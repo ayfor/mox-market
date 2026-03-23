@@ -1,15 +1,20 @@
 "use client";
 
+import { getCollection } from "@/lib/scryfall";
 import { useWatchlistStore } from "@/store/watchlist";
 import type { Currency, WatchlistCard } from "@/types/scryfall";
 import { clsx } from "clsx";
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Area,
+  AreaChart,
+  CartesianGrid,
   Line,
   LineChart,
   ResponsiveContainer,
   Tooltip,
+  XAxis,
   YAxis,
 } from "recharts";
 
@@ -291,54 +296,238 @@ function PriceSparkline({
   );
 }
 
+// ----- Expanded Price Chart -----
+
+function PriceChart({
+  snapshots,
+  currency,
+}: {
+  snapshots: WatchlistCard["snapshots"];
+  currency: Currency;
+}) {
+  const data = useMemo(() => {
+    return snapshots.map((s) => {
+      let value: number | null = null;
+      switch (currency) {
+        case "usd": value = s.prices.usd; break;
+        case "cad": value = s.prices.cad; break;
+        case "eur": value = s.prices.eur; break;
+        case "tix": value = s.prices.tix; break;
+      }
+      return {
+        time: s.timestamp,
+        date: new Date(s.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        value: value ?? 0,
+      };
+    });
+  }, [snapshots, currency]);
+
+  if (data.length < 2) {
+    return (
+      <div className="flex h-48 items-center justify-center text-sm text-gray-400 dark:text-gray-500">
+        Not enough data for a chart yet. Refresh prices to collect snapshots.
+      </div>
+    );
+  }
+
+  const trend = data[data.length - 1].value >= data[0].value;
+  const color = trend ? "var(--color-mox-emerald-light)" : "var(--color-mox-ruby-light)";
+  const fillColor = trend ? "var(--color-mox-emerald)" : "var(--color-mox-ruby)";
+
+  return (
+    <div className="h-48">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+          <defs>
+            <linearGradient id={`gradient-${trend ? "up" : "down"}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={fillColor} stopOpacity={0.3} />
+              <stop offset="100%" stopColor={fillColor} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-gray-800)" strokeOpacity={0.3} />
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 10, fill: "var(--color-gray-500)" }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            domain={["dataMin - 0.1", "dataMax + 0.1"]}
+            tick={{ fontSize: 10, fill: "var(--color-gray-500)" }}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={(v: number) => formatPrice(v, currency)}
+            width={60}
+          />
+          <Tooltip
+            content={({ payload, label }) => {
+              if (!payload?.[0]) return null;
+              const val = payload[0].value as number;
+              return (
+                <div className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+                  <p className="text-gray-400">{label}</p>
+                  <p className="mt-0.5 text-sm font-semibold">{formatPrice(val, currency)}</p>
+                </div>
+              );
+            }}
+          />
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke={color}
+            strokeWidth={2}
+            fill={`url(#gradient-${trend ? "up" : "down"})`}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ----- Price Change Badge -----
+
+function PriceChangeBadge({
+  snapshots,
+  currency,
+}: {
+  snapshots: WatchlistCard["snapshots"];
+  currency: Currency;
+}) {
+  if (snapshots.length < 2) return null;
+
+  const first = snapshots[0];
+  const last = snapshots[snapshots.length - 1];
+
+  const getVal = (s: typeof first) => {
+    switch (currency) {
+      case "usd": return s.prices.usd;
+      case "cad": return s.prices.cad;
+      case "eur": return s.prices.eur;
+      case "tix": return s.prices.tix;
+    }
+  };
+
+  const firstVal = getVal(first);
+  const lastVal = getVal(last);
+  if (firstVal == null || lastVal == null || firstVal === 0) return null;
+
+  const change = lastVal - firstVal;
+  const pct = (change / firstVal) * 100;
+  const isUp = change >= 0;
+
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+        isUp
+          ? "bg-mox-emerald/10 text-mox-emerald-light"
+          : "bg-mox-ruby/10 text-mox-ruby-light",
+      )}
+    >
+      {isUp ? "\u2191" : "\u2193"} {Math.abs(pct).toFixed(1)}%
+    </span>
+  );
+}
+
 // ----- Card Table Row -----
 
 function CardTableRow({
   card,
   currency,
+  isExpanded,
+  onToggle,
 }: {
   card: WatchlistCard;
   currency: Currency;
+  isExpanded: boolean;
+  onToggle: () => void;
 }) {
   const price = getPriceForCurrency(card, currency);
 
   return (
-    <div className="flex items-center gap-4 border-b border-gray-950/5 px-2 py-3 last:border-0 dark:border-white/5">
-      {card.image_uri ? (
-        <Image
-          src={card.image_uri}
-          alt={card.name}
-          width={40}
-          height={56}
-          className="shrink-0 rounded"
-          unoptimized
-        />
-      ) : (
-        <div className="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-gray-200 dark:bg-gray-800">
-          <span className="text-xs text-gray-400">?</span>
+    <div className="border-b border-gray-950/5 last:border-0 dark:border-white/5">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center gap-4 px-2 py-3 text-left hover:bg-gray-950/[0.02] dark:hover:bg-white/[0.02]"
+      >
+        {card.image_uri ? (
+          <Image
+            src={card.image_uri}
+            alt={card.name}
+            width={40}
+            height={56}
+            className="shrink-0 rounded"
+            unoptimized
+          />
+        ) : (
+          <div className="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-gray-200 dark:bg-gray-800">
+            <span className="text-xs text-gray-400">?</span>
+          </div>
+        )}
+
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-gray-950 dark:text-white">
+            {card.name}
+          </p>
+          <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+            {card.set_name} &middot;{" "}
+            <span className="capitalize">{card.rarity}</span>
+          </p>
+        </div>
+
+        <PriceChangeBadge snapshots={card.snapshots} currency={currency} />
+        <PriceSparkline snapshots={card.snapshots} currency={currency} />
+
+        <div className="w-20 text-right">
+          <p className="text-sm font-semibold tabular-nums text-gray-950 dark:text-white">
+            {formatPrice(price, currency)}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {card.type_line.split("\u2014")[0].trim()}
+          </p>
+        </div>
+
+        <svg
+          className={clsx(
+            "size-4 shrink-0 text-gray-400 transition-transform",
+            isExpanded && "rotate-180",
+          )}
+          fill="none"
+          viewBox="0 0 24 24"
+          strokeWidth={2}
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-gray-950/5 px-4 py-4 dark:border-white/5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-950 dark:text-white">
+              Price History ({card.snapshots.length} snapshots)
+            </h3>
+            <div className="flex gap-4 text-xs tabular-nums text-gray-500 dark:text-gray-400">
+              {card.current_prices.usd != null && <span>USD ${card.current_prices.usd.toFixed(2)}</span>}
+              {card.current_prices.eur != null && <span>EUR \u20AC{card.current_prices.eur.toFixed(2)}</span>}
+              {card.current_prices.tix != null && <span>{card.current_prices.tix.toFixed(2)} tix</span>}
+            </div>
+          </div>
+          <PriceChart snapshots={card.snapshots} currency={currency} />
+          <div className="mt-3 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+            <span>{card.snapshots.length} data points</span>
+            <a
+              href={`https://scryfall.com/card/${card.set}/${card.collector_number}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-mox-sapphire-light hover:underline"
+            >
+              View on Scryfall
+            </a>
+          </div>
         </div>
       )}
-
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-gray-950 dark:text-white">
-          {card.name}
-        </p>
-        <p className="truncate text-xs text-gray-500 dark:text-gray-400">
-          {card.set_name} &middot;{" "}
-          <span className="capitalize">{card.rarity}</span>
-        </p>
-      </div>
-
-      <PriceSparkline snapshots={card.snapshots} currency={currency} />
-
-      <div className="w-20 text-right">
-        <p className="text-sm font-semibold tabular-nums text-gray-950 dark:text-white">
-          {formatPrice(price, currency)}
-        </p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          {card.type_line.split("—")[0].trim()}
-        </p>
-      </div>
     </div>
   );
 }
@@ -349,9 +538,36 @@ export function DashboardContent() {
   const cards = useWatchlistStore((s) => s.cards);
   const currency = useWatchlistStore((s) => s.currency);
   const setCurrency = useWatchlistStore((s) => s.setCurrency);
+  const snapshotPrices = useWatchlistStore((s) => s.snapshotPrices);
+  const seedDemoHistory = useWatchlistStore((s) => s.seedDemoHistory);
+  const lastRefreshed = useWatchlistStore((s) => s.lastRefreshed);
 
   const [sortKey, setSortKey] = useState<SortKey>("added");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [seeded, setSeeded] = useState(false);
+
+  // Auto-seed demo history on first mount if cards lack snapshots
+  useEffect(() => {
+    if (!seeded && cards.length > 0 && cards.some((c) => c.snapshots.length < 3)) {
+      seedDemoHistory();
+      setSeeded(true);
+    }
+  }, [cards, seeded, seedDemoHistory]);
+
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing || cards.length === 0) return;
+    setIsRefreshing(true);
+    try {
+      const ids = cards.map((c) => ({ id: c.id }));
+      const result = await getCollection(ids);
+      await snapshotPrices(result.data);
+    } catch {
+      // Network error — silently fail
+    }
+    setIsRefreshing(false);
+  }, [cards, isRefreshing, snapshotPrices]);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -399,8 +615,39 @@ export function DashboardContent() {
                 : "Add cards to your watchlist to track price movements."}
             </p>
           </div>
-          <CurrencySelector value={currency} onChange={setCurrency} />
+          <div className="flex items-center gap-3">
+            {cards.length > 0 && (
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className={clsx(
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold",
+                  "bg-gray-950 text-white hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600",
+                  "disabled:opacity-50 disabled:cursor-not-allowed",
+                )}
+              >
+                <svg
+                  className={clsx("size-3.5", isRefreshing && "animate-spin")}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M2.985 19.644l3.182-3.182" />
+                </svg>
+                {isRefreshing ? "Refreshing..." : "Refresh Prices"}
+              </button>
+            )}
+            <CurrencySelector value={currency} onChange={setCurrency} />
+          </div>
         </div>
+
+        {lastRefreshed && (
+          <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
+            Last refreshed: {new Date(lastRefreshed).toLocaleTimeString()}
+          </p>
+        )}
 
         <div className="mt-10">
           <StatsBar cards={cards} currency={currency} />
@@ -439,7 +686,7 @@ export function DashboardContent() {
                 onSort={handleSort}
               />
               <span className="text-xs text-gray-400 dark:text-gray-500">
-                {sortedCards.length} card{sortedCards.length !== 1 ? "s" : ""}
+                {sortedCards.length} card{sortedCards.length !== 1 ? "s" : ""} &middot; click to expand
               </span>
             </div>
             <div className="mt-3 rounded-lg border border-gray-950/10 dark:border-white/10">
@@ -448,6 +695,8 @@ export function DashboardContent() {
                   key={card.id}
                   card={card}
                   currency={currency}
+                  isExpanded={expandedId === card.id}
+                  onToggle={() => setExpandedId(expandedId === card.id ? null : card.id)}
                 />
               ))}
             </div>

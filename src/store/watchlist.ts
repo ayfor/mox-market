@@ -19,6 +19,7 @@ import { usdToCad } from "@/lib/currency";
 interface WatchlistState {
   cards: WatchlistCard[];
   currency: Currency;
+  lastRefreshed: number | null;
 
   // Actions
   addCard: (card: ScryfallCard) => Promise<void>;
@@ -26,6 +27,7 @@ interface WatchlistState {
   clearAll: () => void;
   setCurrency: (currency: Currency) => void;
   snapshotPrices: (freshCards: ScryfallCard[]) => Promise<void>;
+  seedDemoHistory: () => void;
 }
 
 /**
@@ -59,6 +61,7 @@ export const useWatchlistStore = create<WatchlistState>()(
     (set, get) => ({
       cards: [],
       currency: "usd",
+      lastRefreshed: null,
 
       addCard: async (card: ScryfallCard) => {
         const { cards } = get();
@@ -124,6 +127,48 @@ export const useWatchlistStore = create<WatchlistState>()(
             };
           }),
         );
+
+        set({ cards: updated, lastRefreshed: Date.now() });
+      },
+
+      seedDemoHistory: () => {
+        const { cards } = get();
+        const now = Date.now();
+        const DAY = 24 * 60 * 60 * 1000;
+
+        const updated = cards.map((card) => {
+          // Only seed if card has fewer than 3 snapshots
+          if (card.snapshots.length >= 3) return card;
+
+          const basePrice = card.current_prices;
+          const seeded: PriceSnapshot[] = [];
+
+          // Generate 14 days of simulated history
+          for (let i = 13; i >= 0; i--) {
+            const timestamp = now - i * DAY;
+            // Random walk: +-8% variance from current price
+            const jitter = 1 + (Math.random() - 0.5) * 0.16;
+            const priceMultiplier = jitter;
+
+            seeded.push({
+              timestamp,
+              prices: {
+                usd: basePrice.usd ? Math.round(basePrice.usd * priceMultiplier * 100) / 100 : null,
+                usd_foil: basePrice.usd_foil ? Math.round(basePrice.usd_foil * priceMultiplier * 100) / 100 : null,
+                cad: basePrice.cad ? Math.round(basePrice.cad * priceMultiplier * 100) / 100 : null,
+                cad_foil: basePrice.cad_foil ? Math.round(basePrice.cad_foil * priceMultiplier * 100) / 100 : null,
+                eur: basePrice.eur ? Math.round(basePrice.eur * priceMultiplier * 100) / 100 : null,
+                eur_foil: basePrice.eur_foil ? Math.round(basePrice.eur_foil * priceMultiplier * 100) / 100 : null,
+                tix: basePrice.tix ? Math.round(basePrice.tix * priceMultiplier * 100) / 100 : null,
+              },
+            });
+          }
+
+          return {
+            ...card,
+            snapshots: seeded,
+          };
+        });
 
         set({ cards: updated });
       },
