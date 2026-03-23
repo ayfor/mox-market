@@ -563,11 +563,72 @@ export function DashboardContent() {
       const ids = cards.map((c) => ({ id: c.id }));
       const result = await getCollection(ids);
       await snapshotPrices(result.data);
+
+      // Also store snapshot server-side for persistent history
+      fetch("/api/prices/snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cardIds: cards.map((c) => c.id) }),
+      }).catch(() => {});
     } catch {
       // Network error — silently fail
     }
     setIsRefreshing(false);
   }, [cards, isRefreshing, snapshotPrices]);
+
+  // Fetch server-side history on mount and merge into snapshots
+  useEffect(() => {
+    if (cards.length === 0) return;
+
+    const fetchHistory = async () => {
+      try {
+        const cardIds = cards.map((c) => c.id).join(",");
+        const res = await fetch(`/api/prices/history?cardIds=${cardIds}&days=30`);
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const history: Record<string, Array<{ timestamp: string; usd: number | null; eur: number | null; tix: number | null }>> = data.history;
+
+        // Merge server history into local snapshots
+        const store = useWatchlistStore.getState();
+        const updated = store.cards.map((card) => {
+          const serverSnapshots = history[card.id];
+          if (!serverSnapshots || serverSnapshots.length === 0) return card;
+
+          // Convert server snapshots to local format
+          const serverFormatted = serverSnapshots.map((s) => ({
+            timestamp: new Date(s.timestamp).getTime(),
+            prices: {
+              usd: s.usd,
+              usd_foil: null as number | null,
+              cad: null as number | null,
+              cad_foil: null as number | null,
+              eur: s.eur,
+              eur_foil: null as number | null,
+              tix: s.tix,
+            },
+          }));
+
+          // Merge: use server history as base, append any local-only snapshots
+          const serverTimestamps = new Set(serverFormatted.map((s) => s.timestamp));
+          const localOnly = card.snapshots.filter((s) => !serverTimestamps.has(s.timestamp));
+
+          const merged = [...serverFormatted, ...localOnly].sort(
+            (a, b) => a.timestamp - b.timestamp,
+          );
+
+          return { ...card, snapshots: merged };
+        });
+
+        useWatchlistStore.setState({ cards: updated });
+      } catch {
+        // Server history unavailable — use local data only
+      }
+    };
+
+    fetchHistory();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cards.length]);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {

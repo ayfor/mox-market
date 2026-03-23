@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model TrackedCard {
+  id              String   @id // Scryfall card ID
+  name            String
+  set             String
+  setName         String   @map("set_name")
+  collectorNumber String   @map("collector_number")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  snapshots PriceSnapshot[]
+
+  @@map("tracked_cards")
+}
+
+model PriceSnapshot {
+  id        String   @id @default(cuid())
+  cardId    String   @map("card_id")
+  timestamp DateTime @default(now())
+  usd       Float?
+  usdFoil   Float?   @map("usd_foil")
+  eur       Float?
+  eurFoil   Float?   @map("eur_foil")
+  tix       Float?
+
+  card TrackedCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId, timestamp])
+  @@map("price_snapshots")
+}
