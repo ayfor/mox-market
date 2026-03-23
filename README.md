@@ -6,6 +6,8 @@ MTG card price monitoring dashboard. Track Magic: The Gathering card prices, bui
 
 Built by **Twin Spruce Studio** (`@tss/mox-market`).
 
+> **Note:** This project was created as a personal tool and as an exploration of what modern AI tooling can achieve when given a structured local information system as context. The codebase was generated through collaborative AI-assisted development using Claude Code, guided by a knowledge base of project history, design decisions, and technical constraints.
+
 ## Features
 
 - **Card Search** — Fuzzy search powered by Scryfall autocomplete. Find any card instantly.
