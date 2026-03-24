@@ -138,6 +138,23 @@ export async function getCollection(
 }
 
 /**
+ * Get all printings of a card by exact name.
+ * Returns printings sorted by USD price ascending (cheapest first).
+ */
+export async function getPrintings(
+  name: string,
+): Promise<ScryfallCard[]> {
+  try {
+    const data = await request<ScryfallSearchResponse>(
+      `/cards/search?q=${encodeURIComponent(`!"${name}"`)}&unique=prints&order=usd`,
+    );
+    return data.data;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Get a single card by Scryfall ID.
  */
 export async function getCardById(

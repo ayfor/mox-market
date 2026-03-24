@@ -436,19 +436,28 @@ function CardTableRow({
   currency,
   isExpanded,
   onToggle,
+  onRemove,
 }: {
   card: WatchlistCard;
   currency: Currency;
   isExpanded: boolean;
   onToggle: () => void;
+  onRemove: (id: string) => void;
 }) {
   const price = getPriceForCurrency(card, currency);
 
   return (
-    <div className="border-b border-gray-950/5 last:border-0 dark:border-white/5">
-      <button
-        type="button"
+    <div className="group/row border-b border-gray-950/5 last:border-0 dark:border-white/5">
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
         className="flex w-full items-center gap-4 px-2 py-3 text-left hover:bg-gray-950/[0.02] dark:hover:bg-white/[0.02]"
       >
         {card.image_uri ? (
@@ -488,6 +497,20 @@ function CardTableRow({
           </p>
         </div>
 
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(card.id);
+          }}
+          className="rounded p-1 text-gray-400 opacity-0 transition-opacity hover:bg-gray-950/5 hover:text-gray-600 group-hover/row:opacity-100 dark:hover:bg-white/5 dark:hover:text-gray-300"
+          aria-label={`Remove ${card.name}`}
+        >
+          <svg className="size-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
         <svg
           className={clsx(
             "size-4 shrink-0 text-gray-400 transition-transform",
@@ -500,7 +523,7 @@ function CardTableRow({
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
-      </button>
+      </div>
 
       {isExpanded && (
         <div className="border-t border-gray-950/5 px-4 py-4 dark:border-white/5">
@@ -541,6 +564,7 @@ export function DashboardContent() {
   const snapshotPrices = useWatchlistStore((s) => s.snapshotPrices);
   const seedDemoHistory = useWatchlistStore((s) => s.seedDemoHistory);
   const lastRefreshed = useWatchlistStore((s) => s.lastRefreshed);
+  const removeCard = useWatchlistStore((s) => s.removeCard);
 
   const [sortKey, setSortKey] = useState<SortKey>("added");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -758,6 +782,7 @@ export function DashboardContent() {
                   currency={currency}
                   isExpanded={expandedId === card.id}
                   onToggle={() => setExpandedId(expandedId === card.id ? null : card.id)}
+                  onRemove={removeCard}
                 />
               ))}
             </div>
