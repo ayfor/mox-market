@@ -1,0 +1,102 @@
+/* =========================================================
+   Mox Market V2 — Design Tokens
+   Visual DNA: Glass Panel Editorial.
+   Frosted glass hovering over a grainy Onyx ground.
+   Ported from Claude Design handoff (Apr 2026).
+   ========================================================= */
+
+:root {
+  /* --- Core palette --- */
+  --mox-ruby:        #9e0031;   /* CTAs, "Wait" verdict, emphasis */
+  --mox-white:       #fefffe;   /* primary text, wordmark, decorative symbols */
+  --mox-grey-olive:  #898989;   /* secondary text, placeholders, muted labels */
+  --mox-amethyst:    #2a1e5c;   /* glass panel tint */
+  --mox-onyx:        #0c0c0c;   /* primary background */
+  --mox-sapphire:    #1e3a8a;   /* alt accent — "Fair" verdict + secondary CTAs */
+  --mox-emerald:     #10b981;   /* positive bias — "Buy" verdict + below-market signals */
+
+  /* --- Semantic foreground --- */
+  --fg-primary:       var(--mox-white);
+  --fg-secondary:     var(--mox-grey-olive);
+  --fg-muted:         rgba(254, 255, 254, 0.5);
+  --fg-accent:        var(--mox-ruby);
+  --fg-on-ruby:       var(--mox-white);
+
+  /* --- Semantic background / surface --- */
+  --bg-base:          var(--mox-onyx);
+  --bg-ruby:          var(--mox-ruby);
+  --bg-ruby-soft:     rgba(158, 0, 49, 0.25);
+  --bg-amethyst-12:   rgba(42, 30, 92, 0.12);
+  --bg-amethyst-15:   rgba(42, 30, 92, 0.15);
+
+  /* --- Glass surface tokens --- */
+  --glass-fill:        rgba(255, 255, 255, 0.03);
+  --glass-fill-strong: rgba(255, 255, 255, 0.06);
+  --glass-stroke:        rgba(255, 255, 255, 0.08);
+  --glass-stroke-strong: rgba(255, 255, 255, 0.15);
+  --glass-stroke-soft:   rgba(255, 255, 255, 0.05);
+  --glass-blur:        16px;
+
+  /* --- Verdict palette --- */
+  --verdict-buy:      var(--mox-emerald);   /* Buy / Good Deal */
+  --verdict-fair:     var(--mox-sapphire);  /* Fair Price */
+  --verdict-wait:     var(--mox-ruby);      /* Wait / Overpriced */
+
+  /* --- Radii --- */
+  --mox-radius-xs: 3px;
+  --mox-radius-sm: 4px;
+  --mox-radius-md: 6px;
+  --mox-radius-lg: 8px;
+  --mox-radius-xl: 12px;
+
+  /* --- Spacing scale (4/8 rhythm) --- */
+  --mox-space-1: 4px;
+  --mox-space-2: 8px;
+  --mox-space-3: 12px;
+  --mox-space-4: 16px;
+  --mox-space-5: 20px;
+  --mox-space-6: 24px;
+  --mox-space-8: 32px;
+  --mox-space-10: 40px;
+  --mox-space-12: 48px;
+  --mox-space-16: 64px;
+
+  /* --- Elevation --- */
+  --shadow-panel: 0 8px 32px -4px rgba(0, 0, 0, 0.4);
+  --shadow-tile:  0 4px 16px -4px rgba(0, 0, 0, 0.35);
+
+  /* --- Typography ---
+     Use the locally-loaded Inter Variable (Next/font), with a system fallback
+     in case the variable hasn't resolved yet. */
+  --font-sans: var(--font-inter), 'Inter', system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --fw-regular: 400;
+  --fw-medium:  500;
+  --fw-semibold: 600;
+  --fw-bold:    700;
+  --fw-black:   900;
+
+  /* Type ramp */
+  --ts-wordmark:     900 160px/0.95 var(--font-sans);
+  --ts-prompt:       900 64px/1.06 var(--font-sans);
+  --ts-hero:         900 56px/1.04 var(--font-sans);
+  --ts-display:      900 36px/1.0 var(--font-sans);
+  --ts-large-num:    400 36px/1.0 var(--font-sans);
+  --ts-h2:           900 28px/1.1 var(--font-sans);
+  --ts-h3:           700 22px/1.2 var(--font-sans);
+  --ts-subhead:      700 16px/1.2 var(--font-sans);
+  --ts-body:         400 14px/1.4 var(--font-sans);
+  --ts-body-md:      500 14px/1.4 var(--font-sans);
+  --ts-body-sm:      400 13px/1.4 var(--font-sans);
+  --ts-btn:          500 13px/1.0 var(--font-sans);
+  --ts-caption:      400 12px/1.3 var(--font-sans);
+  --ts-meta:         400 10px/1.2 var(--font-sans);
+  --ts-label:        700 11px/1.0 var(--font-sans);
+  --ts-verdict:      400 10px/1.2 var(--font-sans);
+
+  --track-tight-4: -0.04em;
+  --track-tight-3: -0.03em;
+  --track-body:    0.01em;
+  --track-label:   0.1em;
+  --track-verdict: 0.2em;
+}

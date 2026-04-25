@@ -1,0 +1,399 @@
+/* ─────────────────────────────────────────────────────────
+   Landing page — Glass Panels
+   Two glass panels (660×804) over a grainy Onyx ground.
+   Left: Mox / Market wordmark on agate.
+   Right: Ruby band ("Should you buy it?") above dark form.
+   Faithful to the Figma design (node 61:2 in Mox Market V2 Mockups).
+   ───────────────────────────────────────────────────────── */
+
+.landing-page {
+  position: relative;
+  min-height: 100vh;
+  height: 100vh;
+  background: var(--mox-onyx);
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.landing-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: url("/assets/grain-texture.png") center / 256px repeat;
+  mix-blend-mode: soft-light;
+  opacity: 0.3;
+  pointer-events: none;
+  z-index: 0;
+}
+.landing-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* The grid is laid out at native design dimensions (1344×804) and then
+   uniformly scaled to fit the viewport — panels grow on bigger displays
+   while the internal absolute-positioned content stays in its design
+   coordinates. Capped at 1.4× so it doesn't go gargantuan on 4K.
+
+   `tan(atan2(length, length))` gives us a unitless ratio of two lengths,
+   which is the only way (without JS) to feed a viewport-derived scale into
+   `transform: scale()`. */
+.landing-grid {
+  display: grid;
+  grid-template-columns: 660px 660px;
+  gap: 24px;
+  width: 1344px;
+  height: 804px;
+  transform-origin: center center;
+  --landing-scale-w: tan(atan2(calc(100vw - 48px), 1344px));
+  --landing-scale-h: tan(atan2(calc(100vh - 48px), 804px));
+  transform: scale(
+    min(1.4, var(--landing-scale-w), var(--landing-scale-h))
+  );
+}
+
+/* ───── PANEL — shared shell ─────
+   Border + shadow match the bento tiles in /sample (.mm-tile):
+   subtle 0.08 white edge, soft drop shadow, gloss comes from the
+   backdrop-filter blur on each panel's interior. */
+.landing-panel {
+  position: relative;
+  width: 100%;
+  height: 804px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.4);
+}
+
+/* ───── Mobile ─ stack vertically, no scale ───── */
+@media (max-width: 768px) {
+  .landing-page {
+    display: block;
+    overflow-y: auto;
+    overflow-x: hidden;
+    height: auto;
+    min-height: 100vh;
+  }
+  .landing-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+    width: 100%;
+    height: auto;
+    transform: none;
+  }
+  .landing-panel {
+    height: auto;
+    aspect-ratio: 660 / 804;
+  }
+}
+
+/* ───── LEFT PANEL — agate ground + wordmark ───── */
+.landing-panel-left::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("/assets/agate-bg-2.png") center / cover;
+  opacity: 0.2;
+  pointer-events: none;
+}
+.landing-panel-left::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(12, 12, 12, 0.59);
+  pointer-events: none;
+}
+.landing-panel-left > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Wordmark */
+.landing-wordmark {
+  position: absolute;
+  left: 47px;
+  margin: 0;
+  font: 900 160px/152px var(--font-sans);
+  letter-spacing: -0.04em;
+  color: var(--mox-white);
+  white-space: nowrap;
+}
+.landing-wordmark.mox {
+  top: 239px;
+}
+.landing-wordmark.market {
+  top: 379px;
+}
+
+/* Tagline */
+.landing-tagline {
+  position: absolute;
+  left: 51px;
+  top: 551px;
+  margin: 0;
+  font: 500 16px/1 var(--font-sans);
+  letter-spacing: 0.01em;
+  color: var(--mox-grey-olive);
+}
+
+/* Vertical dots between wordmark and tagline */
+.landing-dots-vert {
+  position: absolute;
+  left: 47px;
+  top: 599px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+.landing-dots-vert .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mox-white);
+}
+
+/* Top-left "+" */
+.landing-deco-plus-left {
+  position: absolute;
+  top: 39px;
+  left: 47px;
+  margin: 0;
+  font: 500 16px/1 var(--font-sans);
+  color: var(--mox-white);
+  opacity: 0.25;
+  user-select: none;
+}
+
+/* Top-right ◇ + diamond */
+.landing-deco-diamond-text {
+  position: absolute;
+  top: 39px;
+  right: 47px;
+  margin: 0;
+  font: 500 14px/1 var(--font-sans);
+  color: var(--mox-white);
+  opacity: 0.3;
+  user-select: none;
+}
+.landing-deco-diamond {
+  position: absolute;
+  top: 37px;
+  right: 51px;
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.landing-deco-diamond::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--mox-white);
+  transform: rotate(45deg);
+}
+
+/* H-dots near bottom right */
+.landing-dots-horiz {
+  position: absolute;
+  bottom: 61px;
+  right: 25px;
+  display: flex;
+  gap: 20px;
+}
+.landing-dots-horiz .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--mox-white);
+}
+
+/* Hex gem logo */
+.landing-hex-gem {
+  position: absolute;
+  top: 267px;
+  left: 413px;
+  width: 130px;
+  height: 130px;
+  pointer-events: none;
+}
+
+/* Top horizontal divider line */
+.landing-divider-top {
+  position: absolute;
+  top: 128px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(254, 255, 254, 0.15);
+}
+
+/* ───── RIGHT PANEL — ruby band + dark form ─────
+   Base color matches the Dark Section (onyx) rather than the Figma's
+   amethyst — the amethyst was a glass tint that never appears once the
+   opaque Ruby + Dark bands cover the interior, but it leaks through as
+   a purple hairline at the edges under transform scaling. */
+.landing-panel-right {
+  background: var(--mox-onyx);
+}
+
+/* Ruby band — top 260px */
+.landing-ruby-band {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 260px;
+  background: var(--mox-ruby);
+  overflow: hidden;
+  z-index: 2;
+}
+.landing-ruby-band-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(254, 255, 254, 0.15);
+}
+.landing-ruby-question {
+  position: absolute;
+  top: 56px;
+  left: 40px;
+  right: 67px;
+  margin: 0;
+  font: 900 56px/58px var(--font-sans);
+  letter-spacing: -0.03em;
+  color: var(--mox-white);
+}
+.landing-ruby-band-dot {
+  position: absolute;
+  bottom: 18px;
+  right: 42px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mox-white);
+}
+
+/* Dark section — bottom 544px */
+.landing-dark-section {
+  position: absolute;
+  top: 260px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--mox-onyx);
+  z-index: 2;
+}
+.landing-dark-deco-plus {
+  position: absolute;
+  top: 40px;
+  right: 30px;
+  margin: 0;
+  font: 500 16px/1 var(--font-sans);
+  color: var(--mox-white);
+  opacity: 0.2;
+  user-select: none;
+  z-index: 4;
+}
+.landing-prompt {
+  position: absolute;
+  top: 40px;
+  left: 40px;
+  margin: 0;
+  font: 900 64px/68px var(--font-sans);
+  letter-spacing: -0.03em;
+  color: var(--mox-white);
+  z-index: 4;
+}
+
+/* Iso hex gem — overlay decoration, behind text */
+.landing-iso-gem-wrap {
+  position: absolute;
+  top: 244px;
+  left: 398px;
+  width: 286.894px;
+  height: 286.894px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0.6;
+}
+.landing-iso-gem {
+  width: 251.418px;
+  height: 251.418px;
+  transform: rotate(8.79deg);
+  display: block;
+}
+
+/* Form */
+.landing-form {
+  position: absolute;
+  bottom: 42px;
+  left: 40px;
+  right: 40px;
+  display: flex;
+  gap: 8px;
+  z-index: 5;
+}
+.landing-form-input {
+  flex: 1;
+  min-width: 0;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 6px;
+  border: 1px solid var(--mox-white);
+  background: var(--mox-white);
+  color: var(--mox-onyx);
+  font: 400 14px/1 var(--font-sans);
+  outline: none;
+  transition: box-shadow 120ms ease;
+}
+.landing-form-input::placeholder {
+  color: var(--mox-grey-olive);
+}
+.landing-form-input:focus {
+  box-shadow: 0 0 0 2px rgba(158, 0, 49, 0.5);
+}
+.landing-form-input.price {
+  flex: 0 0 110px;
+}
+.landing-form-submit {
+  height: 42px;
+  width: 88px;
+  flex: 0 0 88px;
+  border: 1px solid var(--mox-ruby);
+  background: var(--mox-ruby);
+  color: var(--mox-white);
+  border-radius: 6px;
+  font: 500 14px/1 var(--font-sans);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+.landing-form-submit:hover {
+  background: #b8003c;
+  border-color: #b8003c;
+}
+.landing-form-submit:active {
+  transform: translateY(1px);
+}
+
+/* Note: viewport-width responsiveness for desktop is handled by the
+   transform: scale() on .landing-grid above. The 768px mobile-stack
+   block at the top of this file handles small viewports.
+   Internal content stays in design coordinates; below ~660px width,
+   internal text/layout is not pixel-perfect — TODO when V2 mobile
+   spec exists. */

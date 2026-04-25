@@ -1,49 +1,18 @@
 @import "tailwindcss";
-@import "./typography.css";
+@import "./tokens.css";
 
+/* Tailwind utility shim — `font-sans` resolves to the locally-loaded Inter Variable. */
 @theme inline {
   --font-sans: var(--font-inter);
   --font-sans--font-feature-settings: "cv11";
-  --font-mono: var(--font-geist-mono);
 }
 
-@theme {
-  --text-xs: 0.75rem;
-  --text-xs--line-height: calc(1 / 0.75);
-  --text-sm: 0.875rem;
-  --text-sm--line-height: calc(1.25 / 0.875);
-  --text-base: 1rem;
-  --text-base--line-height: calc(1.5 / 1);
-  --text-lg: 1.125rem;
-  --text-lg--line-height: calc(1.75 / 1.125);
-  --text-xl: 1.25rem;
-  --text-xl--line-height: calc(1.75 / 1.25);
-  --text-2xl: 1.5rem;
-  --text-2xl--line-height: calc(2 / 1.5);
-  --text-3xl: 2rem;
-  --text-3xl--line-height: calc(2.5 / 2);
-  --text-4xl: 2.5rem;
-  --text-4xl--line-height: 1;
-  --text-5xl: 3rem;
-  --text-5xl--line-height: 1;
-  --text-6xl: 3.75rem;
-  --text-6xl--line-height: 1;
-  --text-7xl: 4.5rem;
-  --text-7xl--line-height: 1;
-  --text-8xl: 6rem;
-  --text-8xl--line-height: 1;
-  --text-9xl: 8rem;
-  --text-9xl--line-height: 1;
-
-  /* Mox Jewel Palette */
-  --color-mox-sapphire: #2563eb;
-  --color-mox-sapphire-light: #3b82f6;
-  --color-mox-emerald: #059669;
-  --color-mox-emerald-light: #10b981;
-  --color-mox-ruby: #dc2626;
-  --color-mox-ruby-light: #ef4444;
-  --color-mox-gold: #d97706;
-  --color-mox-gold-light: #f59e0b;
-  --color-mox-pearl: #f5f0e8;
-  --color-mox-jet: #0a0a0a;
+/* Dark Onyx is the only ground. No light-mode toggle. */
+html,
+body {
+  background: var(--mox-onyx);
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
