@@ -1,5 +1,3 @@
-import { clsx } from "clsx";
-import { GeistMono } from "geist/font/mono";
 import localFont from "next/font/local";
 import type { Metadata } from "next";
 import type React from "react";
@@ -15,11 +13,11 @@ const InterVariable = localFont({
 
 export const metadata: Metadata = {
   title: {
-    template: "%s - Mox Market",
-    default: "Mox Market - MTG Card Price Monitor",
+    template: "%s — Mox Market",
+    default: "Mox Market — Should you buy it?",
   },
   description:
-    "Track Magic: The Gathering card prices in real time. Build watchlists, import decklists, and monitor price movements.",
+    "Mox Market evaluates a single Magic: The Gathering card listing against the 30-day market. Enter a card and a price; get a verdict.",
 };
 
 export default function RootLayout({
@@ -28,17 +26,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html
-      lang="en"
-      className={clsx(
-        GeistMono.variable,
-        InterVariable.variable,
-        "dark scroll-pt-16 font-sans antialiased dark:bg-gray-950",
-      )}
-    >
-      <body>
-        <div className="isolate">{children}</div>
-      </body>
+    <html lang="en" className={InterVariable.variable}>
+      <body>{children}</body>
     </html>
   );
 }
