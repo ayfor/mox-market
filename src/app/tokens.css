@@ -15,6 +15,12 @@
   --mox-sapphire:    #1e3a8a;   /* alt accent — "Fair" verdict + secondary CTAs */
   --mox-emerald:     #10b981;   /* positive bias — "Buy" verdict + below-market signals */
 
+  /* Brighter readable variants for highlighted body text on dark backgrounds.
+     Used where the deep base color is too dark to read at small sizes
+     (e.g., "your price" numbers in the recent-evaluations list). */
+  --mox-sapphire-bright: #4f7eed;
+  --mox-ruby-bright:     #ff6b95;
+
   /* --- Semantic foreground --- */
   --fg-primary:       var(--mox-white);
   --fg-secondary:     var(--mox-grey-olive);
