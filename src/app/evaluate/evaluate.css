@@ -1,0 +1,471 @@
+/* ─────────────────────────────────────────────────────────
+   Mox Market V2 — /evaluate page
+   Ported from Claude Design handoff (2026-05-01).
+   Navbar styles live in src/components/nav-bar.css.
+   The .mm-app + .mm-stage + grain treatment is duplicated here
+   intentionally — each top-level page is self-contained.
+   ───────────────────────────────────────────────────────── */
+
+.mm-app {
+  position: relative;
+  min-height: 100vh;
+  background: var(--mox-onyx);
+  color: var(--fg-primary);
+  overflow-x: hidden;
+  font-family: var(--font-sans);
+}
+.mm-app::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: url("/assets/grain-texture.png") center / 256px repeat;
+  mix-blend-mode: soft-light;
+  opacity: 0.28;
+  pointer-events: none;
+  z-index: 0;
+}
+.mm-app > * {
+  position: relative;
+  z-index: 1;
+}
+
+.mm-stage {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 48px 64px;
+}
+
+/* ─────────── HERO ─────────── */
+
+.mm-hero {
+  position: relative;
+  padding: 56px 0 24px;
+  min-height: 200px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 48px;
+}
+.mm-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 720px;
+}
+.mm-hero-eyebrow {
+  font: 700 11px/1 var(--font-sans);
+  letter-spacing: 0.18em;
+  color: var(--mox-grey-olive);
+  text-transform: uppercase;
+}
+.mm-hero-headline {
+  font: 900 48px/1 var(--font-sans);
+  letter-spacing: -0.03em;
+  color: var(--fg-primary);
+  margin: 0;
+  white-space: nowrap;
+}
+.mm-hero-subhead {
+  font: 400 16px/1.4 var(--font-sans);
+  color: var(--mox-grey-olive);
+  margin: 0;
+  max-width: 540px;
+}
+.mm-hero-hex {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  margin-top: 24px;
+  transform: rotate(10deg);
+  opacity: 0.32;
+}
+
+/* ─────────── FORM PANEL ─────────── */
+
+.mm-form-panel {
+  position: relative;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--mox-radius-xl);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-tile);
+  padding: 28px 32px;
+}
+.mm-form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+.mm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mm-field--grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mm-field--price {
+  width: 140px;
+  flex: 0 0 140px;
+}
+.mm-field--btn {
+  flex: 0 0 auto;
+}
+.mm-field-label {
+  font: 700 9px/1 var(--font-sans);
+  letter-spacing: 0.16em;
+  color: var(--mox-grey-olive);
+  text-transform: uppercase;
+}
+
+.mm-input {
+  height: 48px;
+  width: 100%;
+  padding: 0 14px;
+  border-radius: var(--mox-radius-md);
+  background: var(--mox-white);
+  border: 1px solid rgba(12, 12, 12, 0.05);
+  color: var(--mox-onyx);
+  font: 400 15px/1 var(--font-sans);
+  outline: none;
+  transition:
+    box-shadow 120ms ease,
+    border-color 120ms ease;
+}
+.mm-input::placeholder {
+  color: var(--mox-grey-olive);
+}
+.mm-input:focus {
+  border-color: rgba(158, 0, 49, 0.5);
+  box-shadow: 0 0 0 3px rgba(158, 0, 49, 0.15);
+}
+
+/* Primary action — solid Ruby per the button-grammar. */
+.mm-evaluate-btn {
+  height: 48px;
+  width: 120px;
+  border-radius: var(--mox-radius-md);
+  background: var(--mox-ruby);
+  color: var(--fg-on-ruby);
+  border: 1px solid rgba(158, 0, 49, 0.85);
+  font: 500 14px/1 var(--font-sans);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition:
+    background 120ms ease,
+    transform 120ms ease,
+    border-color 120ms ease;
+}
+.mm-evaluate-btn:hover {
+  background: #b8003c;
+  border-color: #b8003c;
+}
+.mm-evaluate-btn:active {
+  transform: translateY(1px);
+}
+.mm-evaluate-btn:disabled {
+  background: rgba(158, 0, 49, 0.4);
+  border-color: rgba(158, 0, 49, 0.4);
+  cursor: not-allowed;
+}
+.mm-evaluate-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.mm-form-hint {
+  margin-top: 14px;
+  font: 400 12px/1.4 var(--font-sans);
+  color: var(--mox-grey-olive);
+}
+.mm-form-hint kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  margin: 0 1px;
+  font: 500 11px/1 var(--font-sans);
+  color: var(--fg-primary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  vertical-align: 1px;
+}
+
+/* ─────────── RECENT SECTION ─────────── */
+
+.mm-recent {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mm-recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+.mm-recent-eyebrow {
+  font: 700 11px/1 var(--font-sans);
+  letter-spacing: 0.18em;
+  color: var(--mox-grey-olive);
+  text-transform: uppercase;
+}
+.mm-recent-clear {
+  font: 500 12px/1 var(--font-sans);
+  color: var(--mox-grey-olive);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 4px 6px;
+  transition: color 120ms ease;
+}
+.mm-recent-clear:hover {
+  color: var(--fg-primary);
+}
+
+.mm-recent-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Recent row — glass tile (state surface, not action) */
+.mm-recent-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(180px, 1fr) 110px 110px 110px 80px 32px;
+  align-items: center;
+  gap: 16px;
+  height: 52px;
+  padding: 0 12px 0 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--mox-radius-md);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--fg-primary);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.mm-recent-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.mm-recent-row:hover .mm-recent-remove {
+  opacity: 1;
+}
+
+.mm-recent-thumb {
+  width: 40px;
+  height: 56px;
+  border-radius: 4px;
+  background: linear-gradient(
+    135deg,
+    rgba(42, 30, 92, 0.6),
+    rgba(12, 12, 12, 0.9)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-top: -2px;
+  margin-bottom: -2px;
+}
+.mm-recent-thumb svg {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0.45;
+}
+
+.mm-recent-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.mm-recent-name {
+  font: 700 14px/1.2 var(--font-sans);
+  color: var(--fg-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mm-recent-set {
+  font: 400 11px/1 var(--font-sans);
+  color: var(--mox-grey-olive);
+}
+
+.mm-recent-price {
+  font: 900 16px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.mm-recent-price--your {
+  color: var(--mox-sapphire-bright);
+}
+.mm-recent-price--market {
+  color: var(--mox-grey-olive);
+}
+.mm-recent-price-label {
+  display: block;
+  font: 400 10px/1 var(--font-sans);
+  color: var(--mox-grey-olive);
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+
+/* Verdict pill — small variant. Glass with verdict-color tint
+   (state indicator per the design grammar). */
+.mm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font: 700 10px/1 var(--font-sans);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.mm-pill--buy {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.5);
+  color: var(--mox-emerald);
+}
+.mm-pill--fair {
+  background: rgba(137, 137, 137, 0.14);
+  border-color: rgba(137, 137, 137, 0.5);
+  color: var(--fg-primary);
+}
+.mm-pill--wait {
+  background: rgba(158, 0, 49, 0.18);
+  border-color: rgba(158, 0, 49, 0.55);
+  color: var(--mox-ruby-bright);
+}
+
+.mm-stale {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: rgba(254, 255, 254, 0.1);
+  color: rgba(254, 255, 254, 0.7);
+  font: 700 9px/1 var(--font-sans);
+  cursor: help;
+  position: relative;
+}
+.mm-stale:hover::after {
+  content: "Re-run for current verdict.";
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  background: var(--mox-onyx);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  font: 400 11px/1.2 var(--font-sans);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg-primary);
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+}
+.mm-pill-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.mm-recent-time {
+  font: 400 11px/1 var(--font-sans);
+  color: var(--mox-grey-olive);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+  justify-self: end;
+}
+
+.mm-recent-remove {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--mox-grey-olive);
+  font: 400 18px/1 var(--font-sans);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+.mm-recent-remove:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-primary);
+}
+
+/* ─────────── EMPTY STATE ─────────── */
+
+.mm-empty {
+  margin: 32px auto 0;
+  width: 480px;
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--mox-radius-xl);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  text-align: center;
+  padding: 24px;
+}
+.mm-empty-headline {
+  font: 900 24px/1.1 var(--font-sans);
+  letter-spacing: -0.02em;
+  color: var(--fg-primary);
+  margin: 0;
+}
+.mm-empty-sub {
+  font: 400 14px/1.4 var(--font-sans);
+  color: var(--mox-grey-olive);
+  margin: 0;
+  max-width: 360px;
+}
+
+/* ─────────── FOOTER ─────────── */
+
+.mm-footer {
+  margin-top: 40px;
+  padding: 20px 4px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font: 400 11px/1.4 var(--font-sans);
+  color: var(--mox-grey-olive);
+  text-align: center;
+}

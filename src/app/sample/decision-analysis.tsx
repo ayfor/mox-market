@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   useEffect,
   useMemo,
@@ -8,6 +7,8 @@ import {
   useState,
   type SVGProps,
 } from "react";
+
+import { NavBar } from "@/components/nav-bar";
 
 /* ────────────────────────────────────────────────────────────
    Mox Market V2 — Decision Analysis page
@@ -150,36 +151,6 @@ const Icon = {
     </svg>
   ),
 };
-
-/* ─── Nav ─── */
-function NavBar() {
-  return (
-    <nav className="mm-nav">
-      <Link className="mm-brand" href="/" aria-label="Mox Market home">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/assets/logo-mark.png" width={48} height={48} alt="" />
-        <span className="mm-brand-text">Mox Market</span>
-      </Link>
-      <div className="mm-nav-links" role="tablist">
-        <a className="mm-nav-link on" href="#" role="tab" aria-selected="true">
-          Evaluate
-        </a>
-        <a className="mm-nav-link" href="#" role="tab">
-          Import
-        </a>
-        <a className="mm-nav-link" href="#" role="tab">
-          About
-        </a>
-      </div>
-      <button type="button" className="mm-nav-cta">
-        <span className="mm-nav-cta-ico" aria-hidden="true">
-          <Icon.Plus />
-        </span>
-        <span>New Listing Analysis</span>
-      </button>
-    </nav>
-  );
-}
 
 /* ─── Masthead ─── */
 function Masthead({
