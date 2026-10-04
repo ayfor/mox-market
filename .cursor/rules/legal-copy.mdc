@@ -1,0 +1,12 @@
+---
+description: Attribution footer and recommendation disclaimer wording is verbatim from docs/specs/attribution-footer.md
+globs: src/app/layout.tsx, src/components/**, src/app/evaluate/**
+alwaysApply: false
+---
+
+# Legal copy
+
+- The site footer and the recommendation-adjacent disclaimer use the exact text in `docs/specs/attribution-footer.md`. Copy it; do not paraphrase, shorten, or restyle the wording.
+- The footer is plain visible text on every page: no hover, no expandable, no modal.
+- Card images render unfiltered: no colour shift, desaturation, overlay, or cropping of the copyright and artist line.
+- Never write copy that claims accuracy, guarantees, or that recommendations are "unaffected" by anything.

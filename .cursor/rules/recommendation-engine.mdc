@@ -1,0 +1,16 @@
+---
+description: Purity, integer cents, params-in-one-place, and copy rules for the recommendation engine
+globs: src/lib/recommendation/**
+alwaysApply: false
+---
+
+# Recommendation engine rules
+
+- No imports from `react`, `next`, `next/*`, or anything under `src/app`. Pure functions and types only.
+- All money is integer cents. Never a float, never a string, never `toFixed` inside the engine.
+- Every threshold, window, factor, and cap is a named field on the exported `RECOMMENDATION_PARAMS` const in `params.ts`. No literals in logic.
+- Boundary rule: strict inequalities. `buy` iff delta < buyThreshold; `wait` iff delta > waitThreshold; equality lands `fair`.
+- User-input problems throw `InvalidRecommendationInputError`. Market-data problems never throw; they return `insufficient_data`.
+- Reason strings come from the locked templates in `copy.ts`. Forbidden words (lint-tested): likely, expect, expected, will rise, will fall, will drop, will climb, should, probably, forecast, predict.
+- Worked examples A–E are canonical fixtures. A param change that flips one updates the fixture in the same PR, and the diff is the review artifact.
+- History arrays are oldest → newest, may be sparse, and all counting windows are the trailing 30 UTC days.

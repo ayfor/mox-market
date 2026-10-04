@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeMCPExecution": [
+      {
+        "command": ".cursor/hooks/mcp-write-fence.sh",
+        "failClosed": true,
+        "timeout": 5
+      }
+    ]
+  }
+}
