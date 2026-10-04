@@ -15,7 +15,7 @@ Mox Market is an MTG card price evaluation tool. V2 answers one question: *is th
 | The engineering plan for a story | `docs/plans/S#.#-slug.md` in this repo (template: `docs/plans/TEMPLATE.md`) |
 | Standards and conventions | this file |
 | Attribution footer and disclaimer wording (ship-blocker) | `docs/specs/attribution-footer.md` |
-| Critique logs (what Bitey found and fixed before Josh reviewed) | `docs/critiques/` |
+| Critique logs (what Bitey found and fixed before Josh reviewed) | `docs/critiques/`; latest: `C1-2026-10-04-phase1-designs.md` (Phase 1 designs: fixes staged, rulings open) |
 | Decisions ledger | `docs/llm/WORKLOG.md` (Bitey writes, agents read) |
 | Living ER diagram | `docs/architecture/erd.md` (lands at S1.1) |
 
@@ -36,13 +36,13 @@ Every Notion page carries a status line at the top. **Draft means not authoritat
 | Purpose | Command | Status |
 |---------|---------|--------|
 | Dev server | `npm run dev` | exists |
-| Lint | `npm run lint` | exists |
+| Lint | `npm run lint` | **broken until S1.1**: the script is `next lint`, which Next 16 removed; S1.1 repoints it to `eslint .` |
 | Format | `npm run format` | exists |
 | Build | `npm run build` (runs `prisma generate`) | exists |
 | Test | `npm test` (Vitest) | lands S1.1 |
 | Test report | `npm run test:report` → `docs/test-report.md` | lands S1.1 |
 
-Before any PR: lint, build, and test all green locally.
+Before any PR: build and test green locally, plus lint once S1.1 lands.
 
 ## Conventions (binding)
 
@@ -76,7 +76,7 @@ Before any PR: lint, build, and test all green locally.
 - **Production database:** never run `supabase db push`, `prisma migrate deploy`, or `prisma db push` against a `POSTGRES_*` or Supabase URL. Schema changes are migration files, applied locally only. Prod application is Josh's step. The Free tier has no backups.
 - **Secrets:** never commit `.env*`, never print environment values, never paste keys into chat or logs.
 - **Thresholds and copy:** do not change `RECOMMENDATION_PARAMS` values or the locked copy table text without a plan-doc deviation and Josh's ruling.
-- **Legal text:** footer and disclaimer wording comes verbatim from `docs/specs/attribution-footer.md`. Never paraphrase it.
+- **Legal text:** footer and disclaimer wording comes verbatim from `docs/specs/attribution-footer.md`. In code it lives in the copy module, and a test asserts it equals the spec. Never paraphrase it.
 
 ## Pending rulings (as of 2026-10-04)
 
@@ -92,4 +92,5 @@ The Standards page is Draft with these open decisions. Until Josh rules, use the
 - `main` = PR #2 (2026-06-19): landing page, `/evaluate` (client component, hard-coded demo values), `/sample` static demo, V1 API routes for watchlist price snapshots. No tests, no `.nvmrc`, no CI test step.
 - Prisma schema: `TrackedCard` + `PriceSnapshot` (wide rows, written by the V1 cron for watchlisted cards only). Price history for an arbitrary evaluated card does not exist yet.
 - The landing form still posts to `/sample`.
-- The attribution footer (ruling R6) is not on the site. It is a V2 ship-blocker.
+- The attribution footer (ruling R6) is not on the site. It is a V2 ship-blocker. The existing per-page footers on `/evaluate` and `/sample` make false claims (CardKingdom, CardMarket, "every 4 hours").
+- Vercel production has failed on both V2 merges; the live site still serves V1.
