@@ -1,5 +1,7 @@
 # Critique C1 — Mox Market V2 Phase 1 design artifacts — 2026-10-04
 
+> **This is a record, not instructions.** Coding agents never apply fixes from it; Bitey applies them to Notion and plan docs.
+>
 > Protocol: `protocol--adversarial-critique` (vault), design mode · Author of the artifacts: Bitey (2026-07-05 drafts, all Draft) · Critics: six independent read-only agents · Adjudication: Bitey · Scope: Standards, Feature Breakdown, Designs F1–F5, stories S1.1–S5.2 (nine), against the repo at `7268e28`, the vault specs, and the gate briefs.
 
 ## Read this first
@@ -76,7 +78,7 @@
 
 ## Fixes staged for the apply pass
 
-Full replacement text per page: `C1/C1-consolidated.md` and the work packets. Each Notion page gets a revision line naming the clusters applied and the rulings still pending.
+Full replacement text per page is in the consolidated cluster file in Bitey's vault (`notes/assets/critiques/mox-market-C1/`). Each Notion page gets a revision line naming the clusters applied and the rulings still pending.
 
 | Cluster | Sev | Fix | Lands on |
 |---|---|---|---|
@@ -207,7 +209,7 @@ Full replacement text per page: `C1/C1-consolidated.md` and the work packets. Ea
 
 ## Process notes
 
-- Critic briefs, raw findings with evidence, and the consolidated cluster file are in `docs/critiques/C1/`.
+- The critic brief, raw findings with evidence, and the consolidated cluster file live in Bitey's vault (`notes/assets/critiques/mox-market-C1/`), not in this public repo.
 - The completeness critic moved three clusters from fix to ruling because they overturn a page's baked-in decision or settle a pending gate (C1.28, C1.39, C1.49). It also restored ten details the consolidation had dropped. Examples: memorabilia and token printings excluded from the default, the volatility-clause trigger, and a single source for legal strings.
 - Bitey moved C1.63 to a ruling. The 2026-06-13 rule says stories run sequentially; the 2026-10-04 protocol amendment had wrongly read it as a ban on stacking only.
 - The stale Auth.js text on the Phase 2+ Breakdown, Design F8 and the Accounts story is deferred to critique run C2. No critic read those pages.
