@@ -209,7 +209,7 @@ Full replacement text per page is in the consolidated cluster file in Bitey's va
 
 ## Process notes
 
-- The critic brief, raw findings with evidence, and the consolidated cluster file live in Bitey's vault (`notes/assets/critiques/mox-market-C1/`), not in this public repo.
+- The critic brief, raw findings with evidence, and the consolidated cluster file live in Bitey's vault (`notes/assets/critiques/mox-market-C1/`). They were removed from this repo's tree; earlier commits on the PR branch still hold them.
 - The completeness critic moved three clusters from fix to ruling because they overturn a page's baked-in decision or settle a pending gate (C1.28, C1.39, C1.49). It also restored ten details the consolidation had dropped. Examples: memorabilia and token printings excluded from the default, the volatility-clause trigger, and a single source for legal strings.
 - Bitey moved C1.63 to a ruling. The 2026-06-13 rule says stories run sequentially; the 2026-10-04 protocol amendment had wrongly read it as a ban on stacking only.
 - The stale Auth.js text on the Phase 2+ Breakdown, Design F8 and the Accounts story is deferred to critique run C2. No critic read those pages.
