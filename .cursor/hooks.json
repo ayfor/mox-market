@@ -3,7 +3,7 @@
   "hooks": {
     "beforeMCPExecution": [
       {
-        "command": "printf '%s  %s\\n' 3b3c7ae3e99a23e706f853ea56de91b72ee070328e30266f9073f8c20e868c2f .cursor/hooks/mcp-write-fence.sh | shasum -a 256 -c -s && .cursor/hooks/mcp-write-fence.sh",
+        "command": "printf '%s  %s\\n' 856f108e6cad259f5a33db0568c7fd6a01c920d97937905c0bbd57facb9e5b64 .cursor/hooks/mcp-write-fence.sh | shasum -a 256 -c -s && .cursor/hooks/mcp-write-fence.sh",
         "failClosed": true,
         "timeout": 5
       }

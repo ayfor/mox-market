@@ -16,8 +16,11 @@
 #   Notion server: read tools allowed. notion-update-page allowed only as update_properties that sets
 #                  Status alone, to In Progress | Testing | In Review | Blocked, on the page of the
 #                  active story, from that story's branch. Every other Notion tool is denied.
-#   Figma server:  read tools allowed; everything else denied.
-#   Other servers: allowed. Unreadable payload: denied.
+#   Figma server:  read tools allowed; everything else denied. Recognized by server name OR by the
+#                  official Figma plugin's tool names, so renaming the server key cannot bypass it.
+#   Cursor built-in servers (cursor-ide-browser, cursor-app-control, cursor-origin-readonly,
+#                  cursor-subscriptions): allowed.
+#   Any other server: denied until Bitey adds it here. Unreadable payload: denied.
 
 here="$(cd "$(dirname "$0")" && pwd)"
 input=$(cat)
@@ -44,6 +47,19 @@ args=$(printf '%s' "$input" | jq -c '(.tool_input // {}) | if type == "string" t
 is_notion=0; is_figma=0
 case "$server" in *[Nn]otion*) is_notion=1 ;; *[Ff]igma*) is_figma=1 ;; esac
 case "$tool" in notion-*) is_notion=1 ;; esac
+# The official Figma plugin's tools (Cursor 3.21, 2026-10-04), so a Figma server registered under
+# any key still gets the Figma policy.
+case "$tool" in
+  add_code_connect_map|create_generative_plugin|create_new_file|create_shader|download_assets|\
+export_video|generate_diagram|generate_figma_design|get_code_connect_map|get_code_connect_suggestions|\
+get_context_for_code_connect|get_design_context|get_figjam|get_generative_plugin|get_libraries|\
+get_metadata|get_motion_context|get_screenshot|get_shader|get_variable_defs|\
+list_file_components_for_code_connect|list_file_shaders|list_generative_plugins|list_shaders|\
+search_design_system|send_code_connect_mappings|update_generative_plugin|update_shader|upload_assets|\
+use_figma|weave_cancel_tool_run|weave_find_model|weave_get_model_run_output|weave_get_tool_inputs|\
+weave_get_tool_run_output|weave_list_tools|weave_run_model|weave_run_tool|weave_upload_asset|whoami)
+    [ "$is_notion" = 1 ] || is_figma=1 ;;
+esac
 
 if [ "$is_notion" = 1 ]; then
   case "$tool" in
@@ -89,4 +105,7 @@ weave_get_tool_inputs|weave_get_tool_run_output|weave_find_model|weave_get_model
   esac
 fi
 
-allow
+case "$server" in
+  cursor-ide-browser|cursor-app-control|cursor-origin-readonly|cursor-subscriptions) allow ;;
+esac
+deny "MCP server '${server:-unknown}' is not on the fence's allowlist"
