@@ -102,6 +102,7 @@ Before setting `In Review`: build and tests green locally, and lint green once S
 - **Migrations:** Prisma Migrate is the only schema tool (ruling C1.01 = A). Author a migration only when your story's approved plan includes one. Numbering: `0000` baseline (S1.1), `0001` price_history (S0.1), `0002` recommendation_log (S5.1). Apply migrations only to a local database; applying to production is Josh's step, after a manual `pg_dump` before any destructive change.
 - **Secrets:** never commit `.env*`, never print environment values, never paste keys into chat or logs.
 - **Endpoints:** never call `/api/prices/snapshot` with any method. Its GET writes rows for the cron, and its POST has no authentication.
+- **Writes:** no database writes in page renders or GET route handlers; use Server Actions or POST handlers. The one exception is a secret-guarded cron route, as described under Rulings.
 - **Thresholds and copy:** do not change `RECOMMENDATION_PARAMS` values or the locked copy table text without a plan-doc deviation and Josh's ruling.
 - **Legal text:** footer and disclaimer wording comes verbatim from `docs/specs/attribution-footer.md`. In code it lives in the copy module, and a test asserts it equals the spec. Never paraphrase it.
 
@@ -117,7 +118,11 @@ Every C1 ruling is decided. The full table is in `docs/critiques/C1-2026-10-04-p
 - **C1.63 = A:** parallel lanes (see Workflow).
 - **C1.49 = A:** Vitest 4.x with React Testing Library.
 
-Still open for Josh's gate: Design F0's Open Question 1 (a cron GET carve-out from the no-writes-in-GET rule) and F2's `printing=<scryfall id>` parameter. If your story's plan depends on one, set `Status` to `Blocked` and name it in the Session Log.
+Josh's gate comments (2026-10-05) settled the last questions:
+
+- **`/sample`:** `/evaluate` is the entry form. `/sample` stays available for UI development until `/[card]` serves specific cards (S2.1); S2.4 retires it after that.
+- **Printings:** a printing is identified by its Scryfall card ID, `printing=<scryfall card id>`.
+- **Cron writes:** Vercel Cron only calls with GET, so a cron route may write on GET only when it fails closed on `CRON_SECRET`: 500 when unset, 401 on a missing or wrong `Authorization: Bearer` header, compared in constant time. Today that is only `/api/prices/sync-mtgjson` (S0.3). Every other GET handler and every page render still writes nothing.
 
 ## Known state of main (2026-10-04)
 
