@@ -4,6 +4,13 @@
 >
 > Protocol: `protocol--adversarial-critique` (vault), design mode · Author of the artifacts: Bitey (2026-07-05 drafts, all Draft) · Critics: six independent read-only agents · Adjudication: Bitey · Scope: Standards, Feature Breakdown, Designs F1–F5, stories S1.1–S5.2 (nine), against the repo at `7268e28`, the vault specs, and the gate briefs.
 
+## Status (2026-10-05)
+
+- **All 27 rulings decided.** Decisions and how each was made: `docs/llm/WORKLOG.md`, 2026-10-05 entry.
+- **Fixes applied.** Staged and held fixes plus the ruling edits are applied to Notion and the vault, independently verified. Two consistency passes followed the new F0 pages.
+- **New pages:** Design F0 with stories S0.1–S0.3, S2.2, S2.3 and S2.4. All Draft, awaiting Josh's one gate round.
+- The sections below are the record as written on 2026-10-04.
+
 ## Read this first
 
 - **90 findings** from six critics (8 blocker, 47 major, 31 minor, 4 nit).
