@@ -1,0 +1,6 @@
+# Generated code
+src/generated/
+# Agent and process docs: hand-formatted, tables and verbatim quotes must not be reflowed
+docs/
+AGENTS.md
+CLAUDE.md

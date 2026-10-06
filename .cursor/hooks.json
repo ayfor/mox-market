@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeMCPExecution": [
+      {
+        "command": "printf '%s  %s\\n' 856f108e6cad259f5a33db0568c7fd6a01c920d97937905c0bbd57facb9e5b64 .cursor/hooks/mcp-write-fence.sh | shasum -a 256 -c -s && .cursor/hooks/mcp-write-fence.sh",
+        "failClosed": true,
+        "timeout": 5
+      }
+    ]
+  }
+}

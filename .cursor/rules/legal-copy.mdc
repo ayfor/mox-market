@@ -1,0 +1,13 @@
+---
+description: Attribution footer and recommendation disclaimer wording is verbatim from docs/specs/attribution-footer.md
+globs: src/app/**, src/components/**, src/lib/copy/**
+alwaysApply: false
+---
+
+# Legal copy
+
+- The site footer and the recommendation-adjacent disclaimer use the exact text in `docs/specs/attribution-footer.md`. In code the strings live in the copy module (`src/lib/copy/`), and a test asserts each one equals the spec line. Do not paraphrase, shorten, or restyle the wording.
+- The footer is plain visible text on every page: no hover, no expandable, no modal.
+- The per-page footers in `src/app/evaluate/evaluate-client.tsx` and `src/app/sample/decision-analysis.tsx` make false claims (CardKingdom, CardMarket, "every 4 hours"). They are replaced by the site footer, never edited in place.
+- Card images render unfiltered: no colour shift, desaturation, overlay, or cropping of the copyright and artist line.
+- Never write copy that claims accuracy, guarantees, or that recommendations are "unaffected" by anything.
