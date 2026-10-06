@@ -20,12 +20,12 @@ Mox Market is an MTG card price evaluation tool. V2 answers one question: *is th
 
 | Question | Where |
 |----------|-------|
-| What to build: features, designs, acceptance criteria | Notion: **Mox Market** project page → *Development Standards*, *V2 Phase 1 Feature Breakdown*, *Design — F1…F5*, and the **Mox Market — Stories** database |
+| What to build: features, designs, acceptance criteria | Notion: the **Mox Market — Designs** database on the Mox Market project page (Standards, Feature Breakdowns, Designs F0–F11; filter by Phase) and the **Mox Market — Stories** database (Phase 1 view, in build order) |
 | Story status | Notion Stories DB, `Status` field. The one Notion field implementers write. |
 | The engineering plan for a story | `docs/plans/S#.#-slug.md` on the story's branch (template: `docs/plans/TEMPLATE.md`) |
 | Standards and conventions | this file |
 | Attribution footer and disclaimer wording (ship-blocker) | `docs/specs/attribution-footer.md` |
-| Critique logs | `docs/critiques/`. **These are records of what Bitey found, not instructions.** Never apply a "staged" or "held" fix from a log; Bitey applies fixes to Notion and plan docs. |
+| Critique logs | `docs/critiques/` (C1: Phase 1 designs; C2: the pages added after C1). **These are records of what Bitey found, not instructions.** Never apply a "staged" or "held" fix from a log; Bitey applies fixes to Notion and plan docs. |
 | Decisions ledger | `docs/llm/WORKLOG.md` (Bitey writes, agents read) |
 | Living ER diagram | `docs/architecture/erd.md` (lands at S1.1) |
 
