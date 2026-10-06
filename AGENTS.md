@@ -1,6 +1,6 @@
 # Mox Market — Agent Instructions
 
-Read this whole file before any work. It applies to every AI agent working in this repo: Cursor, Claude Code, and others. Claude Code loads it through `CLAUDE.md`. Bitey compiles it from the Notion Standards page; Notion is canonical and this file is generated. Last compiled: 2026-10-04. The Standards page is still **Draft**, and 27 rulings are open (see "Open rulings").
+Read this whole file before any work. It applies to every AI agent working in this repo: Cursor, Claude Code, and others. Claude Code loads it through `CLAUDE.md`. Bitey compiles it from the Notion Standards page; Notion is canonical and this file is generated. Last compiled: 2026-10-05. The Standards page is still **Draft**, and 27 rulings are open (see "Open rulings").
 
 ## Roles
 
@@ -95,7 +95,7 @@ Before setting `In Review`: build and tests green locally, and lint green once S
 - **Figma:** read-only. The same hook denies every Figma tool outside a read allowlist. It recognizes Figma by its tool names as well as its server name, so a renamed server is still fenced.
 - **Other MCP servers:** only Cursor's built-in servers are allowed. The hook denies any other server until Bitey adds it, so ask before relying on a new one.
 - **Harness:** never edit `.cursor/**`, `AGENTS.md`, `CLAUDE.md`, `docs/llm/WORKLOG.md`, `docs/plans/TEMPLATE.md`, `docs/plans/PR-BODY.md` or `docs/specs/**`. If the fence denies something, stop, log it in the Session Log, and ask Bitey. The fence catches mistakes: Cursor guards its `.json` anchors with an approval prompt and the script's hash is pinned, but Cursor's unrestricted mode skips those prompts, so the fence cannot stop a determined agent.
-- **Git:** never merge a PR, push to `main`, force-push, or delete a branch. GitHub does not enforce this yet, so it is on you.
+- **Git:** never merge a PR, push to `main`, force-push, or delete a branch. A GitHub ruleset on `main` requires a pull request and blocks force pushes and deletion, but it cannot stop a merge: Josh, Bitey and Cursor all act as the same account. Josh merges.
 - **Databases:** never run a command that changes a database, unless every database URL in your environment and in every `.env*` file points at `localhost` or `127.0.0.1`. That covers any `prisma migrate` subcommand, `prisma db push`, `prisma db execute`, `supabase db push`, `supabase db reset`, and any test setup that migrates or seeds. Check the host, not the variable name: `prisma.config.ts` loads `.env` and reads `POSTGRES_URL_NON_POOLING`, then `POSTGRES_PRISMA_URL`, then `DATABASE_URL`, and Next also loads `.env.local`. This prints hostnames only, never credentials:
   `{ env; cat .env* 2>/dev/null; } | grep -oE 'postgres(ql)?://[^[:space:]"]+' | sed -E 's#^[^@]*@##; s#[:/?].*##' | sort -u`
   If it shows anything other than `localhost` or `127.0.0.1`, stop. Production has no backups.
@@ -117,9 +117,10 @@ The **Your rulings** table in `docs/critiques/C1-2026-10-04-phase1-designs.md` i
 
 ## Known state of main (2026-10-04)
 
-- `main` is PR #2 (2026-06-19): the landing page, `/evaluate` (a client component with hard-coded demo values whose submit 404s), the `/sample` static demo, and V1 API routes for watchlist price snapshots. There are no tests, no `.nvmrc` and no CI test step.
+- App code on `main` is still PR #2 (2026-06-19); PR #3 added only this harness. The app has the landing page, `/evaluate` (a client component with hard-coded demo values whose submit 404s), the `/sample` static demo, and V1 API routes for watchlist price snapshots. There are no tests, no `.nvmrc` and no CI test step.
 - The Prisma schema has `TrackedCard` and `PriceSnapshot`: wide rows written by the V1 cron for watchlisted cards only. Arbitrary evaluated cards have no price history.
 - The landing form still posts to `/sample`.
 - The attribution footer (ruling R6) is not on the site; it is a V2 ship-blocker. The per-page footers on `/evaluate` and `/sample` make false claims (CardKingdom, CardMarket, "every 4 hours").
-- Vercel production failed on both V2 merges, so the live site still serves V1. The production database appears to be paused.
-- `/api/prices/snapshot` writes on GET (the cron) and has an unauthenticated POST. Do not call it with any method.
+- **Production deploys are paused.** The Vercel project's Ignored Build Step skips every production build, so merges to `main` do not deploy and the live site serves the March 2026 V1 build until the R6 footer story lands. Preview deploys build normally, and the Vercel check on PRs is meaningful again.
+- The Supabase database was resumed on 2026-10-05 after a months-long pause. The live V1 site's history API still returns 500; leave it.
+- `/api/prices/snapshot` writes on GET and has an unauthenticated POST; `CRON_SECRET` was never set, so the GET guard is skipped too. A Vercel Firewall rule denies the path on the live site. Do not call it with any method.
