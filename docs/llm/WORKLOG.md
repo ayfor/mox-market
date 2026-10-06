@@ -68,3 +68,8 @@ RULING — Josh answered the six Phase 1 shape rulings directly (*"1 - build the
 
 GENERATED — all staged and held fixes plus the ruling edits applied to the Notion Phase 1 pages and vault notes, each page snapshotted first, independently verified, then two consistency fix-up passes. New pages: Design F0 and stories S0.1–S0.3 (price-history pipeline), S2.2 (attribution footer), S2.3 (printing selector), S2.4 (entry points), and a Task DB task for the pipeline. All Draft, awaiting Josh's one gate round. Open at the gate: F0 Open Question 1 (cron GET carve-out) and F2's printing=<id> param.
 
+## 2026-10-05 (later) — Josh's gate comments
+RULING — *"/evaluate is the entry form, /sample can be used to dev UI but is retired once we are able to query specific cards."* Recorded on Standards decision 1, F2 and S2.4.
+RULING — *"yes [use] scryfall ID to diff card printings"*: F2 Open Question 1 resolved; `printing=<scryfall card id>`.
+RULING — *"lets do a narrow exception in this case"*: F0 Open Question 1 resolved. Vercel Cron only calls with GET, so a cron route may write on GET only when it fails closed on `CRON_SECRET` (500 unset, 401 missing or wrong, constant-time compare). Only `/api/prices/sync-mtgjson` (S0.3) today; any new cron route needs the same guard and a line in Standards §Conventions.
+
