@@ -84,3 +84,7 @@ RULING — *"1 - A, 2 - A, 3 - A, 4 - A, 5 - A"*:
 - **C2-B.3 = A:** S2.2 branches from main after S1.1 merges (it needs S1.1's Vitest and RTL).
 - **C2-B.11 = A:** a /{card} URL with no price renders the entry form prefilled, with no Scryfall call; no reserved-name list.
 
+
+## 2026-10-08 (later) — Sequence diagrams and the caveat rule
+RULING — Josh's standing rule: *"When you start to define a user story or a new workflow, please include a high level sequence diagram of the interaction even if we are simplifying to a level of User, Front End, Server, External DB, etc."* Every design workflow and story page now carries a Mermaid sequence diagram, F1–F3 first, then F0, F4, F5.
+RULING — *"accept item 1"*: the thin-data caveat shows on every low-confidence recommendation (7–13 snapshots), on buy, fair and wait alike. Every reason template has one caveat slot, filled in the order stale, then thin data, then volatility. The wording is "only {n} price snapshots", because it counts snapshots, not days.
