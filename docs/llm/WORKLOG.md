@@ -73,3 +73,14 @@ RULING — *"/evaluate is the entry form, /sample can be used to dev UI but is r
 RULING — *"yes [use] scryfall ID to diff card printings"*: F2 Open Question 1 resolved; `printing=<scryfall card id>`.
 RULING — *"lets do a narrow exception in this case"*: F0 Open Question 1 resolved. Vercel Cron only calls with GET, so a cron route may write on GET only when it fails closed on `CRON_SECRET` (500 unset, 401 missing or wrong, constant-time compare). Only `/api/prices/sync-mtgjson` (S0.3) today; any new cron route needs the same guard and a line in Standards §Conventions.
 
+## 2026-10-07 — Board rulings (another Bitey session)
+RULING — R01: Mox Phase 1 runs undated, story by story. R02: all four gate briefs ratified; on the Mox Standards page that reads "the Testing conventions (Vitest + RTL scope) and the migration lane (one history, one tool)", i.e. the four rules applied on Prisma Migrate (C1.01 = A).
+
+## 2026-10-08 — C2 rulings
+RULING — *"1 - A, 2 - A, 3 - A, 4 - A, 5 - A"*:
+- **C2-B.2 = A:** production resumes only after S2.1, S2.2 and S2.4 are on main and Josh signs off; F0's bulk load (path C) runs the same day.
+- **C2-A.2 = A:** until S0.3's cron runs in production, Josh keeps the Supabase free project awake with a read-only query at least every 6 days (calendar reminder every 5 days from 2026-10-09).
+- **C2-B.8 = A:** the missing UI strings (submit helper, validation error, selector labels and option template, Normal/Foil, "soon", stale flag) are added to F1's UI-strings table now.
+- **C2-B.3 = A:** S2.2 branches from main after S1.1 merges (it needs S1.1's Vitest and RTL).
+- **C2-B.11 = A:** a /{card} URL with no price renders the entry form prefilled, with no Scryfall call; no reserved-name list.
+

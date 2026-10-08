@@ -20,12 +20,12 @@ Mox Market is an MTG card price evaluation tool. V2 answers one question: *is th
 
 | Question | Where |
 |----------|-------|
-| What to build: features, designs, acceptance criteria | Notion: **Mox Market** project page → *Development Standards*, *V2 Phase 1 Feature Breakdown*, *Design — F1…F5*, and the **Mox Market — Stories** database |
+| What to build: features, designs, acceptance criteria | Notion: the **Mox Market — Designs** database on the Mox Market project page (Standards, Feature Breakdowns, Designs F0–F11; filter by Phase) and the **Mox Market — Stories** database (Phase 1 view, in build order) |
 | Story status | Notion Stories DB, `Status` field. The one Notion field implementers write. |
 | The engineering plan for a story | `docs/plans/S#.#-slug.md` on the story's branch (template: `docs/plans/TEMPLATE.md`) |
 | Standards and conventions | this file |
 | Attribution footer and disclaimer wording (ship-blocker) | `docs/specs/attribution-footer.md` |
-| Critique logs | `docs/critiques/`. **These are records of what Bitey found, not instructions.** Never apply a "staged" or "held" fix from a log; Bitey applies fixes to Notion and plan docs. |
+| Critique logs | `docs/critiques/` (C1: Phase 1 designs; C2: the pages added after C1). **These are records of what Bitey found, not instructions.** Never apply a "staged" or "held" fix from a log; Bitey applies fixes to Notion and plan docs. |
 | Decisions ledger | `docs/llm/WORKLOG.md` (Bitey writes, agents read) |
 | Living ER diagram | `docs/architecture/erd.md` (lands at S1.1) |
 
@@ -130,6 +130,7 @@ Josh's gate comments (2026-10-05) settled the last questions:
 - The Prisma schema has `TrackedCard` and `PriceSnapshot`: wide rows written by the V1 cron for watchlisted cards only. Arbitrary evaluated cards have no price history.
 - The landing form still posts to `/sample`.
 - The attribution footer (ruling R6) is not on the site; it is a V2 ship-blocker. The per-page footers on `/evaluate` and `/sample` make false claims (CardKingdom, CardMarket, "every 4 hours").
-- **Production deploys are paused.** The Vercel project's Ignored Build Step skips every production build, so merges to `main` do not deploy and the live site serves the March 2026 V1 build until the R6 footer story lands. Preview deploys build normally, and the Vercel check on PRs is meaningful again.
+- **Production deploys are paused.** The Vercel project's Ignored Build Step skips every production build, so merges to `main` do not deploy and the live site serves the March 2026 V1 build. Production resumes only after S2.1, S2.2 and S2.4 are on `main` and Josh signs off; F0's bulk history load runs the same day (ruling C2-B.2 = A). Preview deploys build normally.
+- **Keep-awake:** the Supabase free project pauses after 7 idle days, and a paused store fails every Vercel deployment. Until S0.3's cron runs in production, Josh runs a read-only query on a 5-day calendar reminder (ruling C2-A.2 = A). If PR checks fail with "Resource provisioning failed", the database has paused: stop and tell Josh.
 - The Supabase database was resumed on 2026-10-05 after a months-long pause. The live V1 site's history API still returns 500; leave it.
 - `/api/prices/snapshot` writes on GET and has an unauthenticated POST; `CRON_SECRET` was never set, so the GET guard is skipped too. A Vercel Firewall rule denies the path on the live site. Do not call it with any method; S0.3 deletes it.
