@@ -173,11 +173,44 @@ describe("engine purity", () => {
 });
 
 /**
- * Clock, randomness and environment reads in a source (S1.2 T7): `Date.now`,
- * a zero-argument `new Date()` (with or without parentheses), a bare
- * `Date()` call, `performance.now`, `Math.random` and `process.env`, each
- * also through `globalThis.`. Read from the AST, so comments and strings
- * never count.
+ * Local-time Date and locale methods (ADV-7): each reads the host's time zone
+ * or locale, so a window built with one would shift on a server not set to
+ * UTC. Matched by member name on any object.
+ */
+const LOCAL_TIME_MEMBERS = new Set([
+  "getDate",
+  "getDay",
+  "getMonth",
+  "getFullYear",
+  "getYear",
+  "getHours",
+  "getMinutes",
+  "getSeconds",
+  "getMilliseconds",
+  "getTimezoneOffset",
+  "setDate",
+  "setMonth",
+  "setFullYear",
+  "setYear",
+  "setHours",
+  "setMinutes",
+  "setSeconds",
+  "setMilliseconds",
+  "toLocaleString",
+  "toLocaleDateString",
+  "toLocaleTimeString",
+  "toDateString",
+  "toTimeString",
+]);
+
+/**
+ * Clock, randomness, environment and local-time reads in a source (S1.2 T7,
+ * ADV-7): `Date.now`, a zero-argument `new Date()` (with or without
+ * parentheses), a bare `Date()` call, `performance.now`, `Math.random` and
+ * `process.env`, each also through `globalThis.`; any local-time Date or
+ * locale method; `Intl.*`; `Date.parse`; and `new Date(y, m, …)`, whose
+ * fields are local time. Read from the AST, so comments and strings never
+ * count.
  */
 function impurities(file: string, source: string): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
@@ -197,6 +230,12 @@ function impurities(file: string, source: string): string[] {
       ) {
         found.push(access);
       }
+      if (["Intl", "Date.parse"].some((p) => access.startsWith(p))) {
+        found.push(access);
+      }
+      if (LOCAL_TIME_MEMBERS.has(node.name.text)) {
+        found.push(`.${node.name.text}`);
+      }
     }
     if (
       ts.isNewExpression(node) &&
@@ -204,6 +243,14 @@ function impurities(file: string, source: string): string[] {
       (node.arguments === undefined || node.arguments.length === 0)
     ) {
       found.push("new Date()");
+    }
+    if (
+      ts.isNewExpression(node) &&
+      text(node.expression) === "Date" &&
+      node.arguments !== undefined &&
+      node.arguments.length >= 2
+    ) {
+      found.push("new Date(y, m, …)");
     }
     if (ts.isCallExpression(node) && text(node.expression) === "Date") {
       found.push("Date()");
@@ -214,7 +261,7 @@ function impurities(file: string, source: string): string[] {
   return found;
 }
 
-describe("engine reads no clock (S1.2 T7, AC-6)", () => {
+describe("engine reads no clock or local time (S1.2 T7, AC-6, ADV-7)", () => {
   test("the scanner catches every clock, randomness and environment read", () => {
     const sample = [
       "const a = Date.now();",
@@ -230,6 +277,15 @@ describe("engine reads no clock (S1.2 T7, AC-6)", () => {
       'const j = "Math.random() in a string is fine";',
       "const k = new Date(Date.UTC(2026, 9, 10));",
       'const l = new Date("2026-10-09T06:00:00Z");',
+      "const m = d.getDate();",
+      "d.setDate(d.getUTCDate() + 1);",
+      "const o = d.toLocaleDateString();",
+      "const p = d.getTimezoneOffset();",
+      'const q = new Intl.DateTimeFormat("en-CA").format(d);',
+      "const r = new Date(2026, 9, 10);",
+      'const t = Date.parse("2026-10-10T00:00");',
+      "const u = d.getFullYear() + d.getMonth() + d.getHours();",
+      "const v = d.getUTCFullYear() + d.toISOString();",
     ].join("\n");
     expect(impurities("sample.ts", sample)).toEqual([
       "Date.now",
@@ -241,6 +297,16 @@ describe("engine reads no clock (S1.2 T7, AC-6)", () => {
       "process.env",
       "Date.now",
       "Date.now",
+      ".getDate",
+      ".setDate",
+      ".toLocaleDateString",
+      ".getTimezoneOffset",
+      "Intl.DateTimeFormat",
+      "new Date(y, m, …)",
+      "Date.parse",
+      ".getFullYear",
+      ".getMonth",
+      ".getHours",
     ]);
   });
 

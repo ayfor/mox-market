@@ -58,7 +58,7 @@ describe("validateRecommendationInput", () => {
     expect(MAX_ASKING_PRICE_CENTS).toBe(10_000_000);
   });
 
-  test("only the asking price is validated (cardId and finish resolve upstream)", () => {
+  test("cardId is not validated (it resolves upstream)", () => {
     expect(() =>
       validateRecommendationInput({
         askingPriceCents: 7499,
@@ -66,5 +66,51 @@ describe("validateRecommendationInput", () => {
         finish: "etched",
       }),
     ).not.toThrow();
+  });
+
+  // S1.2 D6 (ADV-3): the finish comes from the URL, so it is user input.
+  test.each(["normal", "foil", "etched"] as const)(
+    "returns for finish %s",
+    (finish) => {
+      expect(
+        validateRecommendationInput({ ...input(7499), finish }),
+      ).toBeUndefined();
+    },
+  );
+
+  test.each([
+    ["undefined", undefined],
+    ["null", null],
+    ['"Foil"', "Foil"],
+    ['"nonfoil"', "nonfoil"],
+    ['""', ""],
+    ["1", 1],
+  ])("throws for finish %s with field finish", (_label, finish) => {
+    const error = thrownBy(() =>
+      validateRecommendationInput({
+        ...input(7499),
+        finish: finish as RecommendationInput["finish"],
+      }),
+    );
+    expect(error).toBeInstanceOf(InvalidRecommendationInputError);
+    const e = error as InvalidRecommendationInputError;
+    expect(e.field).toBe("finish");
+    expect(e.message).toBe("finish must be one of normal, foil, etched");
+  });
+
+  // S1.2 D7 (ADV-6): never a TypeError for a non-object input.
+  test.each([
+    ["null", null],
+    ["undefined", undefined],
+    ["42", 42],
+    ['"x"', "x"],
+  ])("throws the typed error for input %s", (_label, value) => {
+    const error = thrownBy(() =>
+      validateRecommendationInput(value as unknown as RecommendationInput),
+    );
+    expect(error).toBeInstanceOf(InvalidRecommendationInputError);
+    expect((error as InvalidRecommendationInputError).field).toBe(
+      "askingPriceCents",
+    );
   });
 });

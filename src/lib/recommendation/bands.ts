@@ -1,6 +1,7 @@
 // Tier-1 bands in integer basis points (S1.2d6, C1.41 = A). Strict
 // inequalities: buy iff deltaBp < buyBp, wait iff deltaBp > waitBp, and
-// equality with either threshold is Fair.
+// equality with either threshold is Fair. The trend threshold is rounded to
+// whole bp the same way (ADV-1).
 import type { RecommendationParams } from "./params";
 
 /** Basis points in one unit (deltaBp = ratio × BP_PER_UNIT). */
@@ -46,4 +47,13 @@ export function bandKind(deltaBp: number, thresholds: ThresholdsBp): BandKind {
   if (deltaBp < thresholds.buyBp) return "buy";
   if (deltaBp > thresholds.waitBp) return "wait";
   return "fair";
+}
+
+/**
+ * trendThresholdPct in whole bp per day (50 at F1's params), rounded as the
+ * band thresholds are (C1.41 = A); signals.ts compares the exact slope with
+ * it, so the trend label has one exact test (C1.10 = A, ADV-1).
+ */
+export function trendThresholdBp(params: RecommendationParams): number {
+  return withoutNegativeZero(Math.round(params.trendThresholdPct * BP_PER_PCT));
 }

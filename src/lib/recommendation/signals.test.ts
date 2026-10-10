@@ -12,7 +12,13 @@ import {
   flat,
   ramp,
 } from "./fixtures";
-import { interpolatedSeries, slopePct } from "./signals";
+import { RECOMMENDATION_PARAMS } from "./params";
+import {
+  exactSlopePct,
+  interpolatedSeries,
+  type SeriesPoint,
+  slopePct,
+} from "./signals";
 import type {
   MarketSnapshot,
   Recommendation,
@@ -35,6 +41,22 @@ function marketAt(
 }
 
 const RISING = ramp(30, 7304, 48);
+
+/** A real-row series point (den 1). */
+const real = (x: number, y: number): SeriesPoint => ({
+  x,
+  num: BigInt(y),
+  den: BigInt(1),
+});
+
+/** A seeded linear congruential generator, so sweeps are reproducible. */
+function seeded(seed: number) {
+  let state = seed;
+  return (below: number) => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return Math.floor((state / 2147483648) * below);
+  };
+}
 const FIXTURE_S = [
   8150, 8020, 8310, 7990, 8100, 8240, 7870, 8060, 8180, 7950, 8400, 8010, 8120,
   7780, 8290, 8050, 7930, 8210, 8070, 8330, 7900, 8160, 8040, 8260, 7820, 8190,
@@ -304,28 +326,254 @@ describe("gaps (T15, AC-8; S1.2d8)", () => {
       { index: 6, date: dateAt(6), priceCents: 50 },
     ]);
     expect(series).toEqual([
-      { x: 2, y: 100 },
-      { x: 3, y: 200 },
-      { x: 4, y: 300 },
-      { x: 5, y: 400 },
-      { x: 6, y: 50 },
+      real(2, 100),
+      { x: 3, num: BigInt(600), den: BigInt(3) },
+      { x: 4, num: BigInt(900), den: BigInt(3) },
+      real(5, 400),
+      real(6, 50),
     ]);
+    expect(series.map((p) => Number(p.num) / Number(p.den))).toEqual([
+      100, 200, 300, 400, 50,
+    ]);
+  });
+
+  test("an interpolated point that is not a whole cent stays exact (no float rounding)", () => {
+    const series = interpolatedSeries([
+      { index: 0, date: dateAt(0), priceCents: 100 },
+      { index: 3, date: dateAt(3), priceCents: 101 },
+    ]);
+    expect(series[1]).toEqual({ x: 1, num: BigInt(301), den: BigInt(3) });
+    expect(series[2]).toEqual({ x: 2, num: BigInt(302), den: BigInt(3) });
   });
 
   test("slopePct needs two points", () => {
     expect(slopePct([])).toBeNull();
-    expect(slopePct([{ x: 3, y: 100 }])).toBeNull();
-    expect(
-      slopePct([
-        { x: 0, y: 100 },
-        { x: 1, y: 101 },
-      ]),
-    ).toBeCloseTo(100 / 100.5, 12);
+    expect(slopePct([real(3, 100)])).toBeNull();
+    expect(exactSlopePct([real(3, 100)])).toBeNull();
+    expect(slopePct([real(0, 100), real(1, 101)])).toBeCloseTo(100 / 100.5, 12);
+    expect(exactSlopePct([real(0, 100), real(1, 101)])).toEqual({
+      num: BigInt(200),
+      den: BigInt(201),
+    });
+  });
+
+  test("prices beyond 2^53 / 30 keep an exact slope (BigInt sums)", () => {
+    const big = Number.MAX_SAFE_INTEGER - 29;
+    const points = Array.from({ length: 30 }, (_, i) => real(i, big + i));
+    const exact = exactSlopePct(points);
+    expect(exact).not.toBeNull();
+    expect(exact && exact.num > BigInt(0)).toBe(true);
+    expect(slopePct(points)).toBeGreaterThan(0);
   });
 });
 
-describe("no −0 (T13)", () => {
-  test("no numeric signal on any fixture in this file or T1 is −0", () => {
+describe("slope7dPct needs two series points in the last 7 dates (ADV-8)", () => {
+  test("real rows 0–5 and 23: one point in the last 7 dates, so slope7dPct is null", () => {
+    const points = [0, 1, 2, 3, 4, 5, 23].map((i) => [i, RISING[i]] as const);
+    const s = run(7600, marketAt(8000, points)).signals;
+    expect(s.snapshotCount30d).toBe(7);
+    expect(s.slope7dPct).toBeNull();
+    expect(s.slope30dPct).toBeCloseTo(4800 / 7856, 12);
+    expect(s.trendDirection).toBe("rising");
+  });
+
+  test("real rows 0–5 and 24: an interpolated day 23 and a real day 24 give a 2-point slope", () => {
+    const points = [0, 1, 2, 3, 4, 5, 24].map((i) => [i, RISING[i]] as const);
+    const s = run(7600, marketAt(8000, points)).signals;
+    expect(s.snapshotCount30d).toBe(7);
+    // 48 c/day over the mean of 8408 (interpolated) and 8456: 4800 / 8432.
+    expect(s.slope7dPct).toBeCloseTo(300 / 527, 12);
+    expect(s.slope7dPct).toBeCloseTo(0.5692599620493358, 12);
+    expect(s.trendDirection).toBe("rising");
+  });
+});
+
+describe("the trend label at exactly ±trendThresholdPct (ADV-1; C1.10 = A)", () => {
+  // Non-linear integer histories whose exact slope30dPct is +0.5: Σy and
+  // Σxy are fixed by the constraint Σy·(12000x − 178495) = 0. A float OLS
+  // gave 0.5000000000000001 (rising) on this one.
+  const PLUS_HALF = [
+    5728, 3855, 7497, 8253, 7633, 8421, 8304, 8909, 7508, 8022, 8499, 8109,
+    7747, 8733, 8698, 7342, 7871, 8001, 7802, 8442, 7325, 7367, 7852, 8743,
+    7365, 8744, 7555, 8916, 7936, 8023,
+  ];
+  // Its mirror satisfies Σy·(12000x − 169505) = 0, so it is exactly −0.5; a
+  // float OLS gave −0.5000000000000001 (falling).
+  const MINUS_HALF = [...PLUS_HALF].reverse();
+
+  const weighted = (values: readonly number[], offset: number) =>
+    values.reduce((t, y, x) => t + y * (12000 * x - offset), 0);
+
+  test("the fixtures sit exactly on the boundary", () => {
+    expect(weighted(PLUS_HALF, 178495)).toBe(0);
+    expect(weighted(MINUS_HALF, 169505)).toBe(0);
+    const pts = (v: readonly number[]) => v.map((y, x) => real(x, y));
+    expect(exactSlopePct(pts(PLUS_HALF))).toEqual({
+      num: BigInt(1),
+      den: BigInt(2),
+    });
+    expect(exactSlopePct(pts(MINUS_HALF))).toEqual({
+      num: BigInt(-1),
+      den: BigInt(2),
+    });
+  });
+
+  test.each([
+    ["+0.5", PLUS_HALF, 0.5],
+    ["−0.5", MINUS_HALF, -0.5],
+  ] as const)(
+    "exact %s is flat, and slope30dPct is exactly %s",
+    (_l, values, slope) => {
+      const s = run(8000, fixtureMarket(8000, values)).signals;
+      expect(s.slope30dPct).toBe(slope);
+      expect(s.trendDirection).toBe("flat");
+    },
+  );
+
+  test("one cent past the boundary on the newest day turns the label", () => {
+    const up = [...PLUS_HALF.slice(0, 29), PLUS_HALF[29] + 1];
+    const down = [...MINUS_HALF.slice(0, 29), MINUS_HALF[29] - 1];
+    expect(run(8000, fixtureMarket(8000, up)).signals.trendDirection).toBe(
+      "rising",
+    );
+    expect(run(8000, fixtureMarket(8000, down)).signals.trendDirection).toBe(
+      "falling",
+    );
+  });
+
+  test("300 non-linear histories exactly on ±0.5, with and without gaps, are all flat", () => {
+    // A ±40 c/day ramp around 8000 is exactly ±0.5. Adding (+a, −a, −a, +a)
+    // at x = i, i + 1, j, j + 1 keeps Σy and Σxy, so the slope stays exact.
+    // Every other history drops the rows inside one gap whose ends stay on
+    // the ramp, so the interpolated points (den > 1) are the ramp's values.
+    const next = seeded(20261010);
+    for (let t = 0; t < 300; t += 1) {
+      const sign = t % 2 === 0 ? 1 : -1;
+      const values = ramp(30, 8000 - sign * 580, sign * 40);
+      const gapStart = next(20);
+      const gapEnd = t % 4 < 2 ? gapStart : gapStart + 3 + next(5);
+      const free = (x: number) => x < gapStart || x > gapEnd;
+      for (let m = 0; m < 6; m += 1) {
+        const i = next(29);
+        const j = next(29);
+        if (![i, i + 1, j, j + 1].every(free)) continue;
+        const a = next(400);
+        values[i] += a;
+        values[i + 1] -= a;
+        values[j] -= a;
+        values[j + 1] += a;
+      }
+      const points = values.flatMap((y, x) =>
+        x > gapStart && x < gapEnd ? [] : [[x, y] as const],
+      );
+      const s = run(8000, marketAt(8000, points)).signals;
+      const label = `${points.length} rows: ${values.join(",")}`;
+      expect(s.slope30dPct, label).toBe(sign * 0.5);
+      expect(s.trendDirection, label).toBe("flat");
+    }
+  });
+
+  test("the exact slope matches an independent centred-sum reference on 300 gappy histories", () => {
+    // Reference: Σ(x − x̄)(y − ȳ) / Σ(x − x̄)² × 100 / ȳ in BigInt fractions.
+    type Q = readonly [bigint, bigint];
+    const g = (a: bigint, b: bigint): bigint =>
+      b === BigInt(0) ? a : g(b, a % b);
+    const norm = ([n, d]: Q): Q => {
+      const k = g(n < BigInt(0) ? -n : n, d < BigInt(0) ? -d : d);
+      const sgn = d < BigInt(0) ? BigInt(-1) : BigInt(1);
+      return [(sgn * n) / k, (sgn * d) / k];
+    };
+    const add = (a: Q, b: Q): Q =>
+      norm([a[0] * b[1] + b[0] * a[1], a[1] * b[1]]);
+    const mul = (a: Q, b: Q): Q => norm([a[0] * b[0], a[1] * b[1]]);
+    const div = (a: Q, b: Q): Q => norm([a[0] * b[1], a[1] * b[0]]);
+    const neg = (a: Q): Q => [-a[0], a[1]];
+    const q = (n: number | bigint, d: number | bigint = 1): Q =>
+      norm([BigInt(n), BigInt(d)]);
+
+    const next = seeded(7);
+    for (let t = 0; t < 300; t += 1) {
+      const rows = Array.from({ length: 30 }, (_, x) => x).filter(
+        () => next(3) > 0,
+      );
+      if (rows.length < 7) continue;
+      const pts = rows.map((x) => [x, 1 + next(20000)] as const);
+      const series = interpolatedSeries(
+        pts.map(([index, priceCents]) => ({
+          index,
+          date: dateAt(index),
+          priceCents,
+        })),
+      );
+      const ys = series.map((p) => q(p.num, p.den));
+      const n = q(series.length);
+      const xBar = div(
+        series.reduce((a, p) => add(a, q(p.x)), q(0)),
+        n,
+      );
+      const yBar = div(
+        ys.reduce((a, y) => add(a, y), q(0)),
+        n,
+      );
+      let sxy = q(0);
+      let sxx = q(0);
+      series.forEach((p, i) => {
+        const dx = add(q(p.x), neg(xBar));
+        sxy = add(sxy, mul(dx, add(ys[i], neg(yBar))));
+        sxx = add(sxx, mul(dx, dx));
+      });
+      const reference = div(mul(div(sxy, sxx), q(100)), yBar);
+      const exact = exactSlopePct(series);
+      expect(exact && [exact.num, exact.den]).toEqual(reference);
+      const s = run(8000, marketAt(8000, pts)).signals;
+      expect(s.slope30dPct).toBe(
+        reference[0] === BigInt(0)
+          ? 0
+          : Number(reference[0]) / Number(reference[1]),
+      );
+    }
+  });
+
+  test("the threshold is compared in whole bp per day, as C1.41 = A rounds the bands", () => {
+    const market = fixtureMarket(8000, PLUS_HALF);
+    const at = (trendThresholdPct: number) =>
+      computeRecommendation(fixtureInput(8000), market, {
+        ...RECOMMENDATION_PARAMS,
+        trendThresholdPct,
+      }).signals.trendDirection;
+    expect(at(0.5)).toBe("flat");
+    expect(at(0.49)).toBe("rising");
+    expect(at(0.501)).toBe("flat"); // rounds to 50 bp
+  });
+});
+
+describe("an exactly zero slope is +0, not a float residue (ADV-2)", () => {
+  const PALINDROME = [
+    8439, 8172, 7860, 8888, 7538, 8129, 8528, 7611, 7818, 7063, 8162, 8805,
+    8801, 7963, 7680, 7680, 7963, 8801, 8805, 8162, 7063, 7818, 7611, 8528,
+    8129, 7538, 8888, 7860, 8172, 8439,
+  ];
+
+  test("the reviewer's palindrome: slope30dPct is +0 and flat", () => {
+    expect(PALINDROME).toEqual([...PALINDROME].reverse());
+    const s = run(8000, fixtureMarket(8000, PALINDROME)).signals;
+    expect(Object.is(s.slope30dPct, 0)).toBe(true);
+    expect(s.trendDirection).toBe("flat");
+  });
+
+  test("500 random palindromes all give slope30dPct +0", () => {
+    const next = seeded(42);
+    for (let t = 0; t < 500; t += 1) {
+      const half = Array.from({ length: 15 }, () => 7000 + next(2000));
+      const values = [...half, ...[...half].reverse()];
+      const s = run(8000, fixtureMarket(8000, values)).signals;
+      expect(Object.is(s.slope30dPct, 0), values.join(",")).toBe(true);
+    }
+  });
+});
+
+describe("no −0 and no float residue (T13, ADV-2)", () => {
+  test("no numeric signal on any fixture in this file or T1 is −0 or a nonzero value under 1e-12", () => {
     const all = [
       ...seen,
       ...CANONICAL_FIXTURES.map((f) =>
@@ -336,6 +584,9 @@ describe("no −0 (T13)", () => {
     for (const r of all) {
       for (const [key, value] of numericSignals(r.signals)) {
         expect(Object.is(value, -0), key).toBe(false);
+        expect(value !== 0 && Math.abs(value) < 1e-12, `${key} ${value}`).toBe(
+          false,
+        );
       }
     }
   });

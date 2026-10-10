@@ -2,7 +2,12 @@
 // window. Market-data problems never throw (F1 W1 step 2).
 import { describe, expect, test } from "vitest";
 import { computeRecommendation } from "./engine";
-import { FIXTURE_AS_OF, fixtureInput, fixtureMarket } from "./fixtures";
+import {
+  CANONICAL_FIXTURES,
+  FIXTURE_AS_OF,
+  fixtureInput,
+  fixtureMarket,
+} from "./fixtures";
 import { RECOMMENDATION_PARAMS } from "./params";
 import type { MarketSnapshot } from "./types";
 import { readWindow, windowDates } from "./window";
@@ -235,5 +240,46 @@ describe("malformed market data never throws (T17, AC-4; C1.22)", () => {
         history: shuffled,
       }),
     ).toStrictEqual(computeRecommendation(fixtureInput(8000), sorted));
+  });
+});
+
+describe("time-zone independence (ADV-7)", () => {
+  // UTC+14 and UTC−11: a local-time Date method in window.ts would shift
+  // every date by a day in one of them. Vitest runs each test file in a
+  // forked process, and Node re-reads TZ whenever process.env.TZ is set.
+  const ZONES = ["Pacific/Kiritimati", "Pacific/Pago_Pago"];
+  const AS_OFS = [FIXTURE_AS_OF, "2026-03-01", "2027-01-01", "2028-03-01"];
+
+  const results = () => ({
+    dates: AS_OFS.map((asOf) => windowDates(asOf, WINDOW)),
+    windows: AS_OFS.map((asOf) =>
+      readWindow(
+        fixtureMarket(8000, [8000, 8100, 8200], { asOf }).history,
+        asOf,
+        WINDOW,
+      ),
+    ),
+    fixtures: CANONICAL_FIXTURES.map((f) =>
+      computeRecommendation(f.input, f.market),
+    ),
+  });
+
+  test.each(ZONES)("%s gives exactly the UTC results", (zone) => {
+    const original = process.env.TZ;
+    const fixtureDay = Date.UTC(2026, 9, 10);
+    try {
+      process.env.TZ = "UTC";
+      expect(new Date(fixtureDay).getTimezoneOffset()).toBe(0);
+      const utc = results();
+      process.env.TZ = zone;
+      // The switch took effect, so the comparison is not vacuous.
+      expect(new Date(fixtureDay).getTimezoneOffset()).not.toBe(0);
+      expect(results()).toStrictEqual(utc);
+      expect(utc.dates[0]?.[0]).toBe("2026-09-10");
+      expect(utc.dates[0]?.at(-1)).toBe("2026-10-09");
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
   });
 });

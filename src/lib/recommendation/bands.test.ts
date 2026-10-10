@@ -1,6 +1,6 @@
 // T2, T3 (AC-2, AC-7; C1.41 = A, S1.2d6): band edges in integer basis points.
 import { describe, expect, test } from "vitest";
-import { bandKind, deltaBpOf, thresholdsBp } from "./bands";
+import { bandKind, deltaBpOf, thresholdsBp, trendThresholdBp } from "./bands";
 import { computeRecommendation } from "./engine";
 import {
   CANONICAL_FIXTURES,
@@ -25,6 +25,18 @@ const EDGES = [
   [21001, 20000, 501, "wait"], // raw +500.5
   [52502, 50000, 500, "fair"], // raw +500.4
 ] as const;
+
+describe("trendThresholdBp (ADV-1)", () => {
+  test("F1's 0.5 %/day is 50 bp/day, rounded to whole bp like the bands", () => {
+    expect(trendThresholdBp(RECOMMENDATION_PARAMS)).toBe(50);
+    const at = (trendThresholdPct: number) =>
+      trendThresholdBp({ ...RECOMMENDATION_PARAMS, trendThresholdPct });
+    expect(at(0.4)).toBe(40);
+    expect(at(0.504)).toBe(50);
+    expect(at(0.506)).toBe(51);
+    expect(Object.is(at(0), 0)).toBe(true);
+  });
+});
 
 describe("thresholdsBp (T2)", () => {
   test("F1's params give −833 and +500", () => {

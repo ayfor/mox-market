@@ -18,7 +18,13 @@ import {
   RECOMMENDATION_PARAMS,
   type RecommendationParams,
 } from "./params";
-import type { Finish, MarketSnapshot, PriceSnapshot } from "./types";
+import {
+  type Finish,
+  FINISHES,
+  type MarketSnapshot,
+  type PriceSnapshot,
+  type RecommendationInput,
+} from "./types";
 
 /** UTC 'YYYY-MM-DD' k days before FIXTURE_AS_OF (negative k is after it). */
 const daysBefore = (k: number) =>
@@ -163,6 +169,93 @@ describe("confidence from the window count (T4, AC-3)", () => {
   });
 });
 
+describe("the caveat's n and the confidence count de-duplicated window rows (ADV-5)", () => {
+  /** n distinct window dates ending at asOf − 1, oldest first. */
+  const lastDates = (n: number) =>
+    Array.from({ length: n }, (_, i) => daysBefore(n - i));
+  const withHistory = (history: PriceSnapshot[], price: number) => ({
+    ...fixtureMarket(price, []),
+    history,
+  });
+
+  test("60 entries, 13 in the window: n is 13, not 60", () => {
+    const history = [
+      ...Array.from({ length: 47 }, (_, i) => ({
+        date: daysBefore(77 - i),
+        priceCents: 8150,
+      })),
+      ...lastDates(13).map((date) => ({ date, priceCents: 8150 })),
+    ];
+    const r = computeRecommendation(
+      fixtureInput(8150),
+      withHistory(history, 8150),
+    );
+    expect(r.reason).toBe("At market price; only 13 price snapshots.");
+  });
+
+  test("10 dates plus 3 duplicate rows: n is 10, not 13", () => {
+    const dates = lastDates(10);
+    const history = [
+      ...dates.map((date) => ({ date, priceCents: 4200 })),
+      ...dates.slice(0, 3).map((date) => ({ date, priceCents: 4200 })),
+    ];
+    expect(history).toHaveLength(13);
+    const r = computeRecommendation(
+      fixtureInput(5000),
+      withHistory(history, 4200),
+    );
+    expect(r.kind).toBe("wait");
+    expect(r.confidence).toBe("low");
+    expect(r.signals.snapshotCount30d).toBe(10);
+    expect(r.reason).toBe("19% above market; only 10 price snapshots.");
+  });
+
+  test("27 dates plus 3 duplicate rows: medium, no caveat (30 rows would be high)", () => {
+    const dates = lastDates(27);
+    const history = [
+      ...dates.map((date) => ({ date, priceCents: 8150 })),
+      ...dates.slice(-3).map((date) => ({ date, priceCents: 8150 })),
+    ];
+    expect(history).toHaveLength(30);
+    const r = computeRecommendation(
+      fixtureInput(8150),
+      withHistory(history, 8150),
+    );
+    expect(r.signals.snapshotCount30d).toBe(27);
+    expect(r.confidence).toBe("medium");
+    expect(r.reason).toBe("At market price.");
+  });
+
+  test("7 dates where one price is 0: 6 real snapshots, insufficient_data", () => {
+    const history = lastDates(7).map((date, i) => ({
+      date,
+      priceCents: i === 3 ? 0 : 8150,
+    }));
+    const r = computeRecommendation(
+      fixtureInput(8150),
+      withHistory(history, 8150),
+    );
+    expect(r.kind).toBe("insufficient_data");
+    expect(r.signals.snapshotCount30d).toBe(6);
+    expect(r.reason).toBe(INSUFFICIENT_DATA_SENTENCE);
+  });
+
+  test("14 dates where one date's last entry is 0: low, only 13", () => {
+    const dates = lastDates(14);
+    const history = [
+      ...dates.map((date) => ({ date, priceCents: 8150 })),
+      { date: dates[6], priceCents: 0 },
+    ];
+    const r = computeRecommendation(
+      fixtureInput(8150),
+      withHistory(history, 8150),
+    );
+    expect(r.signals.snapshotCount30d).toBe(13);
+    expect(r.confidence).toBe("low");
+    expect(r.reason).toBe("At market price; only 13 price snapshots.");
+  });
+});
+
 describe("insufficient_data (T5, AC-4)", () => {
   const A_HISTORY = flat(30, 8150);
 
@@ -259,6 +352,25 @@ describe("insufficient_data (T5, AC-4)", () => {
     }
   });
 
+  test("an input that is not an object throws the typed error, never a TypeError (ADV-6, D7)", () => {
+    for (const input of [null, undefined, 42, "x"]) {
+      for (const market of [canonicalFixture("A").market, null]) {
+        const error = thrownBy(() =>
+          computeRecommendation(
+            input as unknown as RecommendationInput,
+            market as unknown as MarketSnapshot,
+          ),
+        );
+        expect(error, String(input)).toBeInstanceOf(
+          InvalidRecommendationInputError,
+        );
+        expect((error as InvalidRecommendationInputError).field).toBe(
+          "askingPriceCents",
+        );
+      }
+    }
+  });
+
   test("E still carries the signals its data supports (S1.2d10)", () => {
     const e = canonicalFixture("E");
     const r = computeRecommendation(e.input, e.market);
@@ -326,6 +438,96 @@ describe("finish fallback (T6, AC-5)", () => {
       expect(r.kind).toBe("insufficient_data");
       expect(r.signals.fallbackNotice).toBe(false);
     }
+  });
+});
+
+describe("unusable finishes (ADV-3, D5, D6)", () => {
+  const A_HISTORY = flat(30, 8150);
+  const insufficient = (r: ReturnType<typeof computeRecommendation>) => {
+    expect(r.kind).toBe("insufficient_data");
+    expect(r.confidence).toBe("low");
+    expect(r.reason).toBe(INSUFFICIENT_DATA_SENTENCE);
+    expect(r.signals.fallbackNotice).toBe(false);
+    expect(r.signals.marketPriceCents).toBeNull();
+    expect(r.signals.deltaBp).toBeNull();
+    expect(r.signals.snapshotCount30d).toBe(0);
+  };
+
+  test("an appliedFinish that is missing, null or not a finish is unusable market data", () => {
+    const { appliedFinish: _omit, ...missing } = fixtureMarket(8150, A_HISTORY);
+    expect(_omit).toBe("normal");
+    for (const market of [
+      missing,
+      { ...fixtureMarket(8150, A_HISTORY), appliedFinish: null },
+      { ...fixtureMarket(8150, A_HISTORY), appliedFinish: "Normal" },
+      { ...fixtureMarket(8150, A_HISTORY), appliedFinish: "" },
+    ]) {
+      for (const finish of FINISHES) {
+        insufficient(
+          computeRecommendation(
+            fixtureInput(7400, finish),
+            market as unknown as MarketSnapshot,
+          ),
+        );
+      }
+    }
+  });
+
+  test.each([
+    ["normal", "foil"],
+    ["normal", "etched"],
+    ["foil", "etched"],
+    ["etched", "foil"],
+  ] as const)(
+    "requested %s with applied %s breaks the caller contract (fallback is normal only): insufficient_data",
+    (requested, applied) => {
+      insufficient(
+        computeRecommendation(
+          fixtureInput(7400, requested),
+          fixtureMarket(8150, A_HISTORY, { appliedFinish: applied }),
+        ),
+      );
+    },
+  );
+
+  test.each([
+    ["undefined", undefined],
+    ["null", null],
+    ['"Foil"', "Foil"],
+    ['""', ""],
+    ['"nonfoil"', "nonfoil"],
+  ])(
+    "input finish %s throws InvalidRecommendationInputError (field finish) before any market check",
+    (_label, finish) => {
+      for (const market of [
+        fixtureMarket(8150, A_HISTORY),
+        null as unknown as MarketSnapshot,
+      ]) {
+        const error = thrownBy(() =>
+          computeRecommendation(
+            { ...fixtureInput(7400), finish: finish as Finish },
+            market,
+          ),
+        );
+        expect(error).toBeInstanceOf(InvalidRecommendationInputError);
+        expect((error as InvalidRecommendationInputError).field).toBe("finish");
+        expect((error as Error).message).toBe(
+          "finish must be one of normal, foil, etched",
+        );
+      }
+    },
+  );
+
+  test("an invalid asking price is reported before an invalid finish", () => {
+    const error = thrownBy(() =>
+      computeRecommendation(
+        { ...fixtureInput(0), finish: "Foil" as Finish },
+        fixtureMarket(8150, A_HISTORY),
+      ),
+    );
+    expect((error as InvalidRecommendationInputError).field).toBe(
+      "askingPriceCents",
+    );
   });
 });
 

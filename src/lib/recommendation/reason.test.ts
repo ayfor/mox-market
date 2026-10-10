@@ -103,6 +103,48 @@ describe("thin-data caveat (T18; Josh's ruling 2026-10-08)", () => {
   });
 });
 
+describe("extreme deltas (ADV-4, D8)", () => {
+  test("a below clause never reads 100%: X is at most 99", () => {
+    expect(keep(reasonFor("buy", -9849))).toBe("98% below market.");
+    expect(keep(reasonFor("buy", -9850))).toBe("99% below market.");
+    expect(keep(reasonFor("buy", -9949))).toBe("99% below market.");
+    expect(keep(reasonFor("buy", -9950))).toBe("99% below market.");
+    expect(keep(reasonFor("buy", -9999))).toBe("99% below market.");
+    expect(keep(reasonFor("buy", -10000))).toBe("99% below market.");
+    expect(keep(reasonFor("buy", -9999, "low", 7))).toBe(
+      "99% below market; only 7 price snapshots.",
+    );
+  });
+
+  test("an above clause is not capped: it states the observed multiple", () => {
+    expect(keep(reasonFor("wait", 10000))).toBe("100% above market.");
+    expect(keep(reasonFor("wait", 99_999_990_000))).toBe(
+      "999999900% above market.",
+    );
+  });
+
+  test.each([
+    [1, 8150, -9999, "buy", "99% below market."],
+    [41, 8150, -9950, "buy", "99% below market."],
+    [1, 30000, -10000, "buy", "99% below market."],
+    [10_000_000, 1, 99_999_990_000, "wait", "999999900% above market."],
+    [10_000_000, 10_000_000, 0, "fair", "At market price."],
+  ] as const)(
+    "asking %i against market %i (30 flat snapshots): deltaBp %i, %s, %s",
+    (asking, market, deltaBp, kind, reason) => {
+      const r = computeRecommendation(
+        fixtureInput(asking),
+        fixtureMarket(market, flat(30, market)),
+      );
+      expect(r.signals.deltaBp).toBe(deltaBp);
+      expect(r.signals.deltaPct).toBe(deltaBp / 100);
+      expect(r.kind).toBe(kind);
+      expect(r.confidence).toBe("high");
+      expect(keep(r.reason)).toBe(reason);
+    },
+  );
+});
+
 describe("fillTemplate", () => {
   test("fills known placeholders and leaves unknown ones", () => {
     expect(fillTemplate("{X}% of {n}", { X: 9, n: 3 })).toBe("9% of 3");

@@ -1,7 +1,8 @@
 // F1 Tier-1 price-only engine (S1.2). Pure: no React, Next, clock or
 // randomness, and inputs are never mutated. Money is integer cents.
-// Check order (F1 W1 step 2b, S1.2d2): validate the asking price (throws),
-// then the window, the market price, the window count, then bands.
+// Check order (F1 W1 step 2b, S1.2d2): validate the input (throws), then the
+// market snapshot's shape and applied finish, the window, the market price,
+// the window count, then bands.
 import {
   BP_PER_PCT,
   bandKind,
@@ -14,6 +15,7 @@ import { buildReason } from "./reason";
 import { computeHistorySignals } from "./signals";
 import type {
   Confidence,
+  Finish,
   MarketSnapshot,
   Recommendation,
   RecommendationInput,
@@ -24,6 +26,28 @@ import { readWindow } from "./window";
 
 /** Tier 1 never widens the band (F3 sets this from S3.1). */
 const TIER1_WIDENING_FACTOR = 1;
+
+/** The caller's only fallback finish; normal never falls back (C1.21). */
+const FALLBACK_FINISH: Finish = "normal";
+
+/**
+ * The market snapshot when it is usable, else an empty one, so the result is
+ * insufficient_data and never a throw (D1, D5). Usable means an object whose
+ * appliedFinish is the requested finish or the normal fallback (C1.21): a
+ * missing, misspelt or other applied finish leaves the price and history of
+ * an unknown finish, which is a market-data problem.
+ */
+function usableMarket(
+  market: unknown,
+  requested: Finish,
+): Partial<MarketSnapshot> {
+  if (market === null || typeof market !== "object") return {};
+  const snapshot = market as Partial<MarketSnapshot>;
+  return snapshot.appliedFinish === requested ||
+    snapshot.appliedFinish === FALLBACK_FINISH
+    ? snapshot
+    : {};
+}
 
 /** A market price is usable only as a positive safe integer (S1.2d5). */
 const usableMarketPrice = (value: unknown): number | null =>
@@ -43,8 +67,9 @@ function confidenceFor(
 
 /**
  * Buy / Fair / Wait for an asking price against the market (F1 W1).
- * Throws InvalidRecommendationInputError only for an invalid asking price;
- * a market-data problem is insufficient_data, never a throw.
+ * Throws InvalidRecommendationInputError only for invalid user input (the
+ * asking price, or a finish outside FINISHES); a market-data problem is
+ * insufficient_data, never a throw.
  */
 export function computeRecommendation(
   input: RecommendationInput,
@@ -53,8 +78,7 @@ export function computeRecommendation(
 ): Recommendation {
   validateRecommendationInput(input);
 
-  const snapshot: Partial<MarketSnapshot> =
-    market !== null && typeof market === "object" ? market : {};
+  const snapshot = usableMarket(market, input.finish);
   const windowSnapshots = readWindow(
     snapshot.history,
     snapshot.asOf,
