@@ -260,6 +260,7 @@ function PriceVsMarketTile({
   const setMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- removed by S2.4 (C1.06)
     if (!editing) setDraft(String(yourPrice));
   }, [yourPrice, editing]);
 

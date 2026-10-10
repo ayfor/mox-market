@@ -84,3 +84,5 @@ RULING — *"1 - A, 2 - A, 3 - A, 4 - A, 5 - A"*:
 - **C2-B.3 = A:** S2.2 branches from main after S1.1 merges (it needs S1.1's Vitest and RTL).
 - **C2-B.11 = A:** a /{card} URL with no price renders the entry form prefilled, with no Scryfall call; no reserved-name list.
 
+## 2026-10-10 — Night run (Josh's overnight directive)
+MERGED — S1.1 Engine contract, params & test tooling baseline: F1's typed engine contract and RECOMMENDATION_PARAMS land with Vitest 4 + RTL, ESLint 9, the Node 22 pin, a postgres:16 CI workflow and the 0000_baseline migration behind the prod-migrate guard; adversarial review 8 findings (8 fixed); Codex 1 comment (1 fixed).
