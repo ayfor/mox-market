@@ -130,6 +130,26 @@ describe("featureOf", () => {
     ],
     ["tests/contract/copy-lock.test.ts", "F1 · Recommendation Engine"],
     ["src/lib/recommendation/ui-copy.test.ts", "F2 · Live Evaluation"],
+    // S2.1d20 (T29): this story's tests map to F2; none matches F0's
+    // price-history pattern or F5's.
+    ["src/lib/printings.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/scryfall.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/copy/result-labels.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/evaluation/result-params.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/evaluation/history-reader.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/evaluation/history-reader.test-d.ts", "F2 · Live Evaluation"],
+    ["src/lib/evaluation/with-timeout.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/evaluation/load-market-snapshot.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/evaluation/build-evaluation.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/evaluation/staleness.test.ts", "F2 · Live Evaluation"],
+    ["src/app/[card]/result-view.test.tsx", "F2 · Live Evaluation"],
+    ["src/app/[card]/result-css.test.ts", "F2 · Live Evaluation"],
+    ["src/app/[card]/result-slot.test.tsx", "F2 · Live Evaluation"],
+    ["src/app/[card]/result-panel.test.tsx", "F2 · Live Evaluation"],
+    ["src/app/[card]/client-boundary.test.ts", "F2 · Live Evaluation"],
+    ["src/app/api/cards/autocomplete/route.test.ts", "F2 · Live Evaluation"],
+    ["src/components/card-combobox.test.tsx", "F2 · Live Evaluation"],
+    ["src/components/entry-form.test.tsx", "F2 · Live Evaluation"],
   ])("%s → %s", (file, feature) => {
     expect(featureOf(file)).toBe(feature);
   });
@@ -147,7 +167,7 @@ describe("featureOf", () => {
   });
 
   test("an unknown path is Unmapped", () => {
-    expect(featureOf("src/lib/scryfall.test.ts")).toBe("Unmapped");
+    expect(featureOf("src/lib/throttle.test.ts")).toBe("Unmapped");
     expect(featureOf("")).toBe("Unmapped");
   });
 
@@ -182,7 +202,7 @@ describe("renderReport", () => {
       "Unmapped",
     ]);
     const files = [
-      "src/lib/scryfall.test.ts",
+      "src/lib/throttle.test.ts",
       "src/lib/recommendation-log/a.test.ts",
       "src/lib/classification/a.test.ts",
       "src/lib/recommendation/trend.test.ts",
@@ -215,7 +235,7 @@ describe("renderReport", () => {
     expect(mapped.markdown).not.toContain("| Unmapped |");
     const unmapped = render({
       success: true,
-      testResults: [suite("src/lib/scryfall.test.ts", [passed("a")])],
+      testResults: [suite("src/lib/throttle.test.ts", [passed("a")])],
     });
     expect(unmapped.markdown).toContain(
       "| Unmapped | 1 | 1 | 1 | 0 | 0 | ✅ |",

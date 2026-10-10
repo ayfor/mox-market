@@ -853,6 +853,8 @@ describe("footer CSS keeps the text visible and legible (T13)", () => {
         }));
     });
     expect(overlays.map((o) => `${o.file} ${o.selector}`).sort()).toEqual([
+      // S2.1: the result route repeats the /evaluate shell (result.css).
+      "src/app/[card]/result.css .mm-app::before",
       "src/app/evaluate/evaluate.css .mm-app::before",
       "src/app/landing.css .landing-page::before",
       "src/app/sample/styles.css .mm-app::before",

@@ -36,7 +36,13 @@ export default defineConfig(({ mode }) => {
 
   const shared = {
     plugins: [react()],
-    resolve: { alias: { "@": path.resolve(root, "src") } },
+    resolve: {
+      alias: {
+        "@": path.resolve(root, "src"),
+        // S2.1d3: the package throws outside Next's react-server condition.
+        "server-only": path.resolve(root, "src/test/server-only.ts"),
+      },
+    },
   };
 
   return {

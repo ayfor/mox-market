@@ -56,11 +56,7 @@ export interface ScryfallLegalities {
   [key: string]: LegalityStatus;
 }
 
-export type LegalityStatus =
-  | "legal"
-  | "not_legal"
-  | "restricted"
-  | "banned";
+export type LegalityStatus = "legal" | "not_legal" | "restricted" | "banned";
 
 export interface ScryfallCard {
   // Core fields
@@ -72,6 +68,8 @@ export interface ScryfallCard {
   uri: string;
   scryfall_uri: string;
   layout: string;
+  /** Every printing of this card, as a paginated search URI (S2.1d7). */
+  prints_search_uri: string;
 
   // Gameplay fields
   mana_cost?: string;
@@ -103,6 +101,9 @@ export interface ScryfallCard {
   purchase_uris?: Record<string, string>;
 
   // Misc
+  /** The finishes this printing exists in (F2 §Default printing). */
+  finishes: ("nonfoil" | "foil" | "etched")[];
+  promo: boolean;
   foil: boolean;
   nonfoil: boolean;
   oversized: boolean;

@@ -64,6 +64,10 @@ export const FEATURES = [
       /src\/lib\/copy\/legal/,
       /site-footer/,
       /attribution/,
+      // S2.1d20: the Scryfall client, the default printing and the result
+      // surface's labels.
+      /src\/lib\/(printings|scryfall)/,
+      /src\/lib\/copy\/result-labels/,
     ],
   ],
   [
@@ -198,7 +202,9 @@ export function renderReport(
       (exitCode !== 0 ? ` · vitest exit ${exitCode}` : ""),
   );
   L.push("");
-  L.push("_No e2e suite yet; Playwright is decided at S2.1's plan gate._");
+  L.push(
+    "_No e2e suite yet; S2.1's plan gate added no Playwright (S2.1d17), revisited at S2.4._",
+  );
   L.push("");
 
   L.push("## By feature");

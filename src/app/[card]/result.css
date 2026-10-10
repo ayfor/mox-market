@@ -1,0 +1,351 @@
+/* ─────────────────────────────────────────────────────────
+   Mox Market V2 — result route /[card] (S2.1)
+   Glass panels over the grainy Onyx ground, per tokens.css; no new
+   design language. The page shell (.mm-app, .mm-stage) repeats
+   evaluate.css on purpose: each top-level page is self-contained.
+   The entry form's styles live in src/components/entry-form.css.
+   Badges take the verdict tokens only (C1.14 = A).
+   ───────────────────────────────────────────────────────── */
+
+.mm-app {
+  position: relative;
+  min-height: 100vh;
+  background: var(--mox-onyx);
+  color: var(--fg-primary);
+  overflow-x: hidden;
+  font-family: var(--font-sans);
+}
+.mm-app::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: url("/assets/grain-texture.png") center / 256px repeat;
+  mix-blend-mode: soft-light;
+  opacity: 0.28;
+  pointer-events: none;
+  z-index: 0;
+}
+.mm-app > * {
+  position: relative;
+  z-index: 1;
+}
+
+.mm-stage {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 48px 64px;
+}
+
+.mm-result-page {
+  padding-top: 40px;
+}
+
+.mm-result-slot {
+  margin-top: 32px;
+}
+
+/* ─────────── RESULT LAYOUT ─────────── */
+
+.mm-result {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mm-result-grid {
+  display: grid;
+  grid-template-columns: 244px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+/* R3/R4: the card image sits beside the glass, uncropped and unfiltered. */
+.mm-card-art {
+  width: 244px;
+  aspect-ratio: 488 / 680;
+}
+.mm-card-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.mm-result-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.mm-card-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 64px;
+}
+.mm-card-name {
+  margin: 0;
+  font: var(--ts-h2);
+  letter-spacing: -0.02em;
+  color: var(--fg-primary);
+}
+.mm-card-set {
+  margin: 0;
+  font: var(--ts-body);
+  color: var(--fg-secondary);
+}
+
+/* Reserved for S2.3's PrintingSelect and FinishSelect. */
+.mm-selector-row {
+  display: flex;
+  gap: 12px;
+  min-height: 40px;
+}
+
+/* ─────────── RECOMMENDATION PANEL ─────────── */
+
+.mm-rec-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px 32px;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-stroke);
+  border-radius: var(--mox-radius-xl);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-panel);
+}
+
+.mm-rec-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.mm-rec-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font: 700 12px/1 var(--font-sans);
+  letter-spacing: var(--track-verdict);
+  text-transform: uppercase;
+}
+.mm-rec-badge--buy {
+  background: var(--verdict-buy);
+  color: var(--mox-onyx);
+}
+.mm-rec-badge--fair {
+  background: var(--verdict-fair);
+  color: var(--fg-primary);
+}
+.mm-rec-badge--wait {
+  background: var(--verdict-wait);
+  color: var(--fg-primary);
+}
+
+.mm-rec-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-stroke-strong);
+  font: var(--ts-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+.mm-rec-reason {
+  margin: 0;
+  font: var(--ts-h3);
+  color: var(--fg-primary);
+}
+
+.mm-rec-disclaimer {
+  margin: 0;
+  font: var(--ts-caption);
+  color: var(--fg-secondary);
+  max-width: 720px;
+}
+
+.mm-rec-notice {
+  margin: 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--mox-sapphire-bright);
+  border-radius: var(--mox-radius-sm);
+  background: var(--glass-fill-strong);
+  font: var(--ts-body-sm);
+  color: var(--fg-primary);
+}
+
+.mm-rec-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mm-rec-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 104px;
+  padding: 16px;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-stroke);
+  border-radius: var(--mox-radius-lg);
+}
+.mm-rec-tile-label {
+  font: var(--ts-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+.mm-rec-tile-value {
+  font: 900 24px/1.1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-primary);
+}
+.mm-rec-tile-caption,
+.mm-rec-tile-note {
+  font: var(--ts-caption);
+  color: var(--fg-secondary);
+}
+
+/* The data footer is a div, never a footer element (S2.2's one footer). */
+.mm-data-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--glass-stroke);
+}
+.mm-data-source,
+.mm-data-history {
+  margin: 0;
+  font: var(--ts-caption);
+  color: var(--fg-secondary);
+}
+.mm-data-stale {
+  font-weight: var(--fw-bold);
+  color: var(--mox-ruby-bright);
+}
+
+.mm-stale-banner {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--mox-ruby);
+  border-radius: var(--mox-radius-md);
+  background: var(--bg-ruby-soft);
+  font: var(--ts-body-md);
+  color: var(--fg-primary);
+}
+
+/* ─────────── MESSAGES AND ERROR PANEL ─────────── */
+
+.mm-result-message {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 32px;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-stroke);
+  border-radius: var(--mox-radius-xl);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+.mm-result-message-text {
+  margin: 0;
+  font: var(--ts-subhead);
+  color: var(--fg-primary);
+}
+
+.mm-retry-btn {
+  height: 40px;
+  padding: 0 20px;
+  border-radius: var(--mox-radius-md);
+  background: var(--mox-ruby);
+  border: 1px solid var(--mox-ruby);
+  color: var(--fg-on-ruby);
+  font: var(--ts-btn);
+  cursor: pointer;
+}
+.mm-retry-btn:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* ─────────── SKELETON ─────────── */
+
+.mm-skeleton-block {
+  display: block;
+  background: var(--glass-fill-strong);
+  border-radius: var(--mox-radius-md);
+  animation: mm-skeleton-pulse 1.4s ease-in-out infinite;
+}
+.mm-skeleton-title {
+  width: 60%;
+  height: 31px;
+}
+.mm-skeleton-line {
+  width: 100%;
+  height: 18px;
+}
+.mm-skeleton-line--short {
+  width: 70%;
+}
+.mm-skeleton-selector {
+  width: 220px;
+  height: 40px;
+}
+.mm-skeleton-badge {
+  width: 88px;
+  height: 32px;
+  border-radius: 999px;
+}
+.mm-skeleton-tile {
+  animation: mm-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes mm-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mm-skeleton-block,
+  .mm-skeleton-tile {
+    animation: none;
+  }
+}
+
+/* ─────────── NARROW SCREENS ─────────── */
+
+@media (max-width: 760px) {
+  .mm-stage {
+    padding: 0 16px 48px;
+  }
+  .mm-result-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mm-card-art {
+    width: 200px;
+  }
+  .mm-rec-panel {
+    padding: 20px;
+  }
+  .mm-rec-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
