@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to a PR cancels its older run; runs on main (one per merge
+# commit) are never cancelled, so every merge commit gets a result (ADV.8).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # The postgres:16 service below; never a remote host (AGENTS.md Databases).

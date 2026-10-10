@@ -14,10 +14,15 @@ const url =
   process.env["POSTGRES_PRISMA_URL"] ??
   process.env["DATABASE_URL"];
 
+// One object feeds both the guard and Prisma, so a shadowDatabaseUrl added here
+// later (S0.1 drift checks) is checked too (ADV.2).
+const datasource: { url?: string; shadowDatabaseUrl?: string } = { url };
+
 // AC-13: refuse commands that reach a Supabase host unless ALLOW_PROD_MIGRATE=1.
 assertMigrateAllowed({
   argv: process.argv.slice(2),
-  url,
+  url: datasource.url,
+  shadowUrl: datasource.shadowDatabaseUrl,
   env: { ...process.env, ALLOW_PROD_MIGRATE: inlineAllowProdMigrate },
 });
 
@@ -26,7 +31,5 @@ export default defineConfig({
   migrations: {
     path: "prisma/migrations",
   },
-  datasource: {
-    url,
-  },
+  datasource,
 });

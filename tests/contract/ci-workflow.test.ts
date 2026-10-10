@@ -54,6 +54,15 @@ describe(".github/workflows/ci.yml", () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 
+  test("cancel-in-progress applies only to pull_request runs, never to pushes to main (ADV.8)", () => {
+    const block = ci.match(/^concurrency:\s*\n((?:[ \t]+.*\n)+)/m);
+    expect(block, "concurrency block missing").not.toBeNull();
+    const cancel = block![1].match(/^\s+cancel-in-progress:\s*(.+?)\s*$/m);
+    expect(cancel, "cancel-in-progress missing").not.toBeNull();
+    expect(cancel![1]).toBe("${{ github.event_name == 'pull_request' }}");
+    expect(ci.match(/cancel-in-progress:/g)).toHaveLength(1);
+  });
+
   test("reads Node from .nvmrc and holds read-only permissions", () => {
     expect(ci).toMatch(/node-version-file:\s*\.nvmrc/);
     expect(ci).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*$/m);

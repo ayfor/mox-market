@@ -3,5 +3,12 @@
   "compilerOptions": {
     "incremental": false
   },
-  "include": ["src/**/*.test-d.ts", "src/lib/recommendation/**/*.ts"]
+  "include": [
+    "src/**/*.test-d.ts",
+    "prisma/**/*.test-d.ts",
+    "scripts/**/*.test-d.ts",
+    "tests/**/*.test-d.ts",
+    "src/lib/recommendation/**/*.ts"
+  ],
+  "exclude": ["node_modules", "scripts/__fixtures__"]
 }

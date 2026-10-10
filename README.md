@@ -70,7 +70,7 @@ Integration tests (`*.int.test.ts`) create and drop their own scratch database o
 | `P1001: Can't reach database server at localhost:5432` | Postgres is not running: `docker compose up -d --wait db`, then retry. |
 | `docker compose up` fails with `port is already allocated` on 5432 | Another Postgres holds the port. Stop it (`brew services stop postgresql@14`, or the EDB `postgresql-14` launch daemon: `sudo launchctl unload /Library/LaunchDaemons/postgresql-14.plist`), then retry. Check with `lsof -nP -iTCP:5432 -sTCP:LISTEN`. |
 | Supabase CLI instead of Docker Compose | `supabase start` serves Postgres on port **54322**: change both URLs in `.env` to `postgresql://postgres:postgres@localhost:54322/postgres`. |
-| `migrate guard: refused ... ALLOW_PROD_MIGRATE=1` | A Prisma command that can connect pointed at a Supabase host. Fix your `.env` to use localhost. Only Josh's production steps (below) set the flag, inline. Known limit: `prisma --config <other file>` never loads `prisma.config.ts`, so it bypasses the guard; never do that against production. |
+| `migrate guard: refused ... ALLOW_PROD_MIGRATE=1` | A Prisma command that can connect pointed at a Supabase host, possibly through a `?host=` parameter or the shadow database URL. Fix your `.env` to use localhost. Only Josh's production steps (below) set the flag, inline. Known limit: `prisma --config <other file>` never loads `prisma.config.ts`, so it bypasses the guard; never do that against production. |
 | `Error: POSTGRES_PRISMA_URL unset` | The app reads only `POSTGRES_PRISMA_URL`: `cp .env.example .env` (or export it), then rerun. `DATABASE_URL` is not read. |
 | `P3005: The database schema is not empty` | `migrate deploy` found tables that no migration created (for example from a schema created before Migrate). Locally, drop and recreate the dev database: `docker compose down -v && docker compose up -d --wait db`, then `npx prisma migrate deploy`. Never do this against production. |
 
@@ -82,7 +82,7 @@ Prisma Migrate is the only schema tool (ruling C1.01 = A). Migrations live in `p
 npx prisma migrate deploy
 ```
 
-Agents and CI only ever migrate a local database. `prisma.config.ts` runs a guard (`prisma/migrate-guard.ts`) that refuses every Prisma command that can connect when its host is `*.supabase.co` or `*.pooler.supabase.com`, unless `ALLOW_PROD_MIGRATE=1` is set. The flag is set **inline** for one command and **never stored in any `.env*` file**; a copy in `.env` is ignored. The living ER diagram is `docs/architecture/erd.md`.
+Agents and CI only ever migrate a local database. `prisma.config.ts` runs a guard (`prisma/migrate-guard.ts`) that refuses every Prisma command that can connect when any host it would reach is `*.supabase.co` or `*.pooler.supabase.com`, unless `ALLOW_PROD_MIGRATE=1` is set. It checks the URL's hostname, any `?host=` parameter (which overrides the hostname), every `--url` value and, for commands that use one, the shadow database URL; a URL with `hostaddr=` or an empty host is refused outright. The flag is set **inline** for one command and **never stored in any `.env*` file**; a copy in `.env` is ignored. The living ER diagram is `docs/architecture/erd.md`.
 
 ### Production (Josh only, once, after the S1.1 merge)
 

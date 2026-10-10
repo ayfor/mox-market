@@ -2,7 +2,7 @@
 import { describe, expect, test } from "vitest";
 import {
   assertMigrateAllowed,
-  hostOf,
+  hostsOf,
   isSupabaseHost,
   MigrateGuardError,
 } from "./migrate-guard";
@@ -261,11 +261,33 @@ describe("--url overrides the config URL (C3.1)", () => {
 });
 
 describe("host helpers", () => {
-  test("hostOf lower-cases, drops a trailing dot and returns null when unparsable", () => {
-    expect(hostOf("postgresql://u:p@DB.X.Supabase.CO.:5432/db")).toBe(
-      "db.x.supabase.co",
-    );
-    expect(hostOf("nope")).toBeNull();
+  test("hostsOf lower-cases, drops a trailing dot and returns null when unparsable", () => {
+    expect(hostsOf("postgresql://u:p@DB.X.Supabase.CO.:5432/db")).toEqual({
+      hosts: ["db.x.supabase.co"],
+      hostaddrs: [],
+    });
+    expect(hostsOf("nope")).toBeNull();
+  });
+
+  test("hostsOf adds every host parameter, keys in any case, values comma-split and decoded", () => {
+    expect(
+      hostsOf(
+        "postgresql://u:p@localhost:5432/x?HOST=A.supabase.co&ho%73t=b.example,C.Example.&hostaddr=10.0.0.5&host=%2Ftmp",
+      ),
+    ).toEqual({
+      hosts: ["localhost", "a.supabase.co", "b.example", "c.example", "/tmp"],
+      hostaddrs: ["10.0.0.5"],
+    });
+  });
+
+  test("hostsOf keeps empty pieces so callers can fail closed", () => {
+    expect(hostsOf("postgresql://u:p@localhost/x?host=")?.hosts).toEqual([
+      "localhost",
+      "",
+    ]);
+    expect(hostsOf("postgresql:///x?host=/var/run/postgresql")?.hosts).toEqual([
+      "/var/run/postgresql",
+    ]);
   });
 
   test.each([
@@ -277,5 +299,236 @@ describe("host helpers", () => {
     ["localhost", false],
   ])("isSupabaseHost(%s) is %s", (host, expected) => {
     expect(isSupabaseHost(host)).toBe(expected);
+  });
+});
+
+// ADV.1: Prisma's schema engine and pg connect to `?host=` over the hostname.
+describe("host query parameters (ADV.1)", () => {
+  test.each([
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/postgres?host=db.abc.supabase.co",
+    ],
+    [
+      "migrate reset --force",
+      "postgresql://u:p@localhost:5432/postgres?sslmode=disable&host=aws-0-us-east-1.pooler.supabase.com",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/postgres?HOST=db.abc.supabase.co",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/postgres?ho%73t=db.abc.supabase.co",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/postgres?host=localhost,db.abc.supabase.co",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/postgres?host=localhost%2Cdb.abc.supabase.co",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/postgres?host=db.abc.supabase.co&host=localhost",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@db.abc.supabase.co,localhost/postgres",
+    ],
+    ["migrate deploy", "postgresql:///postgres?host=db.abc.supabase.co"],
+    ["studio", "postgresql://u:p@localhost/x?host=DB.ABC.SUPABASE.CO."],
+  ])("`%s` with %s is refused", (cmd, url) => {
+    expect(run(cmd, url)).toThrow(/ALLOW_PROD_MIGRATE=1/);
+  });
+
+  test("`db push --url=<localhost ?host=pooler>` is refused even with a localhost config URL", () => {
+    expect(() =>
+      assertMigrateAllowed({
+        argv: [
+          "db",
+          "push",
+          "--url=postgresql://u:p@localhost/x?host=aws-0-us-east-1.pooler.supabase.com",
+        ],
+        url: LOCAL,
+        env: {},
+      }),
+    ).toThrow(MigrateGuardError);
+  });
+
+  test("the refusal names the parameter's host, never the URL", () => {
+    let error: unknown;
+    try {
+      assertMigrateAllowed({
+        argv: ["migrate", "deploy"],
+        url: "postgresql://u:s3cret@localhost:5432/postgres?host=db.abc.supabase.co",
+        env: {},
+      });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(MigrateGuardError);
+    expect((error as MigrateGuardError).host).toBe("db.abc.supabase.co");
+    expect((error as Error).message).not.toContain("s3cret");
+    expect((error as Error).message).not.toContain("postgresql://");
+  });
+
+  test("ALLOW_PROD_MIGRATE=1 unlocks a Supabase host named by ?host=", () => {
+    expect(
+      run(
+        "migrate deploy",
+        "postgresql://u:p@localhost:5432/postgres?host=db.abc.supabase.co",
+        { ALLOW_PROD_MIGRATE: "1" },
+      ),
+    ).not.toThrow();
+  });
+
+  test.each([
+    [
+      "hostaddr",
+      "postgresql://u:p@localhost:5432/postgres?hostaddr=10.0.0.5",
+      /hostaddr/,
+    ],
+    [
+      "HOSTADDR",
+      "postgresql://u:p@localhost:5432/postgres?HOSTADDR=127.0.0.1",
+      /hostaddr/,
+    ],
+    [
+      "an empty host parameter",
+      "postgresql://u:p@localhost:5432/postgres?host=",
+      /empty/,
+    ],
+    [
+      "a trailing comma in the host list",
+      "postgresql://u:p@localhost:5432/postgres?host=localhost,",
+      /empty/,
+    ],
+  ])("%s is refused even with ALLOW_PROD_MIGRATE=1", (_label, url, why) => {
+    expect(run("migrate deploy", url)).toThrow(why);
+    expect(run("migrate deploy", url, { ALLOW_PROD_MIGRATE: "1" })).toThrow(
+      MigrateGuardError,
+    );
+  });
+
+  test.each([
+    "postgresql://u:p@localhost:5432/postgres?host=localhost",
+    "postgresql://u:p@localhost:5432/postgres?host=127.0.0.1&sslmode=disable",
+    "postgresql://u:p@localhost:5432/postgres?host=/var/run/postgresql",
+    "postgresql:///postgres?host=%2Ftmp",
+  ])("a local host parameter is allowed: %s", (url) => {
+    expect(run("migrate deploy", url)).not.toThrow();
+  });
+
+  test("exempt commands are not checked", () => {
+    expect(
+      run(
+        "generate",
+        "postgresql://u:p@localhost/x?host=db.abc.supabase.co&hostaddr=1.2.3.4",
+      ),
+    ).not.toThrow();
+  });
+});
+
+// ADV.2: commands that open a shadow database check its URL too.
+describe("shadow database URL (ADV.2)", () => {
+  const shadow =
+    (cmd: string, shadowUrl: string | undefined, env = {}) =>
+    () =>
+      assertMigrateAllowed({ argv: split(cmd), url: LOCAL, shadowUrl, env });
+
+  const USES_SHADOW = [
+    "migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma",
+    "migrate diff --from-schema prisma/schema.prisma --to-migrations prisma/migrations",
+    "migrate diff --from-migrations=prisma/migrations --to-config-datasource",
+    "migrate dev",
+    "migrate dev --create-only",
+    "migrate",
+    "migrate frobnicate",
+    "mcp",
+    "dev",
+    "frobnicate",
+  ];
+
+  test.each(USES_SHADOW)(
+    "`%s` with a Supabase shadow URL is refused",
+    (cmd) => {
+      expect(shadow(cmd, DIRECT)).toThrow(/its shadow database/);
+      expect(shadow(cmd, POOLER)).toThrow(MigrateGuardError);
+    },
+  );
+
+  test.each(USES_SHADOW)(
+    "`%s` with a Supabase shadow URL is allowed with ALLOW_PROD_MIGRATE=1",
+    (cmd) => {
+      expect(shadow(cmd, DIRECT, { ALLOW_PROD_MIGRATE: "1" })).not.toThrow();
+    },
+  );
+
+  test.each(USES_SHADOW)(
+    "`%s` with a local or unset shadow URL is allowed",
+    (cmd) => {
+      expect(shadow(cmd, LOOPBACK)).not.toThrow();
+      expect(shadow(cmd, undefined)).not.toThrow();
+    },
+  );
+
+  test.each([
+    "migrate deploy",
+    "migrate resolve --applied 0000_baseline",
+    "migrate status",
+    "migrate reset --force",
+    "db push",
+    "db execute --file x.sql",
+    "studio",
+    "migrate diff --from-empty --to-schema prisma/schema.prisma --script",
+    "migrate diff --from-config-datasource --to-schema prisma/schema.prisma",
+  ])(
+    "`%s` never opens a shadow database, so its shadow URL is not checked",
+    (cmd) => {
+      expect(shadow(cmd, DIRECT)).not.toThrow();
+    },
+  );
+
+  test("a shadow URL with ?host=<supabase> is refused for migrate dev", () => {
+    expect(
+      shadow(
+        "migrate dev",
+        "postgresql://u:p@localhost:5432/shadow?host=db.abc.supabase.co",
+      ),
+    ).toThrow(MigrateGuardError);
+  });
+
+  test("an unparsable shadow URL is refused for migrate dev", () => {
+    expect(shadow("migrate dev", "not a url")).toThrow(/does not parse/);
+  });
+
+  test("`migrate diff --from-migrations` with a Supabase config URL and no shadow URL stays allowed", () => {
+    expect(
+      run(
+        "migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma",
+        DIRECT,
+      ),
+    ).not.toThrow();
+  });
+});
+
+describe("command labels never carry a flag value", () => {
+  test("`db --url <supabase> push` is refused without echoing the URL", () => {
+    let message = "";
+    try {
+      assertMigrateAllowed({
+        argv: ["db", "--url", DIRECT, "push"],
+        url: LOCAL,
+        env: {},
+      });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toContain("migrate guard: refused");
+    expect(message).toContain("db (unknown)");
+    expect(message).not.toContain("s3cret");
+    expect(message).not.toContain("postgresql://");
   });
 });

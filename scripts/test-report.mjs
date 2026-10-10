@@ -24,6 +24,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnv } from "vite";
 
 // --- feature map (S1.1d12) ---------------------------------------------------
 // Matched in this order (first match wins); displayed as F0 to F5, then
@@ -300,26 +301,14 @@ export function parseArgs(argv) {
   return opts;
 }
 
-// Vitest does not load .env; integration suites need the database URLs, so
-// load .env here without overwriting anything already exported.
-function loadDotenv(file) {
-  if (!existsSync(file)) return;
-  for (const raw of readFileSync(file, "utf8").split("\n")) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq === -1) continue;
-    const key = line.slice(0, eq).trim();
-    if (process.env[key] !== undefined) continue;
-    let val = line.slice(eq + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
-    }
-    process.env[key] = val;
-  }
+// The env files the Vitest child will see (ADV.7). vitest.config.mts loads
+// them itself with Vite's loadEnv in mode "test" (.env, .env.local, .env.test,
+// .env.test.local, dotenv parsing and expansion), so this script calls the same
+// function only to decide its warnings and never writes process.env: a second,
+// hand-written parser could hand the child a different value. With the ""
+// prefix, exported variables are included and win over the files.
+export function loadEnvFiles(root, mode = "test") {
+  return loadEnv(mode, root, "");
 }
 
 function main() {
@@ -333,8 +322,7 @@ function main() {
   }
   const out = resolve(root, opts.out ?? join("docs", "test-report.md"));
 
-  loadDotenv(join(root, ".env"));
-  for (const warning of envWarnings(process.env)) console.warn(warning);
+  for (const warning of envWarnings(loadEnvFiles(root))) console.warn(warning);
 
   const workDir = mkdtempSync(join(tmpdir(), "mox-report-"));
   const jsonPath = join(workDir, "vitest.json");

@@ -1,4 +1,7 @@
 // T10 (AC-6): the report script's pure functions.
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import * as reportModule from "./test-report.mjs";
 
@@ -19,6 +22,7 @@ const {
   typeOf,
   renderReport,
   envWarnings,
+  loadEnvFiles,
   parseArgs,
   renderStub,
   FEATURE_ORDER,
@@ -30,6 +34,7 @@ const {
     opts: { root: string; generatedAt?: string; exitCode?: number },
   ) => Rendered;
   envWarnings: (env: Record<string, string | undefined>) => string[];
+  loadEnvFiles: (root: string, mode?: string) => Record<string, string>;
   parseArgs: (argv: string[]) => { config?: string; out?: string };
   renderStub: (opts: { generatedAt?: string; exitCode?: number }) => string;
   FEATURE_ORDER: string[];
@@ -292,6 +297,88 @@ describe("envWarnings", () => {
           "postgresql://postgres:postgres@localhost:5432/mox_market",
       }),
     ).toEqual([]);
+  });
+});
+
+// ADV.7: the script reads env files exactly as vitest.config.mts does.
+describe("loadEnvFiles", () => {
+  const URL = "postgresql://postgres:postgres@localhost:5432/mox_market";
+
+  function inTempDir(files: Record<string, string>) {
+    const dir = mkdtempSync(path.join(tmpdir(), "mox-report-env-"));
+    for (const [name, body] of Object.entries(files))
+      writeFileSync(path.join(dir, name), body);
+    return {
+      env: loadEnvFiles(dir),
+      done: () => rmSync(dir, { recursive: true, force: true }),
+    };
+  }
+
+  test("a quoted value with an inline comment loads the bare value, and `export` lines load", () => {
+    const { env, done } = inTempDir({
+      ".env": [
+        `MOX_REPORT_PROBE_URL="${URL}" # local`,
+        "export MOX_REPORT_PROBE_X=1",
+        "MOX_REPORT_PROBE_SINGLE='a b' # note",
+        "# MOX_REPORT_PROBE_COMMENTED=1",
+      ].join("\n"),
+    });
+    try {
+      expect(env.MOX_REPORT_PROBE_URL).toBe(URL);
+      expect(env.MOX_REPORT_PROBE_X).toBe("1");
+      expect(env["export MOX_REPORT_PROBE_X"]).toBeUndefined();
+      expect(env.MOX_REPORT_PROBE_SINGLE).toBe("a b");
+      expect(env.MOX_REPORT_PROBE_COMMENTED).toBeUndefined();
+    } finally {
+      done();
+    }
+  });
+
+  test("reads .env.local and .env.test like Vitest does, later files winning", () => {
+    const { env, done } = inTempDir({
+      ".env": "MOX_REPORT_PROBE_A=env\nMOX_REPORT_PROBE_B=env\n",
+      ".env.local": "MOX_REPORT_PROBE_A=local\n",
+      ".env.test": "MOX_REPORT_PROBE_B=test\n",
+    });
+    try {
+      expect(env.MOX_REPORT_PROBE_A).toBe("local");
+      expect(env.MOX_REPORT_PROBE_B).toBe("test");
+    } finally {
+      done();
+    }
+  });
+
+  test("an exported variable wins over the file", () => {
+    process.env.MOX_REPORT_PROBE_EXPORTED = "shell";
+    const { env, done } = inTempDir({
+      ".env": "MOX_REPORT_PROBE_EXPORTED=file\n",
+    });
+    try {
+      expect(env.MOX_REPORT_PROBE_EXPORTED).toBe("shell");
+    } finally {
+      delete process.env.MOX_REPORT_PROBE_EXPORTED;
+      done();
+    }
+  });
+
+  test("never writes process.env", () => {
+    const { done } = inTempDir({ ".env": "MOX_REPORT_PROBE_LEAK=1\n" });
+    try {
+      expect(process.env.MOX_REPORT_PROBE_LEAK).toBeUndefined();
+    } finally {
+      done();
+    }
+  });
+
+  test("envWarnings over the loaded files is quiet when .env sets both URLs with comments", () => {
+    const { env, done } = inTempDir({
+      ".env": `POSTGRES_PRISMA_URL="${URL}" # pooled\nPOSTGRES_URL_NON_POOLING="${URL}" # direct\n`,
+    });
+    try {
+      expect(envWarnings(env)).toEqual([]);
+    } finally {
+      done();
+    }
   });
 });
 

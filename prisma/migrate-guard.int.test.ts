@@ -4,8 +4,10 @@
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -56,6 +58,48 @@ function prisma(
   };
 }
 
+/**
+ * A throwaway project dir: a copy of the config (optionally rewritten), guard,
+ * schema and migrations, with the repo's node_modules linked in.
+ */
+function withThrowawayProject<T>(
+  fn: (dir: string) => T,
+  options: { env?: string; config?: (source: string) => string } = {},
+): T {
+  const dir = mkdtempSync(path.join(tmpdir(), "mox-guard-"));
+  try {
+    mkdirSync(path.join(dir, "prisma"));
+    const config = readFileSync(path.join(ROOT, "prisma.config.ts"), "utf8");
+    writeFileSync(
+      path.join(dir, "prisma.config.ts"),
+      options.config ? options.config(config) : config,
+    );
+    copyFileSync(
+      path.join(ROOT, "prisma", "migrate-guard.ts"),
+      path.join(dir, "prisma", "migrate-guard.ts"),
+    );
+    copyFileSync(
+      path.join(ROOT, "prisma", "schema.prisma"),
+      path.join(dir, "prisma", "schema.prisma"),
+    );
+    cpSync(
+      path.join(ROOT, "prisma", "migrations"),
+      path.join(dir, "prisma", "migrations"),
+      { recursive: true },
+    );
+    symlinkSync(
+      path.join(ROOT, "node_modules"),
+      path.join(dir, "node_modules"),
+      "dir",
+    );
+    if (options.env !== undefined)
+      writeFileSync(path.join(dir, ".env"), options.env);
+    return fn(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 describe("prisma.config.ts wiring", () => {
   test("`migrate deploy` against a Supabase host is refused before connecting", () => {
     const { status, output } = prisma(["migrate", "deploy"], FAKE_SUPABASE);
@@ -80,42 +124,136 @@ describe("prisma.config.ts wiring", () => {
   });
 
   test("ALLOW_PROD_MIGRATE=1 saved in .env does not unlock the guard (inline only, AC-12)", () => {
-    // A throwaway project dir: a copy of the config, guard and schema, the
-    // repo's node_modules linked in, and a .env that tries to set the flag.
-    const dir = mkdtempSync(path.join(tmpdir(), "mox-guard-env-"));
-    try {
-      mkdirSync(path.join(dir, "prisma"));
-      copyFileSync(
-        path.join(ROOT, "prisma.config.ts"),
-        path.join(dir, "prisma.config.ts"),
-      );
-      copyFileSync(
-        path.join(ROOT, "prisma", "migrate-guard.ts"),
-        path.join(dir, "prisma", "migrate-guard.ts"),
-      );
-      copyFileSync(
-        path.join(ROOT, "prisma", "schema.prisma"),
-        path.join(dir, "prisma", "schema.prisma"),
-      );
-      symlinkSync(
-        path.join(ROOT, "node_modules"),
-        path.join(dir, "node_modules"),
-        "dir",
-      );
-      writeFileSync(
-        path.join(dir, ".env"),
-        `ALLOW_PROD_MIGRATE=1\nPOSTGRES_URL_NON_POOLING=${FAKE_SUPABASE}\n`,
-      );
-      const { status, output } = prisma(
-        ["migrate", "deploy"],
-        FAKE_SUPABASE,
-        {},
-        dir,
-      );
-      expect(status).not.toBe(0);
-      expect(output).toContain("migrate guard: refused");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    withThrowawayProject(
+      (dir) => {
+        const { status, output } = prisma(
+          ["migrate", "deploy"],
+          FAKE_SUPABASE,
+          {},
+          dir,
+        );
+        expect(status).not.toBe(0);
+        expect(output).toContain("migrate guard: refused");
+      },
+      {
+        env: `ALLOW_PROD_MIGRATE=1\nPOSTGRES_URL_NON_POOLING=${FAKE_SUPABASE}\n`,
+      },
+    );
+  });
+
+  // ADV.1: Prisma's schema engine connects to ?host= over the URL hostname.
+  test("`migrate status` with a localhost URL whose ?host= is Supabase is refused", () => {
+    const { status, output } = prisma(
+      ["migrate", "status"],
+      "postgresql://guard:guard@localhost:1/postgres?host=guard-check.supabase.co",
+    );
+    expect(status).not.toBe(0);
+    expect(output).toContain("migrate guard: refused");
+    expect(output).toContain("ALLOW_PROD_MIGRATE");
+    expect(output).toContain("guard-check.supabase.co");
+    expect(output).not.toContain("guard:guard");
+  });
+
+  // ADV.3: the inline flag reaches the guard through prisma.config.ts. `--help`
+  // after a command is guarded (D4), and Prisma prints help before it loads
+  // the datasource, so nothing connects either way.
+  test("inline ALLOW_PROD_MIGRATE=1 unlocks `migrate deploy --help` against a Supabase host", () => {
+    const { status, output } = prisma(
+      ["migrate", "deploy", "--help"],
+      FAKE_SUPABASE,
+      { ALLOW_PROD_MIGRATE: "1" },
+    );
+    expect(status, output).toBe(0);
+    expect(output).not.toContain("migrate guard: refused");
+    expect(output).toMatch(/migrate deploy/);
+  });
+
+  test("without the flag, `migrate deploy --help` against a Supabase host is refused", () => {
+    const { status, output } = prisma(
+      ["migrate", "deploy", "--help"],
+      FAKE_SUPABASE,
+    );
+    expect(status).not.toBe(0);
+    expect(output).toContain("migrate guard: refused");
+  });
+});
+
+// ADV.2: one datasource object feeds both the guard and Prisma, so a
+// shadowDatabaseUrl added to it later is checked for the commands that use it.
+describe("shadow database wiring (ADV.2)", () => {
+  const DATASOURCE_LINE =
+    "const datasource: { url?: string; shadowDatabaseUrl?: string } = { url };";
+
+  test("prisma.config.ts passes its datasource's url and shadowDatabaseUrl to the guard and to Prisma", () => {
+    const config = readFileSync(path.join(ROOT, "prisma.config.ts"), "utf8");
+    expect(config).toContain(DATASOURCE_LINE);
+    expect(config).toMatch(/url:\s*datasource\.url,/);
+    expect(config).toMatch(/shadowUrl:\s*datasource\.shadowDatabaseUrl,/);
+    expect(config).toMatch(
+      /defineConfig\(\{[\s\S]*^\s*datasource,\s*$[\s\S]*\}\);/m,
+    );
+    expect(config.match(/assertMigrateAllowed\(/g)).toHaveLength(1);
+  });
+
+  const withShadow = (source: string) => {
+    expect(source).toContain(DATASOURCE_LINE);
+    return source.replace(
+      DATASOURCE_LINE,
+      "const datasource: { url?: string; shadowDatabaseUrl?: string } = { url, shadowDatabaseUrl: process.env.MOX_GUARD_SHADOW_URL };",
+    );
+  };
+
+  test.each([
+    [
+      "migrate diff --from-migrations",
+      [
+        "migrate",
+        "diff",
+        "--from-migrations",
+        "prisma/migrations",
+        "--to-schema",
+        "prisma/schema.prisma",
+      ],
+    ],
+    ["migrate dev", ["migrate", "dev"]],
+  ])("`%s` with a Supabase shadow URL is refused", (_label, args) => {
+    withThrowawayProject(
+      (dir) => {
+        const { status, output } = prisma(
+          args,
+          LOCAL,
+          { MOX_GUARD_SHADOW_URL: FAKE_SUPABASE },
+          dir,
+        );
+        expect(status).not.toBe(0);
+        expect(output).toContain("migrate guard: refused");
+        expect(output).toContain("its shadow database");
+        expect(output).not.toContain("guard:guard");
+      },
+      { config: withShadow },
+    );
+  });
+
+  test("`migrate diff --from-migrations` with no shadow URL is not refused by the guard", () => {
+    withThrowawayProject(
+      (dir) => {
+        const { output } = prisma(
+          [
+            "migrate",
+            "diff",
+            "--from-migrations",
+            "prisma/migrations",
+            "--to-schema",
+            "prisma/schema.prisma",
+          ],
+          LOCAL,
+          {},
+          dir,
+        );
+        expect(output).not.toContain("migrate guard: refused");
+        expect(output).toMatch(/shadowDatabaseUrl/);
+      },
+      { config: withShadow },
+    );
   });
 });

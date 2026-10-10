@@ -7,7 +7,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   assertLocalDatabaseUrl,
-  isReachable,
+  probeLocalDatabase,
   scratchDatabaseName,
   UNREACHABLE_WARNING,
   withClient,
@@ -27,10 +27,17 @@ const serverUrl = process.env.POSTGRES_URL_NON_POOLING;
 
 // The host check runs before any connection attempt (AGENTS.md Databases limit).
 if (serverUrl) assertLocalDatabaseUrl(serverUrl);
-const reachable = serverUrl ? await isReachable(serverUrl, 3_000) : false;
+// Skips only when no server answers; a server that refuses the credentials
+// throws here and fails the file in every environment (ADV.6).
+const probe = serverUrl
+  ? await probeLocalDatabase(serverUrl, 3_000)
+  : { reachable: false as const, reason: "POSTGRES_URL_NON_POOLING unset" };
+const reachable = probe.reachable;
+const unreachableReason = probe.reachable ? "" : probe.reason;
 // Written straight to stderr: Vitest does not surface console output from a
 // file whose tests all skip, and the skip reason must be visible.
-if (!reachable && !IN_CI) process.stderr.write(`⚠ ${UNREACHABLE_WARNING}\n`);
+if (!reachable && !IN_CI)
+  process.stderr.write(`⚠ ${UNREACHABLE_WARNING} (${unreachableReason})\n`);
 
 function prisma(args: string[], url: string) {
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -61,9 +68,7 @@ describe.runIf(IN_CI && !reachable)(
   "baseline migration (CI without a database)",
   () => {
     test("the postgres:16 service must be reachable in CI", () => {
-      expect.fail(
-        `${UNREACHABLE_WARNING} (POSTGRES_URL_NON_POOLING ${serverUrl ? "set" : "unset"})`,
-      );
+      expect.fail(`${UNREACHABLE_WARNING} (${unreachableReason})`);
     });
   },
 );
