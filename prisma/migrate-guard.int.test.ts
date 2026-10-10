@@ -154,6 +154,28 @@ describe("prisma.config.ts wiring", () => {
     expect(output).not.toContain("guard:guard");
   });
 
+  // CODEX.1: a host parameter naming any remote host is refused, and the inline
+  // flag does not unlock it. `.invalid` never resolves and port 1 fails fast,
+  // so a broken wiring could not reach anything either.
+  test.each([
+    ["without the flag", {}],
+    ["with inline ALLOW_PROD_MIGRATE=1", { ALLOW_PROD_MIGRATE: "1" }],
+  ])(
+    "`migrate status` with a localhost URL whose ?host= is a remote host is refused %s",
+    (_label, extra) => {
+      const { status, output } = prisma(
+        ["migrate", "status"],
+        "postgresql://guard:guard@localhost:1/postgres?host=guard-check.example.invalid",
+        extra,
+      );
+      expect(status).not.toBe(0);
+      expect(output).toContain("migrate guard: refused");
+      expect(output).toContain("host query parameter");
+      expect(output).toContain("guard-check.example.invalid");
+      expect(output).not.toContain("guard:guard");
+    },
+  );
+
   // ADV.3: the inline flag reaches the guard through prisma.config.ts. `--help`
   // after a command is guarded (D4), and Prisma prints help before it loads
   // the datasource, so nothing connects either way.

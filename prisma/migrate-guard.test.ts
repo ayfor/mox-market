@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   assertMigrateAllowed,
   hostsOf,
+  isLocalHostParam,
   isSupabaseHost,
   MigrateGuardError,
 } from "./migrate-guard";
@@ -264,6 +265,7 @@ describe("host helpers", () => {
   test("hostsOf lower-cases, drops a trailing dot and returns null when unparsable", () => {
     expect(hostsOf("postgresql://u:p@DB.X.Supabase.CO.:5432/db")).toEqual({
       hosts: ["db.x.supabase.co"],
+      hostParams: [],
       hostaddrs: [],
     });
     expect(hostsOf("nope")).toBeNull();
@@ -276,6 +278,7 @@ describe("host helpers", () => {
       ),
     ).toEqual({
       hosts: ["localhost", "a.supabase.co", "b.example", "c.example", "/tmp"],
+      hostParams: ["a.supabase.co", "b.example", "c.example", "/tmp"],
       hostaddrs: ["10.0.0.5"],
     });
   });
@@ -374,14 +377,16 @@ describe("host query parameters (ADV.1)", () => {
     expect((error as Error).message).not.toContain("postgresql://");
   });
 
-  test("ALLOW_PROD_MIGRATE=1 unlocks a Supabase host named by ?host=", () => {
+  // CODEX.1: a host parameter may name only a local target, so the flag no
+  // longer unlocks a Supabase host hidden behind `localhost`.
+  test("ALLOW_PROD_MIGRATE=1 does not unlock a Supabase host named by ?host=", () => {
     expect(
       run(
         "migrate deploy",
         "postgresql://u:p@localhost:5432/postgres?host=db.abc.supabase.co",
         { ALLOW_PROD_MIGRATE: "1" },
       ),
-    ).not.toThrow();
+    ).toThrow(/host query parameter sends it to db\.abc\.supabase\.co/);
   });
 
   test.each([
@@ -428,6 +433,144 @@ describe("host query parameters (ADV.1)", () => {
         "postgresql://u:p@localhost/x?host=db.abc.supabase.co&hostaddr=1.2.3.4",
       ),
     ).not.toThrow();
+  });
+});
+
+// CODEX.1 (Codex review on PR #7): a `host` parameter naming a remote host
+// that is not Supabase hid the real target behind `localhost`, so writable
+// commands reached it without the flag. A host parameter may now name only
+// localhost, 127.0.0.1 or a socket directory, flag or not.
+describe("host parameters naming a remote host (CODEX.1)", () => {
+  const REMOTE = "postgresql://u:s3cret@localhost/db?host=prod.example.com";
+
+  test.each([
+    ["migrate reset --force", REMOTE],
+    ["db push --force-reset", REMOTE],
+    ["migrate deploy", REMOTE],
+    ["db execute --file x.sql", REMOTE],
+    ["studio", REMOTE],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/db?HOST=prod.example.com",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/db?ho%73t=prod.example.com",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/db?host=localhost,prod.example.com",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/db?host=localhost%2Cprod.example.com",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/db?host=prod.example.com&host=localhost",
+    ],
+    ["migrate deploy", "postgresql://u:p@localhost:5432/db?host=10.0.0.5"],
+    ["migrate deploy", "postgresql://u:p@localhost:5432/db?host=::1"],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/db?host=localhost.example.com",
+    ],
+    [
+      "migrate deploy",
+      "postgresql://u:p@localhost:5432/db?host=127.0.0.1.nip.io",
+    ],
+    ["migrate deploy", "postgresql:///db?host=prod.example.com"],
+    [
+      "migrate deploy",
+      "postgresql://u:p@prod.example.com:5432/db?host=prod.example.com",
+    ],
+  ])("`%s` with %s is refused, with or without the flag", (cmd, url) => {
+    expect(run(cmd, url)).toThrow(/host query parameter/);
+    expect(run(cmd, url, { ALLOW_PROD_MIGRATE: "1" })).toThrow(
+      /host query parameter/,
+    );
+  });
+
+  test("the refusal names the parameter's host and command, never the URL or password", () => {
+    let error: unknown;
+    try {
+      assertMigrateAllowed({
+        argv: ["migrate", "reset", "--force"],
+        url: REMOTE,
+        env: {},
+      });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(MigrateGuardError);
+    const e = error as MigrateGuardError;
+    expect(e.host).toBe("prod.example.com");
+    expect(e.command).toBe("migrate reset");
+    expect(e.message).toContain("prod.example.com");
+    expect(e.message).toContain("migrate reset");
+    expect(e.message).not.toContain("s3cret");
+    expect(e.message).not.toContain("postgresql://");
+  });
+
+  test("a --url value with a remote host parameter is refused under a localhost config URL", () => {
+    expect(() =>
+      assertMigrateAllowed({
+        argv: ["db", "push", `--url=${REMOTE}`],
+        url: LOCAL,
+        env: { ALLOW_PROD_MIGRATE: "1" },
+      }),
+    ).toThrow(/host query parameter/);
+  });
+
+  test("a shadow URL with a remote host parameter is refused for migrate dev, naming the shadow database", () => {
+    expect(() =>
+      assertMigrateAllowed({
+        argv: ["migrate", "dev"],
+        url: LOCAL,
+        shadowUrl: "postgresql://u:p@localhost/shadow?host=prod.example.com",
+        env: {},
+      }),
+    ).toThrow(/prod\.example\.com \(its shadow database\)/);
+  });
+
+  test("a shadow-free command ignores a remote host parameter on the shadow URL", () => {
+    expect(() =>
+      assertMigrateAllowed({
+        argv: ["migrate", "deploy"],
+        url: LOCAL,
+        shadowUrl: "postgresql://u:p@localhost/shadow?host=prod.example.com",
+        env: {},
+      }),
+    ).not.toThrow();
+  });
+
+  test("exempt commands are still not checked", () => {
+    expect(run("generate", REMOTE)).not.toThrow();
+    expect(run("validate", REMOTE)).not.toThrow();
+  });
+
+  // Scope (AC-13): the guard protects production, which is Supabase. A
+  // non-Supabase host the URL shows openly stays outside it; agents are bound
+  // by AGENTS.md's hostname check, which prints that host.
+  test("a non-Supabase host in the URL itself is outside the guard's scope", () => {
+    expect(
+      run("migrate deploy", "postgresql://u:p@prod.example.com:5432/db"),
+    ).not.toThrow();
+  });
+
+  test.each([
+    ["localhost", true],
+    ["LOCALHOST", true],
+    ["127.0.0.1", true],
+    ["/var/run/postgresql", true],
+    ["/tmp", true],
+    ["::1", false],
+    ["prod.example.com", false],
+    ["localhost.example.com", false],
+    ["127.0.0.1.nip.io", false],
+    ["", false],
+  ])("isLocalHostParam(%j) is %s", (host, expected) => {
+    expect(isLocalHostParam(host)).toBe(expected);
   });
 });
 

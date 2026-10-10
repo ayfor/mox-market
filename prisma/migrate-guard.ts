@@ -9,6 +9,12 @@
 // the hostname. Checked for the config URL, every --url value and, for the
 // commands that open one, the shadow database URL (ADV.2).
 //
+// A `host` parameter hides the real target behind the host the URL shows, so
+// one may name only localhost, 127.0.0.1 or a Unix-socket directory; any other
+// is refused even with ALLOW_PROD_MIGRATE=1, like `hostaddr` (CODEX.1). A
+// remote host belongs in the URL itself, where AGENTS.md's hostname check
+// sees it.
+//
 // Known limit: `--config <other file>` never loads this config, so it bypasses
 // the guard (README Troubleshooting).
 //
@@ -99,6 +105,8 @@ export interface UrlHosts {
    * can fail closed on it (pg falls back to PGHOST for an empty host).
    */
   hosts: string[];
+  /** The members of `hosts` that came from `host` query parameters (CODEX.1). */
+  hostParams: string[];
   /** Every `hostaddr` query parameter value: IP addresses, not names. */
   hostaddrs: string[];
 }
@@ -118,17 +126,28 @@ export function hostsOf(url: string): UrlHosts | null {
   } catch {
     return null;
   }
-  const hosts = parsed.hostname ? parsed.hostname.split(",") : [];
+  const named = parsed.hostname ? parsed.hostname.split(",") : [];
+  const hostParams: string[] = [];
   const hostaddrs: string[] = [];
   for (const [key, value] of parsed.searchParams) {
     const name = key.trim().toLowerCase();
-    if (name === "host") hosts.push(...value.split(","));
+    if (name === "host") hostParams.push(...value.split(","));
     else if (name === "hostaddr") hostaddrs.push(...value.split(","));
   }
   return {
-    hosts: hosts.map(normaliseHost),
+    hosts: [...named, ...hostParams].map(normaliseHost),
+    hostParams: hostParams.map(normaliseHost),
     hostaddrs: hostaddrs.map(normaliseHost),
   };
+}
+
+/**
+ * The only targets a `host` query parameter may name (CODEX.1): the two local
+ * hosts AGENTS.md allows, or an absolute Unix-socket directory.
+ */
+export function isLocalHostParam(host: string): boolean {
+  const h = normaliseHost(host);
+  return h === "localhost" || h === "127.0.0.1" || h.startsWith("/");
 }
 
 export function isSupabaseHost(host: string): boolean {
@@ -206,8 +225,10 @@ function targetsOf(
 /**
  * Throws MigrateGuardError when a guarded command would reach a Supabase host
  * without ALLOW_PROD_MIGRATE=1 (exactly '1'). Fails closed: a guarded command
- * whose URL does not parse, names no host or an empty one, or carries
- * `hostaddr` (an IP that bypasses the name check) is refused even with the flag.
+ * whose URL does not parse, names no host or an empty one, carries `hostaddr`
+ * (an IP that bypasses the name check), or has a `host` parameter naming
+ * anything but localhost, 127.0.0.1 or a socket directory (CODEX.1) is refused
+ * even with the flag.
  */
 export function assertMigrateAllowed({
   argv,
@@ -238,15 +259,26 @@ export function assertMigrateAllowed({
     if (parsed.hosts.length === 0 || parsed.hosts.includes(""))
       throw cannotCheck("the database URL names no host or an empty one");
 
+    const which = target.source === "shadow" ? " (its shadow database)" : "";
     const host = parsed.hosts.find(isSupabaseHost);
     if (host !== undefined && env.ALLOW_PROD_MIGRATE !== "1") {
-      const which = target.source === "shadow" ? " (its shadow database)" : "";
       throw new MigrateGuardError(
         `migrate guard: refused \`prisma ${command}\` against ${host}${which} (a Supabase production host). ` +
           "Production is Josh's channel only: set ALLOW_PROD_MIGRATE=1 inline for this one command, " +
           "never in any .env* file.",
         command,
         host,
+      );
+    }
+
+    const hidden = parsed.hostParams.find((h) => !isLocalHostParam(h));
+    if (hidden !== undefined) {
+      throw new MigrateGuardError(
+        `migrate guard: refused \`prisma ${command}\`: a host query parameter sends it to ${hidden}${which} ` +
+          "instead of the host the URL shows. A host parameter may name only localhost, 127.0.0.1 or a " +
+          "socket directory, even with ALLOW_PROD_MIGRATE=1; put a remote host in the URL itself.",
+        command,
+        hidden,
       );
     }
   }
