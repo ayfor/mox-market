@@ -766,10 +766,6 @@ function ActionsTile() {
             </span>
           </button>
         </div>
-        <div className="t-actions-foot">
-          Prices aggregated from Scryfall across TCGplayer, CardKingdom and
-          CardMarket. Updated every 4 hours. Not financial advice.
-        </div>
       </div>
     </div>
   );

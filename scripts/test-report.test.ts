@@ -91,6 +91,13 @@ describe("featureOf", () => {
     ["src/components/footer.test.tsx", "F2 · Live Evaluation"],
     ["src/lib/ui-copy.test.ts", "F2 · Live Evaluation"],
     ["src/app/page.test.tsx", "F2 · Live Evaluation"],
+    // S2.2d13 (T15): this story's tests map to F2.
+    ["src/lib/copy/legal.test.ts", "F2 · Live Evaluation"],
+    ["src/components/site-footer.test.tsx", "F2 · Live Evaluation"],
+    ["src/app/layout.test.tsx", "F2 · Live Evaluation"],
+    ["src/app/sample/page.test.tsx", "F2 · Live Evaluation"],
+    ["tests/contract/site-footer.test.ts", "F2 · Live Evaluation"],
+    ["tests/helpers/attribution-spec.test.ts", "F2 · Live Evaluation"],
     ["src/lib/recommendation/params.test.ts", "F1 · Recommendation Engine"],
     ["src/lib/prisma.test.ts", "F1 · Recommendation Engine"],
     ["prisma/migrate-guard.test.ts", "F1 · Recommendation Engine"],
@@ -109,6 +116,10 @@ describe("featureOf", () => {
     );
     expect(featureOf("src/app/a/x.test.ts")).toBe("Unmapped");
     expect(featureOf("src/app/c/x.test.ts")).toBe("Unmapped");
+  });
+
+  test("only the legal copy module maps to F2, so other copy stays free for S1.3 (S2.2d13)", () => {
+    expect(featureOf("src/lib/copy/reasons.test.ts")).toBe("Unmapped");
   });
 
   test("an unknown path is Unmapped", () => {

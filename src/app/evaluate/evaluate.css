@@ -458,14 +458,3 @@
   margin: 0;
   max-width: 360px;
 }
-
-/* ─────────── FOOTER ─────────── */
-
-.mm-footer {
-  margin-top: 40px;
-  padding: 20px 4px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  font: 400 11px/1.4 var(--font-sans);
-  color: var(--mox-grey-olive);
-  text-align: center;
-}
