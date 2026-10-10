@@ -50,10 +50,21 @@ function testFilesUnder(root: string, dir = ""): string[] {
   );
 }
 
+/**
+ * The parent's env without Vitest's own variables, and without GITHUB_ACTIONS
+ * and colour, so a nested run neither posts CI annotations for its probe
+ * failures nor changes its output format between local and CI runs.
+ */
 function childEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of Object.keys(env))
-    if (key.startsWith("VITEST")) delete env[key];
+    if (
+      key.startsWith("VITEST") ||
+      key === "GITHUB_ACTIONS" ||
+      key === "FORCE_COLOR"
+    )
+      delete env[key];
+  env.NO_COLOR = "1";
   return env;
 }
 
@@ -238,10 +249,10 @@ describe("test discovery", () => {
       const output = run.output.replace(/\x1b\[[0-9;]*m/g, "");
       expect(run.status, output).not.toBe(0);
       expect(output).toMatch(
-        /FAIL\s+\|component\|\s+tests\/contract\/probe\.test\.tsx > component probe/,
+        /FAIL\s+\|?\s*component\s*\|?\s+tests\/contract\/probe\.test\.tsx > component probe/,
       );
       expect(output).toMatch(
-        /FAIL\s+\|unit\|\s+prisma\/probe\.test-d\.ts > type probe/,
+        /FAIL\s+\|?\s*unit\s*\|?\s+prisma\/probe\.test-d\.ts > type probe/,
       );
       expect(output).toMatch(/Type Errors\s+1 failed/);
       expect(output).toMatch(/Test Files\s+2 failed/);
