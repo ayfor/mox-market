@@ -10,7 +10,12 @@
 import { useResultNavigation } from "@/components/result-navigation";
 import { LANDING_COPY } from "@/lib/copy/entry-points";
 import { FORM_LABELS } from "@/lib/copy/result-labels";
-import { checkEntry, markSubmit } from "@/lib/entry-submit";
+import {
+  checkEntry,
+  clearSubmitMarker,
+  isEntryEmpty,
+  markSubmit,
+} from "@/lib/entry-submit";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import { useId, useRef, useState, type FormEvent } from "react";
 
@@ -26,7 +31,8 @@ export function LandingForm() {
   const cardErrorId = `${id}-card-error`;
   const priceErrorId = `${id}-price-error`;
 
-  const empty = checkEntry(card, price).status === "empty";
+  // Never builds an href during render, so no typed text can throw here (ADV-2).
+  const empty = isEntryEmpty(card, price);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -41,8 +47,12 @@ export function LandingForm() {
       return;
     }
     const href = entry.href;
-    // The same query again while it loads changes nothing.
-    if (navigation.isPending && href === lastHref.current) return;
+    // The same query again while it loads changes nothing; a different one
+    // supersedes it, and the superseded push never lands, so its marker goes
+    // (ADV-5). A storage failure there never blocks this push.
+    const superseded = navigation.isPending ? lastHref.current : null;
+    if (superseded === href) return;
+    if (superseded !== null) clearSubmitMarker(superseded);
     lastHref.current = href;
     // The marker first, so S5.1 finds it on the page the push lands on.
     markSubmit(href);

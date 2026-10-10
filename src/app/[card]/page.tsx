@@ -7,6 +7,7 @@
 // (S2.4d9). Renders write nothing (C1.28).
 import { EntryForm } from "@/components/entry-form";
 import { NavBar } from "@/components/nav-bar";
+import { ResultField } from "@/components/result-field";
 import { ResultNavigationProvider } from "@/components/result-navigation";
 import {
   normalisePrice,
@@ -17,7 +18,6 @@ import {
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ResultField } from "./lookup-miss";
 import { PanelSkeleton } from "./panel-skeleton";
 import { ResultPanel } from "./result-panel";
 import { ResultSlot } from "./result-slot";

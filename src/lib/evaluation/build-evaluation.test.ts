@@ -137,6 +137,30 @@ describe("Scryfall failures → the error panel, nothing computed (T9, AC-4)", (
           }),
         ),
     ],
+    // A 404 Scryfall did not send (a wrong path, a proxy): an outage, not a
+    // miss (ADV-3).
+    [
+      "answers an HTML 404",
+      () =>
+        Promise.resolve(
+          new Response("<html>Not Found</html>", {
+            status: 404,
+            headers: { "Content-Type": "text/html" },
+          }),
+        ),
+    ],
+    [
+      "answers an empty 404",
+      () => Promise.resolve(new Response("", { status: 404 })),
+    ],
+    [
+      "answers a JSON-null 404",
+      () => Promise.resolve(new Response("null", { status: 404 })),
+    ],
+    [
+      "answers a 404 with a code other than not_found",
+      () => Promise.resolve(scryfallError(404)),
+    ],
   ])(
     "a named lookup that %s → error, never a miss; prints, reader and engine 0 calls (T11, AC-8)",
     async (_name, answer) => {

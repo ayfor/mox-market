@@ -5,6 +5,8 @@
 import { NAV_LABELS } from "@/lib/copy/entry-points";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { NavBar } from "./nav-bar";
 
@@ -71,6 +73,24 @@ describe("the nav tabs (T19, AC-14)", () => {
       expect(router.prefetch).not.toHaveBeenCalled();
     },
   );
+
+  test("classes (ADV-1): Evaluate keeps the base class and gets the .on glass; the soon tabs never do", () => {
+    render(<NavBar active="evaluate" />);
+    const tabs = within(tablist()).getAllByRole("tab");
+    const [evaluate, ...soon] = tabs;
+    expect([...evaluate.classList].sort()).toEqual(["mm-nav-link", "on"]);
+    expect(soon).toHaveLength(2);
+    for (const tab of soon) {
+      expect([...tab.classList].sort()).toEqual([
+        "mm-nav-link",
+        "mm-nav-link--soon",
+      ]);
+    }
+    // The classes the tab carries are the ones the stylesheet styles.
+    const css = readFileSync(path.resolve(__dirname, "nav-bar.css"), "utf8");
+    expect(css).toMatch(/(^|[\s,}])\.mm-nav-link\s*\{/);
+    expect(css).toMatch(/(^|[\s,}])\.mm-nav-link\.on\s*[,{]/);
+  });
 
   test("no anchor in the nav points at /import or /about", () => {
     const { container } = render(<NavBar />);

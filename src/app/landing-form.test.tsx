@@ -21,6 +21,19 @@ const router = vi.hoisted(() => ({
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
+/**
+ * A push that stays pending until the test ends. React 19 entangles every
+ * transition with an unsettled async action, so a promise left hanging would
+ * keep later tests' transitions pending; afterEach settles them all.
+ */
+const hanging: Array<() => void> = [];
+const hang = () => new Promise<void>((resolve) => hanging.push(resolve));
+afterEach(async () => {
+  await act(async () => {
+    for (const settle of hanging.splice(0)) settle();
+  });
+});
+
 /** What happened, in order: marker writes and pushes. */
 let events: string[] = [];
 
@@ -111,7 +124,7 @@ describe("valid submits (T5, AC-2, AC-15)", () => {
   });
 
   test("the same query again while pending pushes nothing; a different one pushes", async () => {
-    router.push.mockImplementation(() => new Promise(() => {}));
+    router.push.mockImplementation(hang);
     render(<LandingForm />);
     fill("Esper Sentinel", "74.99");
     await act(async () => {
@@ -133,9 +146,85 @@ describe("valid submits (T5, AC-2, AC-15)", () => {
     expect(markers()).toBe(2);
   });
 
+  test("a submit that supersedes a pending one removes its marker: only the newest key is left (ADV-5)", async () => {
+    router.push.mockImplementation(hang);
+    render(<LandingForm />);
+    fill("Esper Sentinel", "74.99");
+    await act(async () => {
+      send();
+    });
+    fireEvent.change(cardInput(), { target: { value: "Esper Charm" } });
+    await act(async () => {
+      send();
+    });
+    const a = "/Esper%20Sentinel?price=74.99";
+    const b = "/Esper%20Charm?price=74.99";
+    expect(router.push.mock.calls.map(([href]) => href)).toEqual([a, b]);
+    expect(Object.keys(window.sessionStorage)).toEqual([submitMarkerKey(b)]);
+    // Back to A while B is pending: B's marker goes, A's is fresh.
+    fireEvent.change(cardInput(), { target: { value: "Esper Sentinel" } });
+    await act(async () => {
+      send();
+    });
+    expect(Object.keys(window.sessionStorage)).toEqual([submitMarkerKey(a)]);
+  });
+
+  test("a removeItem that throws never blocks the newer push (ADV-5)", async () => {
+    router.push.mockImplementation(hang);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    render(<LandingForm />);
+    fill("Esper Sentinel", "74.99");
+    await act(async () => {
+      send();
+    });
+    fireEvent.change(priceInput(), { target: { value: "75" } });
+    await act(async () => {
+      send();
+    });
+    expect(router.push).toHaveBeenCalledTimes(2);
+    expect(router.push).toHaveBeenLastCalledWith("/Esper%20Sentinel?price=75");
+  });
+
+  test("a submit after the previous push settled removes nothing", async () => {
+    render(<LandingForm />);
+    fill("Esper Sentinel", "74.99");
+    await act(async () => {
+      send();
+    });
+    fireEvent.change(priceInput(), { target: { value: "75" } });
+    await act(async () => {
+      send();
+    });
+    expect(Object.keys(window.sessionStorage).sort()).toEqual(
+      [
+        submitMarkerKey("/Esper%20Sentinel?price=74.99"),
+        submitMarkerKey("/Esper%20Sentinel?price=75"),
+      ].sort(),
+    );
+  });
+
   test("not busy before a submit", () => {
     render(<LandingForm />);
     expect(submit()).not.toHaveAttribute("aria-busy");
+  });
+});
+
+describe("ill-formed text never breaks the form (ADV-2)", () => {
+  test("a lone surrogate in the card with a valid price: the form stays rendered and a submit shows the card message", () => {
+    render(<LandingForm />);
+    fill("Esper\uD800", "5");
+    expect(form()).toBeInTheDocument();
+    expect(submit()).toBeEnabled();
+    send();
+    expect(screen.getByText(UI_COPY.cardNotFound)).toHaveAttribute(
+      "role",
+      "alert",
+    );
+    expect(router.push).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+    expect(window.sessionStorage.length).toBe(0);
   });
 });
 

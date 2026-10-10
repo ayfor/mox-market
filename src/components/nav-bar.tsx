@@ -57,7 +57,10 @@ export function NavBar({ active = "evaluate" }: NavBarProps) {
 
       <div className="mm-nav-links" role="tablist">
         <Link
-          className={`mm-nav-link${active === "evaluate" ? "on" : ""}`}
+          // Whole class strings: prettier-plugin-tailwindcss trims the space
+          // off a " on" fragment in a template literal, which glued it into
+          // "mm-nav-linkon" (S2.4 ADV-1).
+          className={active === "evaluate" ? "mm-nav-link on" : "mm-nav-link"}
           href="/evaluate"
           role="tab"
           aria-selected={active === "evaluate"}

@@ -15,7 +15,8 @@ import {
   type EvaluationQuery,
 } from "@/lib/evaluation/build-evaluation";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
-import { render, screen } from "@testing-library/react";
+import { resultHref } from "@/lib/result-href";
+import { fireEvent, render, screen } from "@testing-library/react";
 import {
   cloneElement,
   isValidElement,
@@ -55,6 +56,9 @@ vi.mock("@/lib/throttle", async (importOriginal) => {
 const fetchMock = vi.fn<typeof fetch>();
 beforeEach(() => {
   fetchMock.mockReset();
+  for (const fn of Object.values(router)) fn.mockReset();
+  redirect.mockReset();
+  window.sessionStorage.clear();
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
@@ -288,6 +292,12 @@ describe("lookup misses on the page (T12, AC-6, AC-7, AC-10)", () => {
     ],
     ["an HTML 502", () => new Response("<html>bad</html>", { status: 502 })],
     ["a rejected fetch", () => Promise.reject(new TypeError("fetch failed"))],
+    // A 404 Scryfall did not send is an outage, not a miss (ADV-3).
+    [
+      "an HTML 404",
+      () => new Response("<html>Not Found</html>", { status: 404 }),
+    ],
+    ["an empty 404", () => new Response("", { status: 404 })],
   ])(
     "a lookup answering %s renders the error panel, never a miss (AC-8)",
     async (_name, answer) => {
@@ -298,9 +308,53 @@ describe("lookup misses on the page (T12, AC-6, AC-7, AC-10)", () => {
       expect(screen.queryByText(UI_COPY.ambiguousCard)).toBeNull();
       expect(screen.queryByText(UI_COPY.cardNotFound)).toBeNull();
       expect(cardInput()).not.toHaveAttribute("aria-describedby");
+      expect(log).toHaveBeenCalledOnce();
       expect(log).toHaveBeenCalledWith("scryfall_failed", expect.anything());
     },
   );
+});
+
+describe("the settled miss page as the user edits (ADV-4, ADV-7)", () => {
+  test('not_found: changing the card drops the message from the combobox\'s description; submitting ".." shows the card message once', async () => {
+    fetchMock.mockResolvedValue(scryfall404());
+    await renderSettled("asdfqwer", { price: "5" });
+    expect(cardInput()).toHaveAccessibleDescription(UI_COPY.cardNotFound);
+    fireEvent.change(cardInput(), { target: { value: "Esper Sentinel" } });
+    expect(cardInput()).not.toHaveAttribute("aria-describedby");
+    expect(cardInput()).toHaveAccessibleDescription("");
+    expect(screen.queryByText(UI_COPY.cardNotFound)).toBeNull();
+    fireEvent.change(cardInput(), { target: { value: ".." } });
+    fireEvent.submit(cardInput().closest("form")!);
+    expect(screen.getAllByText(UI_COPY.cardNotFound)).toHaveLength(1);
+    expect(router.push).not.toHaveBeenCalled();
+  });
+
+  test("ambiguous: focusing the card field asks the autocomplete route for the typed name and lists the options; a pick and submit pushes its resultHref", async () => {
+    fetchMock.mockImplementation(async (url) =>
+      String(url).startsWith("/api/cards/autocomplete")
+        ? Response.json({ data: ["Jace Beleren", "Jace, the Mind Sculptor"] })
+        : scryfall404("ambiguous"),
+    );
+    await renderSettled("jace", { price: "5" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    fireEvent.focus(cardInput());
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "jace",
+      "Jace Beleren",
+      "Jace, the Mind Sculptor",
+    ]);
+    const autocomplete = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.startsWith("/api/cards/autocomplete"));
+    expect(autocomplete).toEqual(["/api/cards/autocomplete?q=jace"]);
+    fireEvent.mouseDown(options[1]);
+    fireEvent.click(options[1]);
+    fireEvent.submit(cardInput().closest("form")!);
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      resultHref("Jace Beleren", "5"),
+    );
+  });
 });
 
 describe("a fuzzy hit keeps the typed name (T14, AC-9)", () => {

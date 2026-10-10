@@ -101,6 +101,36 @@ export const REJECTED_ENTRIES: readonly RejectedEntry[] = Object.freeze([
     price: "5",
     status: "bad_card",
   },
+  // Ill-formed UTF-16 (ADV-2): encodeURIComponent throws on a lone
+  // surrogate, so the guard rejects it before any href is built.
+  {
+    name: "a lone high surrogate in the card",
+    card: "Esper\uD800",
+    price: "5",
+    status: "bad_card",
+  },
+  {
+    name: "a lone low surrogate in the card",
+    card: "\uDC00Sentinel",
+    price: "5",
+    status: "bad_card",
+  },
+  {
+    name: "a reversed surrogate pair in the card",
+    card: "Esper \uDE00\uD83D",
+    price: "5",
+    status: "bad_card",
+  },
+  // A built top-level route (ADV-6): the push would land there, not on a card.
+  { name: "card 'sample'", card: "sample", price: "1", status: "bad_card" },
+  { name: "card ' sample '", card: " sample ", price: "1", status: "bad_card" },
+  { name: "card 'evaluate'", card: "evaluate", price: "1", status: "bad_card" },
+  {
+    name: "card 'favicon.ico'",
+    card: "favicon.ico",
+    price: "1",
+    status: "bad_card",
+  },
   {
     name: "price 74.999",
     card: "Esper Sentinel",

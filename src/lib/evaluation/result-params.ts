@@ -24,6 +24,13 @@ const PRICE_SHAPE = /^\d{1,6}(\.\d{1,2})?$/;
 const CONTROL_CHARACTER = /\p{Cc}/u;
 
 /**
+ * Unicode category Cs: a lone surrogate, which makes the string ill-formed
+ * UTF-16 and makes encodeURIComponent throw (S2.4 ADV-2). A valid pair is
+ * one astral code point under the u flag, so it never matches.
+ */
+const LONE_SURROGATE = /\p{Cs}/u;
+
+/**
  * The asking price with `$` and whitespace removed, and commas removed only
  * when they group thousands (F2 Fields, narrowed by ADV-3: a decimal comma
  * such as "74,99" is left in place, so the price is invalid rather than read
@@ -53,15 +60,17 @@ const DOT_SEGMENTS: readonly string[] = [".", ".."];
 
 /**
  * The card name when it passes F2's pre-Scryfall guard, else null: trimmed,
- * 1 to CARD_PARAM_MAX_CHARS code points, no control character, and not a
- * dot segment ("." or ".."), which cannot round-trip through the path. The
- * entry form runs the same guard before it navigates (ADV-6).
+ * 1 to CARD_PARAM_MAX_CHARS code points, well-formed (no lone surrogate, S2.4
+ * ADV-2), no control character, and not a dot segment ("." or ".."), which
+ * cannot round-trip through the path. The entry forms run the same guard
+ * before they navigate (ADV-6).
  */
 export function parseCardParam(raw: string): string | null {
   const card = raw.trim();
   const length = [...card].length;
   if (length < 1 || length > CARD_PARAM_MAX_CHARS) return null;
   if (DOT_SEGMENTS.includes(card)) return null;
+  if (LONE_SURROGATE.test(card)) return null;
   return CONTROL_CHARACTER.test(card) ? null : card;
 }
 

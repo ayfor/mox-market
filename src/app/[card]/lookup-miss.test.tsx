@@ -4,6 +4,7 @@
 // marker; a pending resubmit swaps the message for the skeleton and drops
 // the tie; a later ok result shows no message.
 import { EntryForm } from "@/components/entry-form";
+import { ResultField } from "@/components/result-field";
 import { ResultNavigationProvider } from "@/components/result-navigation";
 import { LOADING_LABEL } from "@/lib/copy/result-labels";
 import { submitMarkerKey } from "@/lib/entry-submit";
@@ -13,9 +14,9 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { extractRules } from "../../../tests/helpers/site-footer-css";
-import { LookupMiss, ResultField, type LookupMissStatus } from "./lookup-miss";
+import { LookupMiss, type LookupMissStatus } from "./lookup-miss";
 import { ResultSlot } from "./result-slot";
 import { ResultView } from "./result-view";
 
@@ -26,6 +27,19 @@ const router = vi.hoisted(() => ({
   prefetch: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
+
+/**
+ * A push that stays pending until the test ends. React 19 entangles every
+ * transition with an unsettled async action, so a promise left hanging would
+ * keep later tests' transitions pending; afterEach settles them all.
+ */
+const hanging: Array<() => void> = [];
+const hang = () => new Promise<void>((resolve) => hanging.push(resolve));
+afterEach(async () => {
+  await act(async () => {
+    for (const settle of hanging.splice(0)) settle();
+  });
+});
 
 beforeEach(() => {
   router.push.mockReset();
@@ -151,7 +165,7 @@ describe("resubmitting from the miss state (T12, AC-6, AC-15)", () => {
   );
 
   test("a pending resubmit shows the skeleton; the message and its tie are gone", async () => {
-    router.push.mockImplementation(() => new Promise(() => {}));
+    router.push.mockImplementation(hang);
     render(
       <Page card="jace" price="5">
         <ResultView evaluation={{ status: "ambiguous" }} />
@@ -182,5 +196,135 @@ describe("resubmitting from the miss state (T12, AC-6, AC-15)", () => {
     );
     expect(screen.queryByText(UI_COPY.ambiguousCard)).toBeNull();
     expect(cardInput()).not.toHaveAttribute("aria-describedby");
+  });
+});
+
+describe("a stale miss message hides (ADV-4)", () => {
+  test.each(CASES)(
+    "%s: editing the card away from the URL's card hides the message and drops the tie; editing back restores both",
+    (status, card, message) => {
+      render(
+        <Page card={card} price="5">
+          <ResultView evaluation={{ status }} />
+        </Page>,
+      );
+      expect(cardInput()).toHaveAccessibleDescription(message);
+      fireEvent.change(cardInput(), { target: { value: "Esper Sentinel" } });
+      expect(screen.queryByText(message)).toBeNull();
+      expect(cardInput()).not.toHaveAttribute("aria-describedby");
+      expect(cardInput()).toHaveAccessibleDescription("");
+      fireEvent.change(cardInput(), { target: { value: card } });
+      expect(screen.getByText(message)).toBeInTheDocument();
+      expect(cardInput()).toHaveAccessibleDescription(message);
+    },
+  );
+
+  test("a price edit keeps the message: it is about the card", () => {
+    render(
+      <Page card="asdfqwer" price="5">
+        <ResultView evaluation={{ status: "not_found" }} />
+      </Page>,
+    );
+    fireEvent.change(priceInput(), { target: { value: "6" } });
+    expect(cardInput()).toHaveAccessibleDescription(UI_COPY.cardNotFound);
+  });
+
+  test.each(CASES)(
+    '%s: submitting ".." shows the card message exactly once, from the form',
+    (status, card) => {
+      render(
+        <Page card={card} price="5">
+          <ResultView evaluation={{ status }} />
+        </Page>,
+      );
+      fireEvent.change(cardInput(), { target: { value: ".." } });
+      send();
+      expect(screen.getAllByText(UI_COPY.cardNotFound)).toHaveLength(1);
+      expect(screen.getByText(UI_COPY.cardNotFound)).toHaveAttribute(
+        "role",
+        "alert",
+      );
+      expect(screen.queryByText(UI_COPY.ambiguousCard)).toBeNull();
+      expect(router.push).not.toHaveBeenCalled();
+    },
+  );
+
+  test("a navigation that lands on the edited card shows that card's miss again", () => {
+    const { rerender } = render(
+      <Page card="asdfqwer" price="5">
+        <ResultView evaluation={{ status: "not_found" }} />
+      </Page>,
+    );
+    fireEvent.change(cardInput(), { target: { value: "qwerasdf" } });
+    expect(screen.queryByText(UI_COPY.cardNotFound)).toBeNull();
+    rerender(
+      <Page card="qwerasdf" price="5">
+        <ResultView evaluation={{ status: "not_found" }} />
+      </Page>,
+    );
+    expect(cardInput()).toHaveValue("qwerasdf");
+    expect(cardInput()).toHaveAccessibleDescription(UI_COPY.cardNotFound);
+  });
+});
+
+describe("an ambiguous miss offers suggestions on focus (ADV-7)", () => {
+  const fetchMock = vi.fn<typeof fetch>();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(
+      Response.json({ data: ["Jace Beleren", "Jace, the Mind Sculptor"] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return () => vi.unstubAllGlobals();
+  });
+
+  test("focusing the card field fetches suggestions for the typed name and lists them", async () => {
+    render(
+      <Page card="jace" price="5">
+        <ResultView evaluation={{ status: "ambiguous" }} />
+      </Page>,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.focus(cardInput());
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "jace",
+      "Jace Beleren",
+      "Jace, the Mind Sculptor",
+    ]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "/api/cards/autocomplete?q=jace",
+    );
+    fireEvent.mouseDown(options[2]);
+    fireEvent.click(options[2]);
+    expect(cardInput()).toHaveValue("Jace, the Mind Sculptor");
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      resultHref("Jace, the Mind Sculptor", "5"),
+    );
+  });
+
+  test.each<[string, ReactNode]>([
+    [
+      "a not_found miss",
+      <ResultView key="m" evaluation={{ status: "not_found" }} />,
+    ],
+    [
+      "a result",
+      <p key="p" className="mm-rec-panel">
+        panel
+      </p>,
+    ],
+  ])("%s: focus fetches nothing", async (_name, slot) => {
+    render(
+      <Page card="jace" price="5">
+        {slot}
+      </Page>,
+    );
+    fireEvent.focus(cardInput());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
   });
 });

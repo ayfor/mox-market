@@ -1,5 +1,6 @@
 // T9 (AC-6, AC-7, AC-8; story Verification): the miss mapping as a pure
-// function. Only Scryfall's own 404 is a miss; every other failure is
+// function. Only Scryfall's own 404 (code "not_found") is a miss; every
+// other failure, a 404 Scryfall did not send included (ADV-3), is
 // unavailable, so it is never reported as not found.
 import { ScryfallApiError } from "@/lib/scryfall";
 import { ThrottleBacklogError } from "@/lib/throttle";
@@ -23,6 +24,25 @@ describe("classifyLookupError (T9)", () => {
   ])("404 with %s → not_found", (_name, type) => {
     expect(classifyLookupError(apiError(404, type))).toBe("not_found");
   });
+
+  test.each<[string, string]>([
+    ['"unknown" (an HTML, empty or JSON-null body)', "unknown"],
+    ['"bad_request"', "bad_request"],
+    ['"Not_Found" (case differs)', "Not_Found"],
+    ["empty", ""],
+  ])(
+    "a 404 whose code is %s → unavailable, even with type ambiguous (ADV-3)",
+    (_name, code) => {
+      expect(
+        classifyLookupError(new ScryfallApiError(404, code, "Not Found")),
+      ).toBe("unavailable");
+      expect(
+        classifyLookupError(
+          new ScryfallApiError(404, code, "Not Found", "ambiguous"),
+        ),
+      ).toBe("unavailable");
+    },
+  );
 
   test.each([400, 403, 410, 429, 500, 502, 503])(
     "a %i ScryfallApiError → unavailable, even with type ambiguous",

@@ -20,6 +20,9 @@ const STORY_TSX = [
   "src/app/[card]/lookup-miss.tsx",
   "src/app/[card]/result-view.tsx",
   "src/app/[card]/page.tsx",
+  // ADV-4, ADV-7: the field wrapper moved out of lookup-miss.tsx.
+  "src/components/result-field.tsx",
+  "src/components/card-combobox.tsx",
 ];
 
 /** Attributes a user reads or hears. */
