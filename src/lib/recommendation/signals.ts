@@ -24,6 +24,7 @@ const PERCENT = 100;
 
 const ZERO = BigInt(0);
 const ONE = BigInt(1);
+const TWO = BigInt(2);
 
 /**
  * One point of the slope series. Its price is exactly num / den cents: den
@@ -41,11 +42,6 @@ export interface ExactRatio {
   readonly num: bigint;
   readonly den: bigint;
 }
-
-const sum = (values: readonly number[]) =>
-  values.reduce((total, value) => total + value, 0);
-
-const mean = (values: readonly number[]) => sum(values) / values.length;
 
 const absBig = (value: bigint) => (value < ZERO ? -value : value);
 
@@ -70,11 +66,42 @@ function lowerMedian(prices: readonly number[]): number {
   return sorted[(sorted.length - 1) >> 1];
 }
 
-/** Population standard deviation over the mean. */
+/**
+ * Σp and Σp² as exact integers. A history price is any positive safe
+ * integer, so a 30-day sum can pass 2^53 and a double would drop cents
+ * (CODEX.1); every price statistic is taken from these sums.
+ */
+function exactSums(prices: readonly number[]): { s: bigint; ss: bigint } {
+  let s = ZERO;
+  let ss = ZERO;
+  for (const price of prices) {
+    const p = BigInt(price);
+    s += p;
+    ss += p * p;
+  }
+  return { s, ss };
+}
+
+/**
+ * Math.round(Σp / n) without a rounded sum (CODEX.1): for a positive mean,
+ * floor(Σp / n + 1/2) = floor((2Σp + n) / 2n). The result lies between the
+ * lowest and highest price, so it is a safe integer.
+ */
+function roundedMeanCents(prices: readonly number[]): number {
+  const n = BigInt(prices.length);
+  return Number((TWO * exactSums(prices).s + n) / (TWO * n));
+}
+
+/**
+ * Population standard deviation over the mean, as
+ * sqrt(nΣp² − (Σp)²) / Σp: the radicand is an exact integer, so equal prices
+ * give exactly 0 at any safe price and the result is within a few ulps of the
+ * true ratio (CODEX.1).
+ */
 function coefficientOfVariation(prices: readonly number[]): number {
-  const mu = mean(prices);
-  const variance = mean(prices.map((price) => (price - mu) ** 2));
-  return Math.sqrt(variance) / mu;
+  const n = BigInt(prices.length);
+  const { s, ss } = exactSums(prices);
+  return Math.sqrt(Number(n * ss - s * s)) / Number(s);
 }
 
 /**
@@ -182,7 +209,7 @@ export function computeHistorySignals(
   const low = hasRange ? Math.min(...prices) : 0;
   const high = hasRange ? Math.max(...prices) : 0;
   const range30dCents: PriceRange | null = hasRange
-    ? { low, high, avg: Math.round(mean(prices)) }
+    ? { low, high, avg: roundedMeanCents(prices) }
     : null;
   const rangePosition =
     hasRange && high !== low

@@ -572,6 +572,134 @@ describe("an exactly zero slope is +0, not a float residue (ADV-2)", () => {
   });
 });
 
+describe("prices near 2^53 keep whole cents in avg and volatility (T31, CODEX.1)", () => {
+  // Any positive safe integer is a usable history price, so a 30-day sum can
+  // pass 2^53. Before CODEX.1 the sum was a double: 14 × 9_007_199_254_740_990
+  // gave avg 9_007_199_254_740_991 and a nonzero volatility.
+  const B = 9_007_199_254_740_980;
+  const ZERO = BigInt(0);
+  const ONE = BigInt(1);
+  const TWO = BigInt(2);
+
+  /** A direct call that stays out of the 1e-12 residue sweep (T13). */
+  const signalsOf = (values: readonly number[]) =>
+    computeRecommendation(fixtureInput(8000), fixtureMarket(8000, values))
+      .signals;
+
+  /** Math.round(Σp / n) as quotient plus a half-up remainder test. */
+  function referenceAvg(values: readonly number[]): number {
+    const n = BigInt(values.length);
+    const total = values.reduce((t, v) => t + BigInt(v), ZERO);
+    const q = total / n;
+    return Number(TWO * (total % n) >= n ? q + ONE : q);
+  }
+
+  /** Integer square root by Newton's method from above. */
+  function isqrt(v: bigint): bigint {
+    if (v < TWO) return v;
+    let x = BigInt(Math.ceil(Math.sqrt(Number(v)) * (1 + 1e-9))) + ONE;
+    for (;;) {
+      const y = (x + v / x) / TWO;
+      if (y >= x) return x;
+      x = y;
+    }
+  }
+
+  /**
+   * σ / μ from centred integer deviations, to 36 digits:
+   * Σ(n·p − Σp)² = n · (nΣp² − (Σp)²), so σ / μ = sqrt(Σ(n·p − Σp)² / n) / Σp.
+   */
+  function referenceVolatility(values: readonly number[]): number {
+    const n = BigInt(values.length);
+    const total = values.reduce((t, v) => t + BigInt(v), ZERO);
+    const centred = values.reduce((t, v) => {
+      const d = n * BigInt(v) - total;
+      return t + d * d;
+    }, ZERO);
+    const scale = BigInt(10) ** BigInt(36);
+    const root = isqrt((centred / n) * scale * scale);
+    return (
+      Number(root / total) / 1e36 + Number(root % total) / Number(total) / 1e36
+    );
+  }
+
+  test("the reviewer's case: 14 × 9_007_199_254_740_990 gives that avg and volatility +0", () => {
+    const price = 9_007_199_254_740_990;
+    const s = run(8000, fixtureMarket(8000, flat(14, price))).signals;
+    expect(s.range30dCents).toEqual({ low: price, high: price, avg: price });
+    expect(s.median30dCents).toBe(price);
+    expect(Object.is(s.volatility30d, 0)).toBe(true);
+    expect(Object.is(s.slope30dPct, 0)).toBe(true);
+    expect(s.trendDirection).toBe("flat");
+  });
+
+  test("30 × Number.MAX_SAFE_INTEGER: avg is MAX_SAFE_INTEGER and volatility +0", () => {
+    const price = Number.MAX_SAFE_INTEGER;
+    const s = run(8000, fixtureMarket(8000, flat(30, price))).signals;
+    expect(s.range30dCents).toEqual({ low: price, high: price, avg: price });
+    expect(Object.is(s.volatility30d, 0)).toBe(true);
+  });
+
+  test.each([
+    ["8 × B, 6 × (B + 1): mean B + 3/7 rounds down", 8, 6, B],
+    ["7 × B, 7 × (B + 1): mean B + 1/2 rounds up (Math.round)", 7, 7, B + 1],
+    ["6 × B, 8 × (B + 1): mean B + 4/7 rounds up", 6, 8, B + 1],
+  ] as const)("%s", (_label, lows, highs, avg) => {
+    const values = [...flat(lows, B), ...flat(highs, B + 1)];
+    const s = signalsOf(values);
+    expect(s.range30dCents).toEqual({ low: B, high: B + 1, avg });
+    expect(referenceAvg(values)).toBe(avg);
+  });
+
+  test("7 × B and 7 × (B + 1): volatility is 1 / (2B + 1) to 1e-14, not a float artefact", () => {
+    const values = [...flat(7, B), ...flat(7, B + 1)];
+    const v = signalsOf(values).volatility30d;
+    // σ = 1/2 and μ = B + 1/2 exactly, so σ / μ = 1 / (2B + 1).
+    const expected = 1 / 18_014_398_509_481_961;
+    expect(v).not.toBeNull();
+    expect(Math.abs((v as number) / expected - 1)).toBeLessThan(1e-14);
+    expect(
+      Math.abs((v as number) / referenceVolatility(values) - 1),
+    ).toBeLessThan(1e-14);
+  });
+
+  /** A positive safe integer from two seeded draws: 1 + hi·2^31 + lo ≤ 2^53 − 2^31. */
+  const safePrice = (next: (below: number) => number) =>
+    1 + next(2 ** 22 - 1) * 2 ** 31 + next(2 ** 31);
+
+  test("400 seeded histories up to MAX_SAFE_INTEGER match exact references", () => {
+    const next = seeded(53);
+    for (let t = 0; t < 400; t += 1) {
+      const count = 14 + next(17);
+      // Even t: prices within 1000 cents of MAX_SAFE_INTEGER, where a double
+      // sum drops cents. Odd t: prices spread over the whole safe range.
+      const values = Array.from({ length: count }, () =>
+        t % 2 === 0 ? Number.MAX_SAFE_INTEGER - next(1000) : safePrice(next),
+      );
+      const label = values.join(",");
+      expect(values.every(Number.isSafeInteger), label).toBe(true);
+      const s = signalsOf(values);
+      expect(s.range30dCents?.avg, label).toBe(referenceAvg(values));
+      const v = s.volatility30d as number;
+      const ref = referenceVolatility(values);
+      if (ref === 0) expect(Object.is(v, 0), label).toBe(true);
+      else expect(Math.abs(v / ref - 1), label).toBeLessThan(1e-14);
+    }
+  });
+
+  test("equal prices anywhere in the safe range give volatility +0 and that avg", () => {
+    const next = seeded(9007);
+    for (let t = 0; t < 200; t += 1) {
+      const price = t === 0 ? Number.MAX_SAFE_INTEGER : safePrice(next);
+      expect(Number.isSafeInteger(price), String(price)).toBe(true);
+      const count = 14 + next(17);
+      const s = signalsOf(flat(count, price));
+      expect(s.range30dCents?.avg, `${count} × ${price}`).toBe(price);
+      expect(Object.is(s.volatility30d, 0), `${count} × ${price}`).toBe(true);
+    }
+  });
+});
+
 describe("no −0 and no float residue (T13, ADV-2)", () => {
   test("no numeric signal on any fixture in this file or T1 is −0 or a nonzero value under 1e-12", () => {
     const all = [
