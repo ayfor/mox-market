@@ -1,5 +1,10 @@
-// T3, T4 (AC-2): F1's eleven params at design values, and PARAMS_VERSION.
+// T3, T4 (S1.1 AC-2): F1's eleven params at design values, and PARAMS_VERSION.
+// S1.3 T11 (AC-4) pins values and version in one inline snapshot; S1.3 T13
+// checks each param's JSDoc.
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import ts from "typescript";
 import { describe, expect, test } from "vitest";
 import {
   canonicalJson,
@@ -88,8 +93,104 @@ describe("PARAMS_VERSION (T4)", () => {
       '{"a":{"c":null,"d":[{"x":2,"y":1}]},"b":1}',
     );
   });
+});
 
-  test("pins today's value (a param change shows up here as a diff, F1 W2)", () => {
-    expect(PARAMS_VERSION).toMatchInlineSnapshot(`"46ec1cd7"`);
+describe("params guardrail (S1.3 T11, AC-4; C1.58)", () => {
+  // Values and version together, so the pin is not tautological: any value
+  // change fails here unless the same change updates this snapshot, and CI
+  // never writes snapshots (tests/contract/ci-workflow.test.ts). A change
+  // still needs a plan-doc deviation and Josh's ruling (AGENTS.md).
+  test("RECOMMENDATION_PARAMS and PARAMS_VERSION match the inline snapshot", () => {
+    expect({ PARAMS_VERSION, RECOMMENDATION_PARAMS }).toMatchInlineSnapshot(`
+      {
+        "PARAMS_VERSION": "46ec1cd7",
+        "RECOMMENDATION_PARAMS": {
+          "buyThresholdAsymmetry": 0.6,
+          "fairBandPct": 5,
+          "highConfidenceSnapshotCount": 28,
+          "lowConfidenceSnapshotCount": 14,
+          "minSnapshotsForRange": 14,
+          "minSnapshotsForTrend": 7,
+          "minSnapshotsForVerdict": 7,
+          "minSnapshotsForVolatility": 14,
+          "shortSlopeDays": 7,
+          "trendThresholdPct": 0.5,
+          "windowDays": 30,
+        },
+      }
+    `);
+  });
+});
+
+// --- S1.3 T13: every param documents its meaning, unit and rationale --------
+interface FieldDocs {
+  readonly name: string;
+  readonly doc: string | null;
+}
+
+/** Each property of `interface <name>` with its JSDoc text, read from the AST. */
+function interfaceFieldDocs(
+  file: string,
+  source: string,
+  name: string,
+): FieldDocs[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const decl = sf.statements.find(
+    (s): s is ts.InterfaceDeclaration =>
+      ts.isInterfaceDeclaration(s) && s.name.text === name,
+  );
+  if (!decl) throw new Error(`interface ${name} not found in ${file}`);
+  return decl.members.filter(ts.isPropertySignature).map((member) => {
+    const docs = ts
+      .getJSDocCommentsAndTags(member)
+      .filter(ts.isJSDoc)
+      .map((d) => d.getText(sf));
+    return {
+      name: member.name.getText(sf),
+      doc: docs.length > 0 ? docs.join("\n") : null,
+    };
+  });
+}
+
+/** Fields whose JSDoc is missing, or lacks "Unit:" or "Why:". */
+function undocumented(fields: FieldDocs[]): string[] {
+  return fields.flatMap(({ name, doc }) => {
+    if (doc === null) return [`${name}: no JSDoc`];
+    return ["Unit:", "Why:"]
+      .filter((label) => !doc.includes(label))
+      .map((label) => `${name}: no ${label}`);
+  });
+}
+
+describe("param docs (S1.3 T13; S1.3d9)", () => {
+  const PARAMS_SOURCE = readFileSync(path.join(__dirname, "params.ts"), "utf8");
+
+  test("self-test: flags an undocumented field and one missing Why:", () => {
+    const sample = [
+      "export interface Sample {",
+      "  /** Meaning. Unit: percent. Why: F1. */",
+      "  readonly good: number;",
+      "  readonly bare: number;",
+      "  // Unit: and Why: in a line comment do not count.",
+      "  readonly lineComment: number;",
+      "  /** Meaning. Unit: days. */",
+      "  readonly noWhy: number;",
+      "}",
+    ].join("\n");
+    expect(
+      undocumented(interfaceFieldDocs("sample.ts", sample, "Sample")),
+    ).toEqual(["bare: no JSDoc", "lineComment: no JSDoc", "noWhy: no Why:"]);
+  });
+
+  test("every field of RecommendationParams has Unit: and Why:", () => {
+    const fields = interfaceFieldDocs(
+      "params.ts",
+      PARAMS_SOURCE,
+      "RecommendationParams",
+    );
+    expect(fields.map((f) => f.name).sort()).toEqual(
+      Object.keys(RECOMMENDATION_PARAMS).sort(),
+    );
+    expect(undocumented(fields)).toEqual([]);
   });
 });

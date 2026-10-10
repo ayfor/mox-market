@@ -78,7 +78,10 @@ export interface RecommendationSignals {
 export interface Recommendation {
   kind: RecommendationKind;
   confidence: Confidence;
-  /** Observed facts only; the forbidden-word lint lands with S1.3 (C1.48 = B). */
+  /**
+   * One sentence of observed facts, built only from copy.ts templates; the
+   * forbidden-phrase lint covers every reason (S1.3, AC-1, AC-2).
+   */
   reason: string;
   signals: RecommendationSignals;
 }

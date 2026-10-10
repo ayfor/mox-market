@@ -117,6 +117,19 @@ describe("featureOf", () => {
     ["src/test/environment.test.tsx", "F1 · Recommendation Engine"],
     ["tests/contract/readme.test.ts", "F1 · Recommendation Engine"],
     ["tests/helpers/local-db.test.ts", "F1 · Recommendation Engine"],
+    // S1.3d10 (T22): the copy lock files under F1, the UI copy under F2.
+    ["src/lib/recommendation/copy.test.ts", "F1 · Recommendation Engine"],
+    ["src/lib/recommendation/copy.test-d.ts", "F1 · Recommendation Engine"],
+    [
+      "src/lib/recommendation/forbidden-phrases.test.ts",
+      "F1 · Recommendation Engine",
+    ],
+    [
+      "src/lib/recommendation/reason-source.test.ts",
+      "F1 · Recommendation Engine",
+    ],
+    ["tests/contract/copy-lock.test.ts", "F1 · Recommendation Engine"],
+    ["src/lib/recommendation/ui-copy.test.ts", "F2 · Live Evaluation"],
   ])("%s → %s", (file, feature) => {
     expect(featureOf(file)).toBe(feature);
   });

@@ -185,24 +185,13 @@ export function findForbiddenClaims(text: string): string[] {
   return findings;
 }
 
-/** The Standards page's forbidden reason words (AGENTS.md Conventions). */
-export const FORBIDDEN_REASON_WORDS = [
-  "likely",
-  "expect",
-  "expected",
-  "will rise",
-  "will fall",
-  "will drop",
-  "will climb",
-  "should",
-  "probably",
-  "forecast",
-  "predict",
-] as const;
-
-/** Every forbidden reason word in `text` as a whole word, case-insensitive. */
-export function findForbiddenReasonWords(text: string): string[] {
-  return FORBIDDEN_REASON_WORDS.filter((word) =>
-    new RegExp(`\\b${word.replace(/ /g, "\\s+")}\\b`, "i").test(text),
-  );
-}
+/**
+ * The Standards page's forbidden reason words (AGENTS.md Conventions): S2.2's
+ * names for the one list in src/lib/recommendation/forbidden-phrases.ts
+ * (S1.3d4). Substring matching after normalisation, so "unexpectedly" and
+ * "predictable" are flagged too.
+ */
+export {
+  findForbiddenPhrases as findForbiddenReasonWords,
+  FORBIDDEN_PHRASES as FORBIDDEN_REASON_WORDS,
+} from "../../src/lib/recommendation/forbidden-phrases";

@@ -1,4 +1,5 @@
 // T2 (AC-3), T3 (AC-4), T4 (AC-7): the legal copy module equals the spec.
+// S1.3 T16 (AC-5): the source label, and the shared forbidden-phrase lint.
 // Strict equality, never a snapshot (C2-B.1). The spec is read at test time,
 // scoped to the footer and disclaimer headings; the affiliate blockquote is
 // never read here (AC-3).
@@ -20,6 +21,7 @@ import {
   FAN_CONTENT_POLICY_LINK,
   RECOMMENDATION_DISCLAIMER,
   SITE_FOOTER_LINES,
+  SOURCE_LABEL,
 } from "./legal";
 
 const spec = readSpec();
@@ -36,7 +38,11 @@ function exportedStrings(value: unknown): string[] {
   return [];
 }
 const allStrings = exportedStrings(legal);
-const fullStrings = [...SITE_FOOTER_LINES, RECOMMENDATION_DISCLAIMER];
+const fullStrings = [
+  ...SITE_FOOTER_LINES,
+  RECOMMENDATION_DISCLAIMER,
+  SOURCE_LABEL,
+];
 
 describe("legal copy equals the spec (T2)", () => {
   test("SITE_FOOTER_LINES has three lines", () => {
@@ -169,10 +175,26 @@ describe("forbidden claims (T4)", () => {
     for (const s of allStrings) expect(findForbiddenReasonWords(s)).toEqual([]);
   });
 
-  test("the reason-word check matches whole words only", () => {
+  test("the shared lint flags 'unexpectedly' and 'predictable' (S1.3d4: substring after normalisation)", () => {
     expect(findForbiddenReasonWords("Prices will rise")).toEqual(["will rise"]);
     expect(findForbiddenReasonWords("You SHOULD buy")).toEqual(["should"]);
-    expect(findForbiddenReasonWords("unexpectedly")).toEqual([]);
-    expect(findForbiddenReasonWords("predictable")).toEqual([]);
+    expect(findForbiddenReasonWords("unexpectedly")).toEqual([
+      "expect",
+      "expected",
+    ]);
+    expect(findForbiddenReasonWords("predictable")).toEqual(["predict"]);
+  });
+});
+
+describe("source label (S1.3 T16, AC-5; S1.3d5)", () => {
+  test("SOURCE_LABEL is F1's source label, one string everywhere (C1.02)", () => {
+    expect(SOURCE_LABEL).toBe(
+      "Market price via Scryfall (TCGplayer), updated daily",
+    );
+  });
+
+  test("it makes no forbidden claim and holds no forbidden phrase", () => {
+    expect(findForbiddenClaims(SOURCE_LABEL)).toEqual([]);
+    expect(findForbiddenReasonWords(SOURCE_LABEL)).toEqual([]);
   });
 });
