@@ -122,4 +122,23 @@ describe("CI never writes snapshots (S1.3 T12, AC-4)", () => {
     expect(vitestConfig).not.toMatch(/\bupdate\s*:/);
     expect(vitestConfig).not.toMatch(UPDATE_FLAG);
   });
+
+  test("the workflow and package.json never set UPDATE_SNAPSHOT (ADV-1)", () => {
+    expect(ci).not.toMatch(/UPDATE_SNAPSHOT/);
+    expect(JSON.stringify(pkg)).not.toMatch(/UPDATE_SNAPSHOT/);
+  });
+
+  test("vitest.config.mts never loads UPDATE_SNAPSHOT from a .env file and drops it in CI (ADV-1)", () => {
+    expect(vitestConfig).toMatch(
+      /const SNAPSHOT_UPDATE_VAR = "UPDATE_SNAPSHOT";/,
+    );
+    expect(vitestConfig).toMatch(
+      /if \(key === SNAPSHOT_UPDATE_VAR\) continue;\s*\n\s*if \(process\.env\[key\] === undefined\)/,
+    );
+    expect(vitestConfig).toMatch(
+      /if \(IN_CI\) delete process\.env\[SNAPSHOT_UPDATE_VAR\];/,
+    );
+    // Only the guard names it: no other line sets or reads it.
+    expect(vitestConfig.match(/UPDATE_SNAPSHOT/g)).toHaveLength(1);
+  });
 });

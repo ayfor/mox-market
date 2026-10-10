@@ -61,18 +61,32 @@ export type TemplateValues<T extends string> = string extends T
   : Readonly<Record<Placeholders<T>, string | number>>;
 
 /**
- * Replaces each `{key}` placeholder with its value. A key missing at run time
- * leaves its placeholder in place rather than throwing, so a render never
- * fails on copy (S1.3d7).
+ * The text a value fills a placeholder with, or null when it would print
+ * badly: a finite number, or a string with visible text (trimmed). undefined,
+ * null, a blank string, NaN, Infinity and every other type are unfillable
+ * (ADV-8).
+ */
+function fillText(value: unknown): string | null {
+  if (typeof value === "number")
+    return Number.isFinite(value) ? `${value}` : null;
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return text === "" ? null : text;
+}
+
+/**
+ * Replaces each `{key}` placeholder with its value. A key missing at run time,
+ * or a value that would print badly (see fillText), leaves its placeholder in
+ * place rather than throwing, so a render never fails on copy and never shows
+ * "undefined", "null" or "NaN" (S1.3d7, ADV-8).
  */
 export function fillTemplate<T extends string>(
   template: T,
   values: TemplateValues<T>,
 ): string {
-  const lookup = values as Readonly<Record<string, string | number>>;
-  return template.replace(/\{(\w+)\}/g, (placeholder, key: string) =>
-    Object.prototype.hasOwnProperty.call(lookup, key)
-      ? String(lookup[key])
-      : placeholder,
-  );
+  const lookup = values as Readonly<Record<string, unknown>>;
+  return template.replace(/\{(\w+)\}/g, (placeholder, key: string) => {
+    if (!Object.prototype.hasOwnProperty.call(lookup, key)) return placeholder;
+    return fillText(lookup[key]) ?? placeholder;
+  });
 }

@@ -2,13 +2,14 @@
 // table as frozen constants, the Tier-1 reason grammar, no copy in the engine's
 // logic modules, and every Tier-1 reason pinned. Strings are compared with
 // literals written here, never with a snapshot (as S2.2's legal test).
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { describe, expect, test } from "vitest";
 import {
   CLAUSE_SEPARATOR,
   FALLBACK_NOTICE,
+  fillTemplate,
   REASON_COPY,
   SENTENCE_END,
   SHOCK_TOOLTIP,
@@ -25,6 +26,7 @@ import {
 import { RECOMMENDATION_PARAMS } from "./params";
 import { buildReason } from "./reason";
 import type { Confidence, RecommendationKind } from "./types";
+import { UI_COPY } from "./ui-copy";
 
 const ENGINE_DIR = path.resolve(__dirname);
 
@@ -143,15 +145,37 @@ describe("Tier-1 reason grammar (T3)", () => {
 });
 
 // --- T4: no copy-like literal in the engine's logic modules (S1.3d6) --------
-/** Modules that assemble or carry reasons; validate.ts and errors.ts hold developer messages. */
-const LOGIC_MODULES = [
-  "engine.ts",
-  "reason.ts",
-  "bands.ts",
-  "signals.ts",
-  "window.ts",
-  "types.ts",
-];
+/**
+ * Modules exempt from the scan (ADV-6): the copy modules and the phrase list
+ * hold copy by design, fixtures.ts holds test data (S1.3d12), validate.ts and
+ * errors.ts hold developer-facing messages (S1.3d6), and params.ts and
+ * limits.ts hold numbers and their docs. Every other non-test module under
+ * src/lib/recommendation is scanned, so a new one (an S3.1 tiered engine, a
+ * helper S2.1 adds) fails closed.
+ */
+const COPY_SCAN_EXEMPT = new Set([
+  "copy.ts",
+  "ui-copy.ts",
+  "forbidden-phrases.ts",
+  "fixtures.ts",
+  "validate.ts",
+  "errors.ts",
+  "params.ts",
+  "limits.ts",
+]);
+
+/** Every non-test .ts or .tsx file under src/lib/recommendation, relative. */
+function engineModules(dir: string = ENGINE_DIR): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return engineModules(full);
+    return /\.tsx?$/.test(entry.name) && !/\.test(-d)?\.tsx?$/.test(entry.name)
+      ? [path.relative(ENGINE_DIR, full).split(path.sep).join("/")]
+      : [];
+  });
+}
+
+const LOGIC_MODULES = engineModules().filter((m) => !COPY_SCAN_EXEMPT.has(m));
 
 /** An import or export specifier, `import("…")` or `import type("…")`. */
 function isModuleSpecifier(node: ts.Node): boolean {
@@ -217,6 +241,30 @@ describe("the engine's logic modules hold no copy (T4)", () => {
       'sample.ts:3 "only "',
       'sample.ts:4 " "',
       'sample.ts:12 "Done."',
+    ]);
+  });
+
+  test("scans every non-test engine module except the named exemptions, each of which exists (ADV-6)", () => {
+    const all = engineModules();
+    for (const name of COPY_SCAN_EXEMPT) expect(all, name).toContain(name);
+    expect(LOGIC_MODULES).toEqual(
+      expect.arrayContaining([
+        "engine.ts",
+        "reason.ts",
+        "bands.ts",
+        "signals.ts",
+        "window.ts",
+        "types.ts",
+      ]),
+    );
+    expect(LOGIC_MODULES.length + COPY_SCAN_EXEMPT.size).toBe(all.length);
+  });
+
+  test("self-test: a new module that builds a reason inline is flagged (ADV-6)", () => {
+    const tiered =
+      "export const t = (x: number) => `${x}% below market; 30-day trend is falling`;";
+    expect(copyLiterals("tiered.ts", tiered)).toEqual([
+      'tiered.ts:1 "% below market; 30-day trend is falling"',
     ]);
   });
 
@@ -369,5 +417,75 @@ describe("the fair row carries both frames (T20, AC-6)", () => {
     const below = engineReason(8999, 10000, 10);
     expect(below.kind).toBe("fair");
     expect(below.reason).toBe("10% below market.");
+  });
+});
+
+// --- ADV-8: a bad value keeps its placeholder, never prints ------------------
+describe("fillTemplate never prints a bad value (ADV-8; S1.3d7)", () => {
+  /** Values a typed caller cannot pass but an untyped lookup can. */
+  const BAD: [string, unknown][] = [
+    ["undefined", undefined],
+    ["null", null],
+    ["an empty string", ""],
+    ["a blank string", "   "],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["-Infinity", Number.NEGATIVE_INFINITY],
+    ["a boolean", true],
+    ["an object", { finish: "foil" }],
+    ["an array", ["Foil"]],
+  ];
+  const fill = (template: string, values: Record<string, unknown>) =>
+    fillTemplate(template, values as Record<string, string | number>);
+
+  test("the cases the review planted", () => {
+    expect(fill(FALLBACK_NOTICE, { finish: undefined })).toBe(
+      "This printing has no {finish} price — showing Normal pricing.",
+    );
+    expect(fill(UI_COPY.staleFlag, { hours: Number.NaN })).toBe(
+      "Over {hours} hours old",
+    );
+    expect(fill(REASON_COPY.below, { X: Number.NaN })).toBe(
+      "{X}% below market",
+    );
+    expect(fill(REASON_COPY.within, { X: null })).toBe("Within {X}% of market");
+    expect(fill(REASON_COPY.thinData, { n: "" })).toBe(
+      "only {n} price snapshots",
+    );
+  });
+
+  const TEMPLATES = [
+    ...Object.values(REASON_COPY),
+    FALLBACK_NOTICE,
+    SHOCK_TOOLTIP,
+    ...Object.values(UI_COPY),
+  ].filter((t) => /\{\w+\}/.test(t));
+
+  test.each(BAD)(
+    "%s keeps every placeholder and prints no undefined, null, NaN, Infinity, [object or double space",
+    (_name, bad) => {
+      expect(TEMPLATES.length).toBeGreaterThanOrEqual(12);
+      for (const template of TEMPLATES) {
+        const keys = [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+        const filled = fill(
+          template,
+          Object.fromEntries(keys.map((k) => [k, bad])),
+        );
+        expect(filled, template).toBe(template);
+        expect(filled).not.toMatch(/undefined|null|NaN|Infinity|\[object| {2}/);
+      }
+    },
+  );
+
+  test("finite numbers, zero included, and visible strings fill; strings are trimmed", () => {
+    expect(fill(REASON_COPY.within, { X: 0 })).toBe("Within 0% of market");
+    expect(fill(REASON_COPY.within, { X: -0 })).toBe("Within 0% of market");
+    expect(fill(REASON_COPY.below, { X: 9 })).toBe("9% below market");
+    expect(fill(FALLBACK_NOTICE, { finish: " Foil " })).toBe(
+      "This printing has no Foil price — showing Normal pricing.",
+    );
+    expect(fill(UI_COPY.historyLine, { N: 12, relativeTime: undefined })).toBe(
+      "Price history: 12 snapshots, newest {relativeTime}",
+    );
   });
 });

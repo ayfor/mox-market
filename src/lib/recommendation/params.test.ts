@@ -95,7 +95,47 @@ describe("PARAMS_VERSION (T4)", () => {
   });
 });
 
+/**
+ * Whether this run is CI by the rule Vitest uses (std-env): CI set to
+ * anything but "false", or a CI provider's own variable (GitHub Actions').
+ */
+const inCI = (env: NodeJS.ProcessEnv) =>
+  (env.CI !== undefined && env.CI !== "" && env.CI !== "false") ||
+  Boolean(env.GITHUB_ACTIONS);
+
+/** Why a run may not check snapshots this way, or null (ADV-1). */
+function snapshotModeOffence(
+  env: NodeJS.ProcessEnv,
+  mode: string | undefined,
+): string | null {
+  if (!inCI(env) || mode === "none") return null;
+  return `CI runs must never write snapshots, but the update mode is ${JSON.stringify(mode)}`;
+}
+
 describe("params guardrail (S1.3 T11, AC-4; C1.58)", () => {
+  // ADV-1: Vitest turns any truthy UPDATE_SNAPSHOT (a shell, a workflow env
+  // or a .env file loaded by vitest.config.mts) or -u into "rewrite every
+  // snapshot", even in CI, and the snapshot below would then pass. This reads
+  // the mode the run actually has, so every route fails in CI.
+  test("self-test: in CI only the none mode passes", () => {
+    expect(snapshotModeOffence({ CI: "true" }, "none")).toBeNull();
+    expect(snapshotModeOffence({ GITHUB_ACTIONS: "true" }, "none")).toBeNull();
+    expect(snapshotModeOffence({ CI: "true" }, "all")).toMatch(/"all"/);
+    expect(snapshotModeOffence({ CI: "1" }, "new")).toMatch(/"new"/);
+    expect(snapshotModeOffence({ GITHUB_ACTIONS: "true" }, "all")).toMatch(
+      /"all"/,
+    );
+    expect(snapshotModeOffence({ CI: "true" }, undefined)).toMatch(/undefined/);
+    expect(snapshotModeOffence({}, "all")).toBeNull();
+    expect(snapshotModeOffence({ CI: "false" }, "new")).toBeNull();
+  });
+
+  test("a CI run never writes snapshots, whatever set the mode (ADV-1)", () => {
+    const mode = expect.getState().snapshotState?.snapshotUpdateState;
+    expect(mode).toMatch(/^(none|new|all)$/);
+    expect(snapshotModeOffence(process.env, mode)).toBeNull();
+  });
+
   // Values and version together, so the pin is not tautological: any value
   // change fails here unless the same change updates this snapshot, and CI
   // never writes snapshots (tests/contract/ci-workflow.test.ts). A change

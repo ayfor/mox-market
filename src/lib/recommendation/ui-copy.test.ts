@@ -68,6 +68,16 @@ describe("filled UI strings (T14)", () => {
     ).toBe("Price history: 12 snapshots, newest 3 hours ago");
   });
 
+  test("history line at one snapshot reads as F1 locks it, plural (ADV-9; open for Josh)", () => {
+    // F1's UI-strings table has no singular row, and a locked-copy change
+    // needs Josh's ruling (AGENTS.md). Pinned so the ruling, either way,
+    // changes this line on purpose. No caller renders it before F0 (S2.1
+    // pivot: an empty history reader).
+    expect(
+      fillTemplate(UI_COPY.historyLine, { N: 1, relativeTime: "2 hours ago" }),
+    ).toBe("Price history: 1 snapshots, newest 2 hours ago");
+  });
+
   test("stale flag", () => {
     expect(fillTemplate(UI_COPY.staleFlag, { hours: 36 })).toBe(
       "Over 36 hours old",
