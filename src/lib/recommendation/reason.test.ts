@@ -148,8 +148,12 @@ describe("extreme deltas (ADV-4, D8)", () => {
 describe("fillTemplate", () => {
   test("fills known placeholders and leaves unknown ones", () => {
     expect(fillTemplate("{X}% of {n}", { X: 9, n: 3 })).toBe("9% of 3");
-    expect(fillTemplate("{X} and {Y}", { X: 1 })).toBe("1 and {Y}");
-    expect(fillTemplate("{toString}", {})).toBe("{toString}");
+    // String-typed templates: a literal one would not compile without every
+    // key (S1.3d7), but at run time a missing key keeps its placeholder.
+    const partial: string = "{X} and {Y}";
+    const inherited: string = "{toString}";
+    expect(fillTemplate(partial, { X: 1 })).toBe("1 and {Y}");
+    expect(fillTemplate(inherited, {})).toBe("{toString}");
   });
 });
 

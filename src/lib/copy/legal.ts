@@ -1,10 +1,14 @@
-// Legal copy for ruling R6: the site footer and the recommendation disclaimer.
+// Legal copy for ruling R6: the site footer and the recommendation disclaimer,
+// plus F1's source label (S1.3d5).
 //
-// Verbatim from docs/specs/attribution-footer.md, never paraphrased (AGENTS.md
-// Legal text). legal.test.ts asserts each string equals its spec blockquote,
-// so change the spec (vault note first) and this file together. String
-// literals only: this module imports nothing and never loads markdown at
-// runtime (S2.2d2). The affiliate line ships at affiliate launch, not here.
+// The footer and disclaimer are verbatim from docs/specs/attribution-footer.md,
+// never paraphrased (AGENTS.md Legal text). legal.test.ts asserts each string
+// equals its spec blockquote, so change the spec (vault note first) and this
+// file together. The source label is not in the spec: legal.test.ts pins it to
+// F1's UI-strings table, one string everywhere (C1.02). String literals only:
+// this module imports nothing and never loads markdown at runtime (S2.2d2).
+// The forbidden-phrase lint covers every string here (S1.3, AC-5). The
+// affiliate line ships at affiliate launch, not here.
 
 /** The one link in the footer, in footer line 1. */
 export const FAN_CONTENT_POLICY_LINK = Object.freeze({
@@ -40,3 +44,7 @@ export const SITE_FOOTER_LINES: readonly [string, string, string] =
  */
 export const RECOMMENDATION_DISCLAIMER =
   "Recommendations are automated informational signals derived from third-party price data that updates daily. They are estimates, not personalized financial, investment, or purchasing advice, and accuracy is not guaranteed. You are responsible for your own purchase decisions.";
+
+/** The data footer's source line on the result page (F1 UI strings; C1.02). */
+export const SOURCE_LABEL =
+  "Market price via Scryfall (TCGplayer), updated daily";

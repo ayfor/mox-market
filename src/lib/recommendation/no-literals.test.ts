@@ -70,6 +70,9 @@ describe("no thresholds as literals in engine logic (T8)", () => {
       "types.ts",
       "validate.ts",
       "errors.ts",
+      // S1.3 T21: the UI copy and the forbidden-phrase list.
+      "ui-copy.ts",
+      "forbidden-phrases.ts",
     ]) {
       expect(files).toContain(name);
     }

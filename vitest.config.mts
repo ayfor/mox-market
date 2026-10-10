@@ -12,13 +12,27 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 // roots; tests/contract/test-discovery.int.test.ts fails on any test file that
 // no project collects (ADV.4).
 const TEST_ROOTS = "{src,prisma,scripts,tests}";
+
+// S1.3 ADV-1: Vitest rewrites every snapshot when this variable is truthy,
+// even in CI, which would let a params change pass the inline-snapshot
+// guardrail. A .env file never sets it, and a CI run drops it, so CI never
+// writes a snapshot; src/lib/recommendation/params.test.ts also fails any CI
+// run whose update mode is not "none", whatever set it.
+const SNAPSHOT_UPDATE_VAR = "UPDATE_SNAPSHOT";
+const ciValue = process.env.CI;
+const IN_CI =
+  (ciValue !== undefined && ciValue !== "" && ciValue !== "false") ||
+  Boolean(process.env.GITHUB_ACTIONS);
+
 export default defineConfig(({ mode }) => {
   // Vitest does not load .env. Load every variable (the "" prefix opts out of
   // Vite's VITE_-only filter) without overwriting anything already exported.
   const env = loadEnv(mode, root, "");
   for (const [key, value] of Object.entries(env)) {
+    if (key === SNAPSHOT_UPDATE_VAR) continue;
     if (process.env[key] === undefined) process.env[key] = value;
   }
+  if (IN_CI) delete process.env[SNAPSHOT_UPDATE_VAR];
 
   const shared = {
     plugins: [react()],
