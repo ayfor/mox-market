@@ -23,8 +23,22 @@ export const AUTOCOMPLETE_DEBOUNCE_MS = 150;
 /** The autocomplete route's CDN cache lifetime, one day (C1.30). */
 export const AUTOCOMPLETE_CACHE_SECONDS = 86_400;
 
-/** Each Scryfall request aborts after this long (S2.1d21). */
+/** Each Scryfall request aborts after this long, queue wait included (S2.1d21, ADV-1). */
 export const SCRYFALL_TIMEOUT_MS = 8_000;
+
+/**
+ * A Scryfall request is refused at once when its throttle slot is further
+ * away than this, leaving at least half of SCRYFALL_TIMEOUT_MS for the fetch
+ * (ADV-1).
+ */
+export const SCRYFALL_MAX_QUEUE_MS = 4_000;
+
+/**
+ * Autocomplete is refused (the route answers 502) when the throttle queue is
+ * deeper than this, so a flood of suggestions never crowds out result-page
+ * lookups (ADV-1).
+ */
+export const AUTOCOMPLETE_MAX_QUEUE_MS = 1_000;
 
 /** getAllPrintings stops with an error past this many pages (S2.1d7). */
 export const MAX_PRINT_PAGES = 20;

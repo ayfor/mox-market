@@ -144,3 +144,76 @@ describe("pending state (T17, AC-8)", () => {
     }
   });
 });
+
+describe("submits while a result loads (ADV-8)", () => {
+  /** page.tsx's shape: the form is not keyed, its initial values follow the URL. */
+  function UrlPage({ price, paramsKey }: { price: string; paramsKey: string }) {
+    return (
+      <ResultNavigationProvider>
+        <EntryForm initialCard="Esper Sentinel" initialPrice={price} />
+        <ResultSlot>
+          <Suspense key={paramsKey} fallback={<PanelSkeleton />}>
+            <BuyPanel reason={paramsKey} />
+          </Suspense>
+        </ResultSlot>
+      </ResultNavigationProvider>
+    );
+  }
+
+  const priceField = () => screen.getByRole("textbox", { name: "Your price" });
+  const evaluate = () => screen.getByRole("button", { name: "Evaluate" });
+  const setPrice = (value: string) =>
+    fireEvent.change(priceField(), { target: { value } });
+  const submitForm = (container: HTMLElement) =>
+    act(async () => {
+      fireEvent.submit(container.querySelector("form")!);
+    });
+
+  test("a different query while pending supersedes it; Evaluate is aria-busy meanwhile", async () => {
+    router.push.mockImplementation(() => new Promise(() => {}));
+    const { container } = render(<UrlPage price="54.00" paramsKey="a" />);
+    expect(evaluate()).not.toHaveAttribute("aria-busy");
+    setPrice("65.00");
+    await submitForm(container);
+    expect(evaluate()).toHaveAttribute("aria-busy", "true");
+    setPrice("70.00");
+    await submitForm(container);
+    expect(router.push.mock.calls.map(([href]) => href)).toEqual([
+      "/Esper%20Sentinel?price=65.00",
+      "/Esper%20Sentinel?price=70.00",
+    ]);
+  });
+
+  test("an edit typed while the result loads survives the navigation landing", async () => {
+    const nav = pendingNavigation();
+    router.push.mockImplementation(() => nav.promise);
+    const { container, rerender } = render(
+      <UrlPage price="54.00" paramsKey="a" />,
+    );
+    setPrice("65.00");
+    await submitForm(container);
+    setPrice("70.00");
+    await nav.settle();
+    rerender(<UrlPage price="65.00" paramsKey="b" />);
+    expect(priceField()).toHaveValue("70.00");
+    expect(router.push).toHaveBeenCalledOnce();
+  });
+
+  test("unedited fields follow the URL: the submitted query, then back", async () => {
+    const nav = pendingNavigation();
+    router.push.mockImplementation(() => nav.promise);
+    const { container, rerender } = render(
+      <UrlPage price="54.00" paramsKey="a" />,
+    );
+    setPrice("$65");
+    await submitForm(container);
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/Esper%20Sentinel?price=65",
+    );
+    await nav.settle();
+    rerender(<UrlPage price="65" paramsKey="b" />);
+    expect(priceField()).toHaveValue("65");
+    rerender(<UrlPage price="54.00" paramsKey="a" />);
+    expect(priceField()).toHaveValue("54.00");
+  });
+});

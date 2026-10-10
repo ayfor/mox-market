@@ -320,3 +320,113 @@ describe("the reader is the only history source (T21, AC-13)", () => {
     expect(vi.mocked(reader.getHistoryFreshness)).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("never throws on malformed Scryfall data (ADV-4)", () => {
+  test("a printings payload holding null → error, logged once, nothing computed", async () => {
+    const { deps, reader, log } = depsWith({
+      getAllPrintings: async () => [null] as unknown as ScryfallCard[],
+    });
+    await expect(buildEvaluation(query(7499), deps)).resolves.toEqual({
+      status: "error",
+    });
+    expect(log).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith("scryfall_failed", expect.any(TypeError));
+    expect(vi.mocked(reader.getPriceHistory)).not.toHaveBeenCalled();
+    expect(computeSpy).not.toHaveBeenCalled();
+  });
+
+  test("a printings payload that is not an array → error", async () => {
+    const { deps } = depsWith({
+      getAllPrintings: async () => ({ data: [] }) as unknown as ScryfallCard[],
+    });
+    await expect(buildEvaluation(query(7499), deps)).resolves.toEqual({
+      status: "error",
+    });
+  });
+
+  test("a throw past the lookup (a printing whose prices getter throws) → error, logged", async () => {
+    const hostile = Object.defineProperty(
+      { ...ESPER_SENTINEL_PRINTS[5] },
+      "prices",
+      {
+        get() {
+          throw new TypeError("boom");
+        },
+      },
+    );
+    const { deps, log } = depsWith({ getAllPrintings: async () => [hostile] });
+    await expect(buildEvaluation(query(7499), deps)).resolves.toEqual({
+      status: "error",
+    });
+    expect(log).toHaveBeenCalledWith(
+      "evaluation_failed",
+      expect.any(TypeError),
+    );
+  });
+
+  test("a clock that throws → error, never a rejection", async () => {
+    const { deps } = depsWith({});
+    const throwing: EvaluationDeps = {
+      ...deps,
+      now: () => {
+        throw new RangeError("clock");
+      },
+    };
+    await expect(buildEvaluation(query(7499), throwing)).resolves.toEqual({
+      status: "error",
+    });
+  });
+
+  test("an evaluated card without the fields the header renders → error", async () => {
+    const bare = { ...NAMED, set_name: undefined } as unknown as ScryfallCard;
+    const { deps, log } = depsWith({
+      getCardByName: async () => bare,
+      getAllPrintings: async () => [],
+    });
+    await expect(buildEvaluation(query(7499), deps)).resolves.toEqual({
+      status: "error",
+    });
+    expect(log).toHaveBeenCalledWith(
+      "scryfall_malformed",
+      expect.any(TypeError),
+    );
+    expect(computeSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("foil with no foil-priced candidate → the default normal printing (ADV-5, S2.1d23)", () => {
+  const unpricedFoil = (p: ScryfallCard): ScryfallCard => ({
+    ...p,
+    prices: { ...p.prices, usd_foil: null },
+  });
+  const SLD = ESPER_SENTINEL_PRINTS.find((p) => p.set === "sld")!;
+
+  test("named is the Secret Lair (foil-only, no usd): mh2 #12 is evaluated at 5917 with the fallback notice", async () => {
+    expect(SLD.prices.usd).toBeNull();
+    const { deps, reader } = depsWith({
+      getCardByName: async () => unpricedFoil(SLD),
+      getAllPrintings: async () => ESPER_SENTINEL_PRINTS.map(unpricedFoil),
+    });
+    const result = ok(await buildEvaluation(query(5400, "foil"), deps));
+    expect(result.printing.id).toBe(MH2_12_ID);
+    expect(result.appliedFinish).toBe("normal");
+    expect(computeSpy.mock.calls[0][1].currentPriceCents).toBe(5917);
+    expect(result.recommendation.kind).toBe("buy");
+    expect(result.recommendation.signals.fallbackNotice).toBe(true);
+    expect(vi.mocked(reader.getPriceHistory)).toHaveBeenCalledExactlyOnceWith(
+      MH2_12_ID,
+      "normal",
+      AS_OF,
+    );
+  });
+
+  test("normal requested never looks at foil candidates", async () => {
+    const onlyFoil = ESPER_SENTINEL_PRINTS.map((p) => ({
+      ...p,
+      prices: { ...p.prices, usd: null },
+    }));
+    const { deps } = depsWith({ getAllPrintings: async () => onlyFoil });
+    const result = ok(await buildEvaluation(query(5400, "normal"), deps));
+    expect(result.printing.id).toBe(NAMED.id);
+  });
+});

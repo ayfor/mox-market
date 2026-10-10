@@ -3,7 +3,11 @@
 // PriceHistoryReader. Each read is raced to HISTORY_TIMEOUT_MS; a failed read
 // degrades the page and is logged, and never throws.
 import { priceCentsFor } from "@/lib/printings";
-import type { Finish, MarketSnapshot } from "@/lib/recommendation/types";
+import type {
+  Finish,
+  MarketSnapshot,
+  PriceSnapshot,
+} from "@/lib/recommendation/types";
 import type { ShownFinish } from "@/lib/recommendation/ui-copy";
 import type { ScryfallCard } from "@/types/scryfall";
 import { HISTORY_TIMEOUT_MS } from "./consts";
@@ -48,12 +52,40 @@ export function utcDate(date: Date): string {
 const validDateOrNull = (value: unknown): Date | null =>
   value instanceof Date && !Number.isNaN(value.getTime()) ? value : null;
 
-/** The history result, or null when it is not the reader's shape. */
+const ROW_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The newest row's UTC date as a Date at midnight, or null when no row has a
+ * 'YYYY-MM-DD' date. Stands in for a missing or unreadable latestSnapshotAt,
+ * so a panel computed from rows never says it has no history (ADV-7).
+ */
+function newestRowDate(history: readonly unknown[]): Date | null {
+  let newest: string | null = null;
+  for (const row of history) {
+    const date = (row as Partial<PriceSnapshot> | null)?.date;
+    if (typeof date === "string" && ROW_DATE.test(date)) {
+      if (newest === null || date > newest) newest = date;
+    }
+  }
+  return newest === null
+    ? null
+    : validDateOrNull(new Date(`${newest}T00:00:00.000Z`));
+}
+
+/**
+ * The history result, or null when it is not the reader's shape. A
+ * latestSnapshotAt that is missing or not a valid Date falls back to the
+ * newest row's date (ADV-7); with no dated row it is null.
+ */
 function usableHistory(result: unknown): PriceHistoryResult | null {
   if (result === null || typeof result !== "object") return null;
   const { history, latestSnapshotAt } = result as Partial<PriceHistoryResult>;
   if (!Array.isArray(history)) return null;
-  return { history, latestSnapshotAt: validDateOrNull(latestSnapshotAt) };
+  return {
+    history,
+    latestSnapshotAt:
+      validDateOrNull(latestSnapshotAt) ?? newestRowDate(history),
+  };
 }
 
 /** lastSuccessAt as a valid date, or null when missing or unreadable. */

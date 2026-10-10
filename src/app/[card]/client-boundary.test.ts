@@ -205,6 +205,7 @@ describe("client modules never reach the engine or a server-only module (T24)", 
       expect.arrayContaining([
         "src/app/[card]/result-slot.tsx",
         "src/app/[card]/retry-button.tsx",
+        "src/app/[card]/error.tsx",
         "src/components/entry-form.tsx",
         "src/components/card-combobox.tsx",
         "src/components/result-navigation.tsx",

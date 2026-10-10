@@ -339,6 +339,14 @@ describe("data footer and banner (T16, AC-7, AC-14)", () => {
     );
   });
 
+  test("latestSnapshotAt null but rows in the window: no no-history line under a computed panel (ADV-7)", () => {
+    const e = evaluation({ latestSnapshotAt: null });
+    expect(e.recommendation.kind).toBe("buy");
+    const { container } = render(<ResultView evaluation={e} />);
+    expect(container).not.toHaveTextContent(UI_COPY.noHistory);
+    expect(container.querySelector(".mm-data-history")).toBeNull();
+  });
+
   test("the unavailable variant shows no history line: its reason line says why", () => {
     const { container } = render(<ResultView evaluation={unavailable()} />);
     expect(container.querySelector(".mm-data-history")).toBeNull();

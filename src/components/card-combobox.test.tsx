@@ -131,7 +131,7 @@ describe("debounce and minimum length (T26, AC-18)", () => {
 });
 
 describe("suggestions (T26)", () => {
-  test("shows the names and picking one fills the input", async () => {
+  test("shows the typed text, then the names; picking one fills the input", async () => {
     fetchMock.mockResolvedValue(ok(["Esper Sentinel", "Esper Charm"]));
     const onValue = vi.fn();
     render(<Harness onValue={onValue} />);
@@ -142,12 +142,13 @@ describe("suggestions (T26)", () => {
     await flush();
     const options = screen.getAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual([
+      "esper",
       "Esper Sentinel",
       "Esper Charm",
     ]);
     // Headless UI selects an option on mousedown.
-    fireEvent.mouseDown(options[0]);
-    fireEvent.click(options[0]);
+    fireEvent.mouseDown(options[1]);
+    fireEvent.click(options[1]);
     await flush();
     expect(screen.getByTestId("value")).toHaveTextContent("Esper Sentinel");
     expect(onValue).toHaveBeenLastCalledWith("Esper Sentinel");
@@ -176,6 +177,7 @@ describe("suggestions (T26)", () => {
     resolveFirst(ok(["Jabba"]));
     await flush();
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "jac",
       "Jace, the Mind Sculptor",
     ]);
   });
@@ -219,7 +221,7 @@ describe("a failed route (T28, AC-20)", () => {
       await vi.advanceTimersByTimeAsync(150);
     });
     await flush();
-    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(screen.getAllByRole("option")).toHaveLength(2);
     type("esper s");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(150);
@@ -227,5 +229,102 @@ describe("a failed route (T28, AC-20)", () => {
     await flush();
     expect(screen.queryAllByRole("option")).toHaveLength(0);
     expect(input()).toHaveValue("esper s");
+  });
+});
+
+describe("free text stays free under the keyboard (ADV-2, AC-20)", () => {
+  /** The combobox in a form, so Enter can submit it. */
+  function FormHarness({ onSubmit }: { onSubmit: (card: string) => void }) {
+    const [value, setValue] = useState("");
+    return (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit(value);
+        }}
+      >
+        <label htmlFor="card">Card</label>
+        <CardCombobox id="card" value={value} onChange={setValue} />
+        <output data-testid="value">{value}</output>
+      </form>
+    );
+  }
+
+  const suggest = async (typed: string) => {
+    type(typed);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150);
+    });
+    await flush();
+  };
+
+  test("the typed text is the first, active option; an exact suggestion is not repeated", async () => {
+    fetchMock.mockResolvedValue(ok(["Bolt Bend", "Bolt", "Lightning Bolt"]));
+    render(<FormHarness onSubmit={vi.fn()} />);
+    await suggest("Bolt");
+    const options = screen.getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "Bolt",
+      "Bolt Bend",
+      "Lightning Bolt",
+    ]);
+    expect(input()).toHaveAttribute("aria-activedescendant", options[0].id);
+  });
+
+  test("Tab keeps the typed text", async () => {
+    fetchMock.mockResolvedValue(ok(["Bolt Bend", "Lightning Bolt"]));
+    render(<FormHarness onSubmit={vi.fn()} />);
+    await suggest("Bolt");
+    fireEvent.keyDown(input(), { key: "Tab" });
+    await flush();
+    expect(screen.getByTestId("value")).toHaveTextContent(/^Bolt$/);
+    expect(input()).toHaveValue("Bolt");
+  });
+
+  test("Enter keeps the typed text and submits the form once", async () => {
+    fetchMock.mockResolvedValue(ok(["Bolt Bend", "Lightning Bolt"]));
+    const onSubmit = vi.fn();
+    render(<FormHarness onSubmit={onSubmit} />);
+    await suggest("Bolt");
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await flush();
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("Bolt");
+    expect(input()).toHaveValue("Bolt");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+
+  test("Enter on a suggestion the user moved to fills it, without submitting", async () => {
+    fetchMock.mockResolvedValue(ok(["Bolt Bend", "Lightning Bolt"]));
+    const onSubmit = vi.fn();
+    render(<FormHarness onSubmit={onSubmit} />);
+    await suggest("Bolt");
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
+    await flush();
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await flush();
+    expect(screen.getByTestId("value")).toHaveTextContent("Bolt Bend");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test("with no suggestions (a 502), the first Enter submits the typed text", async () => {
+    fetchMock.mockResolvedValue(failed(502));
+    const onSubmit = vi.fn();
+    render(<FormHarness onSubmit={onSubmit} />);
+    await suggest("esper sentinel");
+    expect(input()).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await flush();
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("esper sentinel");
+    expect(input()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("Enter while composing (IME) does nothing", async () => {
+    fetchMock.mockResolvedValue(failed(502));
+    const onSubmit = vi.fn();
+    render(<FormHarness onSubmit={onSubmit} />);
+    await suggest("esper sentinel");
+    fireEvent.keyDown(input(), { key: "Enter", isComposing: true });
+    await flush();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

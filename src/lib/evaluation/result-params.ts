@@ -8,8 +8,14 @@ import {
 import type { ShownFinish } from "@/lib/recommendation/ui-copy";
 import { CARD_PARAM_MAX_CHARS } from "./consts";
 
-/** `$`, commas and every whitespace character, stripped before parsing. */
-const PRICE_NOISE = /[$,\s]/g;
+/** `$` and every whitespace character, stripped before parsing. */
+const PRICE_NOISE = /[$\s]/g;
+
+/**
+ * Commas only as thousands separators: "1,234.50" and "100,000" pass,
+ * "74,99", "0,50" and "1,5" (decimal commas) do not (ADV-3, S2.1d24).
+ */
+const THOUSANDS_GROUPED = /^\d{1,3}(,\d{3})+(\.\d{1,2})?$/;
 
 /** F2 Fields: up to six whole-dollar digits and up to two decimals. */
 const PRICE_SHAPE = /^\d{1,6}(\.\d{1,2})?$/;
@@ -17,9 +23,15 @@ const PRICE_SHAPE = /^\d{1,6}(\.\d{1,2})?$/;
 /** Unicode category Cc: C0, DEL and C1 control characters. */
 const CONTROL_CHARACTER = /\p{Cc}/u;
 
-/** The asking price with `$`, commas and whitespace removed (F2 Fields). */
+/**
+ * The asking price with `$` and whitespace removed, and commas removed only
+ * when they group thousands (F2 Fields, narrowed by ADV-3: a decimal comma
+ * such as "74,99" is left in place, so the price is invalid rather than read
+ * as $7,499).
+ */
 export function normalisePrice(raw: string): string {
-  return raw.replace(PRICE_NOISE, "");
+  const price = raw.replace(PRICE_NOISE, "");
+  return THOUSANDS_GROUPED.test(price) ? price.replace(/,/g, "") : price;
 }
 
 /**
@@ -36,14 +48,20 @@ export function parsePriceCents(raw: string): number | null {
     : null;
 }
 
+/** "." and "..": path dot segments, which a URL resolves away (ADV-6). */
+const DOT_SEGMENTS: readonly string[] = [".", ".."];
+
 /**
  * The card name when it passes F2's pre-Scryfall guard, else null: trimmed,
- * 1 to CARD_PARAM_MAX_CHARS code points, and no control character.
+ * 1 to CARD_PARAM_MAX_CHARS code points, no control character, and not a
+ * dot segment ("." or ".."), which cannot round-trip through the path. The
+ * entry form runs the same guard before it navigates (ADV-6).
  */
 export function parseCardParam(raw: string): string | null {
   const card = raw.trim();
   const length = [...card].length;
   if (length < 1 || length > CARD_PARAM_MAX_CHARS) return null;
+  if (DOT_SEGMENTS.includes(card)) return null;
   return CONTROL_CHARACTER.test(card) ? null : card;
 }
 

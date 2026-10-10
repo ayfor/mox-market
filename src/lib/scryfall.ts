@@ -12,7 +12,12 @@ import type {
   ScryfallImageUris,
   ScryfallSearchResponse,
 } from "@/types/scryfall";
-import { MAX_PRINT_PAGES, SCRYFALL_TIMEOUT_MS } from "./evaluation/consts";
+import {
+  AUTOCOMPLETE_MAX_QUEUE_MS,
+  MAX_PRINT_PAGES,
+  SCRYFALL_MAX_QUEUE_MS,
+  SCRYFALL_TIMEOUT_MS,
+} from "./evaluation/consts";
 import { throttle } from "./throttle";
 
 const BASE_URL = "https://api.scryfall.com";
@@ -31,28 +36,32 @@ class ScryfallApiError extends Error {
 /**
  * One throttled Scryfall request: a path under BASE_URL, or an absolute URL
  * that must already be on BASE_URL (the prints search and its next pages).
- * Unless the caller passes its own signal, the request, body included, aborts
- * after SCRYFALL_TIMEOUT_MS, so a hung Scryfall is an error and never a page
- * that does not finish (S2.1d21).
+ * Unless the caller passes its own signal, the request aborts
+ * SCRYFALL_TIMEOUT_MS after it is made, its wait in the throttle queue and
+ * its body included, so a hung or backed-up Scryfall is an error and never a
+ * page that does not finish (S2.1d21, ADV-1). A request whose throttle slot
+ * lies more than `maxQueueMs` away is refused at once (ThrottleBacklogError).
  */
 async function request<T>(
   pathOrUrl: string,
   options?: RequestInit,
+  { maxQueueMs = SCRYFALL_MAX_QUEUE_MS }: { maxQueueMs?: number } = {},
 ): Promise<T> {
   const url = pathOrUrl.startsWith("/") ? `${BASE_URL}${pathOrUrl}` : pathOrUrl;
   if (!isScryfallUrl(url)) {
     throw new Error("refusing a request outside api.scryfall.com");
   }
-  await throttle();
 
   const controller = options?.signal ? null : new AbortController();
+  const signal = options?.signal ?? controller?.signal;
   const timer = controller
     ? setTimeout(() => controller.abort(), SCRYFALL_TIMEOUT_MS)
     : null;
   try {
+    await throttle({ signal: signal ?? undefined, maxWaitMs: maxQueueMs });
     const res = await fetch(url, {
       ...options,
-      signal: options?.signal ?? controller?.signal,
+      signal,
       headers: {
         Accept: "application/json",
         "User-Agent": "MoxMarket/0.1.0",
@@ -84,13 +93,16 @@ function isScryfallUrl(url: string): boolean {
 /**
  * Lightweight name suggestions for search-as-you-type.
  * Returns up to 20 card name strings. Throws on any Scryfall failure, so the
- * autocomplete route can answer non-2xx (C1.30; the old catch is gone).
+ * autocomplete route can answer non-2xx (C1.30; the old catch is gone), and
+ * when the throttle queue is over AUTOCOMPLETE_MAX_QUEUE_MS deep (ADV-1).
  */
 export async function autocomplete(query: string): Promise<string[]> {
   if (query.length < 2) return [];
 
   const data = await request<ScryfallAutocompleteResponse>(
     `/cards/autocomplete?q=${encodeURIComponent(query)}`,
+    undefined,
+    { maxQueueMs: AUTOCOMPLETE_MAX_QUEUE_MS },
   );
   return data.data;
 }

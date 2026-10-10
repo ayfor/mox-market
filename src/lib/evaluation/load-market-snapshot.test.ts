@@ -250,8 +250,8 @@ describe("degraded reads (T8)", () => {
     },
   );
 
-  test("a latestSnapshotAt that is not a valid Date becomes null", async () => {
-    for (const latest of [new Date("nope"), "2026-10-09", 12345]) {
+  test("a latestSnapshotAt that is null or not a valid Date falls back to the newest row's date (ADV-7)", async () => {
+    for (const latest of [new Date("nope"), "2026-10-09", 12345, null]) {
       const reader = readerOf(
         async () =>
           ({
@@ -260,9 +260,41 @@ describe("degraded reads (T8)", () => {
           }) as unknown as PriceHistoryResult,
       );
       const loaded = await load(priced("59.17", null), "normal", reader);
-      expect(loaded.market.latestSnapshotAt).toBeNull();
+      // dailyHistory's newest row is the day before asOf.
+      expect(loaded.market.latestSnapshotAt).toEqual(
+        new Date("2026-10-09T00:00:00.000Z"),
+      );
+      expect(loaded.market.history).toBe(rows);
       expect(loaded.historyUnavailable).toBe(false);
     }
+  });
+
+  test("with no dated row, an unusable latestSnapshotAt is null", async () => {
+    for (const history of [
+      [],
+      [{ date: "yesterday", priceCents: 1 }],
+      [null, { priceCents: 1 }],
+    ]) {
+      const reader = readerOf(
+        async () =>
+          ({
+            history,
+            latestSnapshotAt: "2026-10-09",
+          }) as unknown as PriceHistoryResult,
+      );
+      const loaded = await load(priced("59.17", null), "normal", reader);
+      expect(loaded.market.latestSnapshotAt).toBeNull();
+    }
+  });
+
+  test("a valid latestSnapshotAt is kept as the reader sent it", async () => {
+    const latest = new Date("2026-10-09T06:00:00.000Z");
+    const reader = readerOf(async () => ({
+      history: rows,
+      latestSnapshotAt: latest,
+    }));
+    const loaded = await load(priced("59.17", null), "normal", reader);
+    expect(loaded.market.latestSnapshotAt).toBe(latest);
   });
 
   test("a lastSuccessAt that is not a valid Date, or null, counts as stale", async () => {

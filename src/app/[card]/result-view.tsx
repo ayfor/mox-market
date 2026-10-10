@@ -49,7 +49,7 @@ function CardArt({ printing }: { printing: EvaluatedPrinting }) {
   );
 }
 
-/** Source label, then the history line or the no-history line (AC-7). */
+/** Source label, then the history line or the no-history line (AC-7, ADV-7). */
 function DataFooter({ evaluation }: { evaluation: OkEvaluation }) {
   const { latestSnapshotAt, now, recommendation, historyUnavailable } =
     evaluation;
@@ -59,7 +59,9 @@ function DataFooter({ evaluation }: { evaluation: OkEvaluation }) {
     // The reason line already says the history is unavailable.
     historyLine = null;
   } else if (latestSnapshotAt === null) {
-    historyLine = UI_COPY.noHistory;
+    // "No history" only when nothing was computed from rows either (ADV-7).
+    historyLine =
+      recommendation.signals.snapshotCount30d === 0 ? UI_COPY.noHistory : null;
   } else {
     historyLine = fillTemplate(UI_COPY.historyLine, {
       N: recommendation.signals.snapshotCount30d,

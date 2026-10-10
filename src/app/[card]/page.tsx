@@ -35,14 +35,13 @@ export default async function ResultPage({
   const parsed = parseResultParams(card, search);
   if (parsed.kind === "not_found") notFound();
 
-  const formKey = `${parsed.card}|${parsed.price}|${parsed.kind}`;
   return (
     <div className="mm-app">
       <NavBar active="evaluate" />
       <main className="mm-stage mm-result-page">
         <ResultNavigationProvider>
+          {/* Not keyed: the form takes new URL values into unedited fields (ADV-8). */}
           <EntryForm
-            key={formKey}
             initialCard={parsed.card}
             initialPrice={parsed.price}
             initialError={parsed.kind === "form" && parsed.error}

@@ -123,7 +123,7 @@ describe("a valid submit (T18, AC-9)", () => {
     );
   });
 
-  test("a second submit while pending pushes nothing", async () => {
+  test("the same query again while pending pushes nothing", async () => {
     router.push.mockImplementation(() => new Promise(() => {}));
     render(<EntryForm />);
     fill("Esper Sentinel", "74.99");
@@ -160,6 +160,117 @@ describe("autocomplete down (T28, AC-20)", () => {
     expect(screen.queryAllByRole("option")).toHaveLength(0);
     expect(cardInput()).toHaveValue("esper sentinel");
     send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/esper%20sentinel?price=74.99",
+    );
+  });
+});
+
+describe("decimal commas (ADV-3)", () => {
+  test.each(["74,99", "0,50", "1,5"])(
+    "%j → the validation error, no navigation",
+    (price) => {
+      render(<EntryForm />);
+      fill("Esper Sentinel", price);
+      send();
+      expect(screen.getByText(UI_COPY.validationError)).toBeInTheDocument();
+      expect(router.push).toHaveBeenCalledTimes(0);
+    },
+  );
+
+  test('"1,000" is a thousands separator → /…?price=1000', () => {
+    render(<EntryForm />);
+    fill("Esper Sentinel", "1,000");
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/Esper%20Sentinel?price=1000",
+    );
+  });
+});
+
+describe("the server's card guard runs before navigating (ADV-6)", () => {
+  test.each([
+    ["..", ".."],
+    [".", "."],
+    ["a padded dot segment", " .. "],
+    ["a tab", "Esper\tSentinel"],
+    ["NEL (U+0085)", "Esper\u0085Sentinel"],
+  ])("%s → the inline card error, no navigation", (_name, card) => {
+    render(<EntryForm />);
+    fill(card, "5");
+    send();
+    const error = screen.getByText(UI_COPY.cardNotFound);
+    expect(error).toHaveAttribute("role", "alert");
+    expect(cardInput()).toHaveAttribute("aria-invalid", "true");
+    expect(cardInput()).toHaveAttribute("aria-errormessage", error.id);
+    expect(router.push).toHaveBeenCalledTimes(0);
+  });
+
+  test("editing the card clears its error; three dots are a name, not a segment", () => {
+    render(<EntryForm />);
+    fill("..", "5");
+    send();
+    expect(screen.getByText(UI_COPY.cardNotFound)).toBeInTheDocument();
+    fireEvent.change(cardInput(), { target: { value: "..." } });
+    expect(screen.queryByText(UI_COPY.cardNotFound)).toBeNull();
+    expect(cardInput()).not.toHaveAttribute("aria-invalid");
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith("/...?price=5");
+  });
+});
+
+describe("keyboard free text through the form (ADV-2, AC-20)", () => {
+  // While the list is open Headless UI marks the rest of the form
+  // aria-hidden, the field label included, so the input is found by role.
+  const combobox = () => screen.getByRole("combobox");
+  const typeCard = async (text: string) => {
+    fireEvent.change(combobox(), { target: { value: text } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  };
+
+  const withSuggestions = async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(
+      Response.json({ data: ["Bolt Bend", "Lightning Bolt"] }),
+    );
+    render(<EntryForm />);
+    fireEvent.change(priceInput(), { target: { value: "1" } });
+    await typeCard("Bolt");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent(/^Bolt$/);
+  };
+
+  test("with suggestions, Tab keeps the typed card", async () => {
+    await withSuggestions();
+    fireEvent.keyDown(combobox(), { key: "Tab" });
+    expect(combobox()).toHaveValue("Bolt");
+    expect(router.push).not.toHaveBeenCalled();
+  });
+
+  test("with suggestions, Enter keeps the typed card and pushes it once", async () => {
+    await withSuggestions();
+    await act(async () => {
+      fireEvent.keyDown(combobox(), { key: "Enter" });
+    });
+    expect(combobox()).toHaveValue("Bolt");
+    expect(router.push).toHaveBeenCalledExactlyOnceWith("/Bolt?price=1");
+  });
+
+  test("with the route down (502), the first Enter pushes the typed card", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: "upstream" }), { status: 502 }),
+    );
+    render(<EntryForm />);
+    fireEvent.change(priceInput(), { target: { value: "74.99" } });
+    await typeCard("esper sentinel");
+    await act(async () => {
+      fireEvent.keyDown(combobox(), { key: "Enter" });
+    });
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       "/esper%20sentinel?price=74.99",
     );

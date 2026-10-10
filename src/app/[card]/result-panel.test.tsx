@@ -124,3 +124,44 @@ describe("ResultPanel under a failing reader (T22, AC-14)", () => {
     expect(log).not.toHaveBeenCalled();
   });
 });
+
+describe("rows without a usable latestSnapshotAt (ADV-7)", () => {
+  test.each<[string, unknown]>([
+    ["a string", "2026-10-09"],
+    ["null", null],
+  ])(
+    "latestSnapshotAt %s with 30 rows → buy, and the footer never says no history",
+    async (_name, latestSnapshotAt) => {
+      vi.useRealTimers();
+      const { deps } = depsWith({
+        getPriceHistory: async () =>
+          ({ history: ROWS, latestSnapshotAt }) as unknown as Awaited<
+            ReturnType<PriceHistoryReader["getPriceHistory"]>
+          >,
+        getHistoryFreshness: async () => ({
+          lastSuccessAt: NOW,
+          sourceDate: "2026-10-09",
+        }),
+      });
+      const element = await ResultPanel({
+        query: {
+          card: "Esper Sentinel",
+          askingPriceCents: 5400,
+          finish: "normal",
+        },
+        deps,
+      });
+      const { container } = render(element);
+      expect(container.querySelector(".mm-rec-panel")).toHaveAttribute(
+        "data-kind",
+        "buy",
+      );
+      const footer = container.querySelector(".mm-data-footer")!;
+      expect(footer).not.toHaveTextContent(UI_COPY.noHistory);
+      expect(footer.querySelector(".mm-data-history")?.textContent).toBe(
+        // The newest row is 2026-10-09, read as UTC midnight.
+        "Price history: 30 snapshots, newest 36 hours ago",
+      );
+    },
+  );
+});

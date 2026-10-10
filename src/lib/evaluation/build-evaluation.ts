@@ -77,23 +77,91 @@ export type Evaluation =
   /** The engine rejected the input: the validation string (F2 Fields). */
   | { readonly status: "invalid" };
 
-/** Lookup, printings, snapshot and recommendation for one query. */
+/** A card object with the fields the page renders, as strings (ADV-4). */
+function isEvaluablePrinting(value: unknown): value is ScryfallCard {
+  if (value === null || typeof value !== "object") return false;
+  const card = value as Record<string, unknown>;
+  return (
+    typeof card.id === "string" &&
+    typeof card.name === "string" &&
+    typeof card.set === "string" &&
+    typeof card.set_name === "string" &&
+    typeof card.collector_number === "string"
+  );
+}
+
+/**
+ * The printings payload when every entry is an object, else a TypeError: a
+ * malformed entry fails the lookup like a failed page, so the default is
+ * never picked from a partial list (S2.1d7, ADV-4).
+ */
+function printingsOf(fetched: unknown): ScryfallCard[] {
+  if (
+    !Array.isArray(fetched) ||
+    !fetched.every((entry) => entry !== null && typeof entry === "object")
+  ) {
+    throw new TypeError("malformed printings payload");
+  }
+  return fetched as ScryfallCard[];
+}
+
+/**
+ * F2 §Default printing for the requested finish. When foil is requested and
+ * no candidate has a usable foil price, the default normal printing is
+ * evaluated with the C1.21 fallback before the named-lookup card, which can
+ * be a promo or a Secret Lair printing F2's predicate excludes (ADV-5,
+ * S2.1d23; Josh can overturn). The named card only when neither finish has a
+ * candidate.
+ */
+function pickPrinting(
+  printings: readonly ScryfallCard[],
+  finish: ShownFinish,
+  named: ScryfallCard,
+): ScryfallCard {
+  return (
+    selectDefaultPrinting(printings, finish) ??
+    (finish === "foil" ? selectDefaultPrinting(printings, "normal") : null) ??
+    named
+  );
+}
+
+/**
+ * Lookup, printings, snapshot and recommendation for one query. Never
+ * throws: Scryfall's JSON is unvalidated (request() casts it), so the whole
+ * body sits in one try and any unexpected throw is the error panel (ADV-4).
+ */
 export async function buildEvaluation(
   query: EvaluationQuery,
   deps: EvaluationDeps = defaultEvaluationDeps,
+): Promise<Evaluation> {
+  try {
+    return await evaluate(query, deps);
+  } catch (error) {
+    deps.log("evaluation_failed", error);
+    return { status: "error" };
+  }
+}
+
+async function evaluate(
+  query: EvaluationQuery,
+  deps: EvaluationDeps,
 ): Promise<Evaluation> {
   let named: ScryfallCard | null;
   let printings: ScryfallCard[];
   try {
     named = await deps.scryfall.getCardByName(query.card, true);
     if (named === null) return { status: "not_found" };
-    printings = await deps.scryfall.getAllPrintings(named);
+    printings = printingsOf(await deps.scryfall.getAllPrintings(named));
   } catch (error) {
     deps.log("scryfall_failed", error);
     return { status: "error" };
   }
 
-  const printing = selectDefaultPrinting(printings, query.finish) ?? named;
+  const printing = pickPrinting(printings, query.finish, named);
+  if (!isEvaluablePrinting(printing)) {
+    deps.log("scryfall_malformed", new TypeError("unusable card object"));
+    return { status: "error" };
+  }
   const now = deps.now();
   const snapshot = await loadMarketSnapshot({
     printing,

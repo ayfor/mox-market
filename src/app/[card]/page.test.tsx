@@ -1,6 +1,7 @@
 // T19 (AC-9; C1.28 = A; S2.1d18) and T17's page half (AC-8): the result
 // page awaited as a function. Bad params never reach Scryfall; a valid query
 // streams the panel through a Suspense boundary keyed by the query.
+import { EntryForm } from "@/components/entry-form";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import { render, screen } from "@testing-library/react";
 import {
@@ -111,6 +112,14 @@ describe("params rejected before any Scryfall call (T19, AC-9)", () => {
 });
 
 describe("a valid query (T17, AC-8)", () => {
+  test("the entry form is not keyed, so a navigation keeps the user's edits (ADV-8)", async () => {
+    const elements = elementsIn(
+      await page("Esper%20Sentinel", { price: "74.99" }),
+    );
+    const form = elements.find((e) => e.type === EntryForm);
+    expect(form).toBeDefined();
+    expect(form!.key).toBeNull();
+  });
   test("the panel sits in a Suspense keyed by paramsKey with the skeleton as fallback, inside ResultSlot", async () => {
     const tree = await page("Esper%20Sentinel", {
       price: "$74.99",

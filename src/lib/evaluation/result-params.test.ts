@@ -15,7 +15,7 @@ import {
 } from "./result-params";
 
 describe("normalisePrice and parsePriceCents (T1)", () => {
-  test("normalisePrice strips $, commas and whitespace", () => {
+  test("normalisePrice strips $, whitespace and thousands commas", () => {
     expect(normalisePrice(" $1,234.50 ")).toBe("1234.50");
     expect(normalisePrice("$ 74.99")).toBe("74.99");
     expect(normalisePrice("7 4.99\t")).toBe("74.99");
@@ -55,6 +55,19 @@ describe("normalisePrice and parsePriceCents (T1)", () => {
     expect(parsePriceCents(raw)).toBeNull();
   });
 
+  test("commas only as thousands separators (ADV-3, S2.1d24)", () => {
+    expect(parsePriceCents("74,99")).toBeNull();
+    expect(parsePriceCents("0,50")).toBeNull();
+    expect(parsePriceCents("1,5")).toBeNull();
+    expect(parsePriceCents("1,00,000")).toBeNull();
+    expect(parsePriceCents(",500")).toBeNull();
+    expect(parsePriceCents("1,234.50")).toBe(123450);
+    expect(parsePriceCents("1,000")).toBe(100000);
+    expect(parsePriceCents("$100,000.00")).toBe(MAX_ASKING_PRICE_CENTS);
+    expect(normalisePrice("74,99")).toBe("74,99");
+    expect(normalisePrice("$ 1,000")).toBe("1000");
+  });
+
   test("the accepted range is MIN_ASKING_PRICE_CENTS..MAX_ASKING_PRICE_CENTS", () => {
     expect(MIN_ASKING_PRICE_CENTS).toBe(1);
     expect(MAX_ASKING_PRICE_CENTS).toBe(10_000_000);
@@ -81,6 +94,10 @@ describe("parseResultParams (T2)", () => {
     ["U+0007", "Esper\u0007Sentinel"],
     ["U+007F", "Esper\u007fSentinel"],
     ["U+0085", "Esper\u0085Sentinel"],
+    ["a tab", "Esper\tSentinel"],
+    ['the dot segment "."', "."],
+    ['the dot segment ".."', ".."],
+    ['" .. " (trimmed to a dot segment)', " .. "],
   ])("%s is not_found", (_name, card) => {
     expect(parseResultParams(enc(card), { price: "1" })).toEqual({
       kind: "not_found",
@@ -110,6 +127,13 @@ describe("parseResultParams (T2)", () => {
     expect(
       ok(parseResultParams("Esper%20Sentinel", { price: "74.99" })).card,
     ).toBe("Esper Sentinel");
+  });
+
+  test('dot segments only: "..." and ".Esper" are names (ADV-6)', () => {
+    expect(parseCardParam("...")).toBe("...");
+    expect(parseCardParam(".Esper")).toBe(".Esper");
+    expect(parseCardParam("..")).toBeNull();
+    expect(parseCardParam(".")).toBeNull();
   });
 
   test("the card is trimmed", () => {
