@@ -1,6 +1,8 @@
-// T2 (AC-1): runtime enum tuples and engine purity.
+// T2 (AC-1): runtime enum tuples and engine purity. S1.2 T7 (AC-6) extends
+// the scan to the engine's modules and adds the clock and randomness scan.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 import { describe, expect, test } from "vitest";
 import {
   CONFIDENCE_LEVELS,
@@ -148,9 +150,174 @@ describe("engine purity", () => {
     // This file is skipped: its scanner samples hold forbidden specifiers as data.
     const files = sourceFiles(ENGINE_DIR).filter((f) => f !== __filename);
     expect(files.length).toBeGreaterThan(0);
+    // S1.2 T7: the engine's modules are in the scan.
+    const names = files.map((f) => path.relative(ENGINE_DIR, f));
+    for (const name of [
+      "engine.ts",
+      "window.ts",
+      "signals.ts",
+      "bands.ts",
+      "reason.ts",
+      "copy.ts",
+      "fixtures.ts",
+    ]) {
+      expect(names).toContain(name);
+    }
     const offenders = files.flatMap((file) =>
       offencesIn(file, readFileSync(file, "utf8")).map(
         (offence) => `${path.relative(ENGINE_DIR, file)} → ${offence}`,
+      ),
+    );
+    expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * Local-time Date and locale methods (ADV-7): each reads the host's time zone
+ * or locale, so a window built with one would shift on a server not set to
+ * UTC. Matched by member name on any object.
+ */
+const LOCAL_TIME_MEMBERS = new Set([
+  "getDate",
+  "getDay",
+  "getMonth",
+  "getFullYear",
+  "getYear",
+  "getHours",
+  "getMinutes",
+  "getSeconds",
+  "getMilliseconds",
+  "getTimezoneOffset",
+  "setDate",
+  "setMonth",
+  "setFullYear",
+  "setYear",
+  "setHours",
+  "setMinutes",
+  "setSeconds",
+  "setMilliseconds",
+  "toLocaleString",
+  "toLocaleDateString",
+  "toLocaleTimeString",
+  "toDateString",
+  "toTimeString",
+]);
+
+/**
+ * Clock, randomness, environment and local-time reads in a source (S1.2 T7,
+ * ADV-7): `Date.now`, a zero-argument `new Date()` (with or without
+ * parentheses), a bare `Date()` call, `performance.now`, `Math.random` and
+ * `process.env`, each also through `globalThis.`; any local-time Date or
+ * locale method; `Intl.*`; `Date.parse`; and `new Date(y, m, …)`, whose
+ * fields are local time. Read from the AST, so comments and strings never
+ * count.
+ */
+function impurities(file: string, source: string): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  const text = (node: ts.Node) =>
+    node
+      .getText(sf)
+      .replace(/\s+/g, "")
+      .replace(/^globalThis\./, "");
+  const visit = (node: ts.Node) => {
+    if (ts.isPropertyAccessExpression(node)) {
+      const access = text(node);
+      if (
+        ["Date.now", "performance.now", "Math.random", "process.env"].includes(
+          access,
+        )
+      ) {
+        found.push(access);
+      }
+      if (["Intl", "Date.parse"].some((p) => access.startsWith(p))) {
+        found.push(access);
+      }
+      if (LOCAL_TIME_MEMBERS.has(node.name.text)) {
+        found.push(`.${node.name.text}`);
+      }
+    }
+    if (
+      ts.isNewExpression(node) &&
+      text(node.expression) === "Date" &&
+      (node.arguments === undefined || node.arguments.length === 0)
+    ) {
+      found.push("new Date()");
+    }
+    if (
+      ts.isNewExpression(node) &&
+      text(node.expression) === "Date" &&
+      node.arguments !== undefined &&
+      node.arguments.length >= 2
+    ) {
+      found.push("new Date(y, m, …)");
+    }
+    if (ts.isCallExpression(node) && text(node.expression) === "Date") {
+      found.push("Date()");
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+describe("engine reads no clock or local time (S1.2 T7, AC-6, ADV-7)", () => {
+  test("the scanner catches every clock, randomness and environment read", () => {
+    const sample = [
+      "const a = Date.now();",
+      "const b = new Date();",
+      "const c = new Date;",
+      "const d = Date();",
+      "const e = performance.now();",
+      "const f = Math.random();",
+      "const g = process.env.TZ;",
+      "const h = globalThis.Date.now();",
+      "const i = Date . now();",
+      "// Date.now() in a comment is fine",
+      'const j = "Math.random() in a string is fine";',
+      "const k = new Date(Date.UTC(2026, 9, 10));",
+      'const l = new Date("2026-10-09T06:00:00Z");',
+      "const m = d.getDate();",
+      "d.setDate(d.getUTCDate() + 1);",
+      "const o = d.toLocaleDateString();",
+      "const p = d.getTimezoneOffset();",
+      'const q = new Intl.DateTimeFormat("en-CA").format(d);',
+      "const r = new Date(2026, 9, 10);",
+      'const t = Date.parse("2026-10-10T00:00");',
+      "const u = d.getFullYear() + d.getMonth() + d.getHours();",
+      "const v = d.getUTCFullYear() + d.toISOString();",
+    ].join("\n");
+    expect(impurities("sample.ts", sample)).toEqual([
+      "Date.now",
+      "new Date()",
+      "new Date()",
+      "Date()",
+      "performance.now",
+      "Math.random",
+      "process.env",
+      "Date.now",
+      "Date.now",
+      ".getDate",
+      ".setDate",
+      ".toLocaleDateString",
+      ".getTimezoneOffset",
+      "Intl.DateTimeFormat",
+      "new Date(y, m, …)",
+      "Date.parse",
+      ".getFullYear",
+      ".getMonth",
+      ".getHours",
+    ]);
+  });
+
+  test("no non-test engine source reads the clock, randomness or the environment", () => {
+    const files = sourceFiles(ENGINE_DIR).filter(
+      (f) => !/\.test(-d)?\.ts$/.test(f),
+    );
+    expect(files.length).toBeGreaterThan(0);
+    const offenders = files.flatMap((file) =>
+      impurities(file, readFileSync(file, "utf8")).map(
+        (what) => `${path.relative(ENGINE_DIR, file)} → ${what}`,
       ),
     );
     expect(offenders).toEqual([]);
