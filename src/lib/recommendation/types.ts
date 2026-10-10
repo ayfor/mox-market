@@ -78,7 +78,7 @@ export interface RecommendationSignals {
 export interface Recommendation {
   kind: RecommendationKind;
   confidence: Confidence;
-  /** Observed facts only; forbidden-word lint lands with S1.2. */
+  /** Observed facts only; the forbidden-word lint lands with S1.3 (C1.48 = B). */
   reason: string;
   signals: RecommendationSignals;
 }

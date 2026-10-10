@@ -1,6 +1,8 @@
-// T2 (AC-1): runtime enum tuples and engine purity.
+// T2 (AC-1): runtime enum tuples and engine purity. S1.2 T7 (AC-6) extends
+// the scan to the engine's modules and adds the clock and randomness scan.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 import { describe, expect, test } from "vitest";
 import {
   CONFIDENCE_LEVELS,
@@ -148,9 +150,108 @@ describe("engine purity", () => {
     // This file is skipped: its scanner samples hold forbidden specifiers as data.
     const files = sourceFiles(ENGINE_DIR).filter((f) => f !== __filename);
     expect(files.length).toBeGreaterThan(0);
+    // S1.2 T7: the engine's modules are in the scan.
+    const names = files.map((f) => path.relative(ENGINE_DIR, f));
+    for (const name of [
+      "engine.ts",
+      "window.ts",
+      "signals.ts",
+      "bands.ts",
+      "reason.ts",
+      "copy.ts",
+      "fixtures.ts",
+    ]) {
+      expect(names).toContain(name);
+    }
     const offenders = files.flatMap((file) =>
       offencesIn(file, readFileSync(file, "utf8")).map(
         (offence) => `${path.relative(ENGINE_DIR, file)} → ${offence}`,
+      ),
+    );
+    expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * Clock, randomness and environment reads in a source (S1.2 T7): `Date.now`,
+ * a zero-argument `new Date()` (with or without parentheses), a bare
+ * `Date()` call, `performance.now`, `Math.random` and `process.env`, each
+ * also through `globalThis.`. Read from the AST, so comments and strings
+ * never count.
+ */
+function impurities(file: string, source: string): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  const text = (node: ts.Node) =>
+    node
+      .getText(sf)
+      .replace(/\s+/g, "")
+      .replace(/^globalThis\./, "");
+  const visit = (node: ts.Node) => {
+    if (ts.isPropertyAccessExpression(node)) {
+      const access = text(node);
+      if (
+        ["Date.now", "performance.now", "Math.random", "process.env"].includes(
+          access,
+        )
+      ) {
+        found.push(access);
+      }
+    }
+    if (
+      ts.isNewExpression(node) &&
+      text(node.expression) === "Date" &&
+      (node.arguments === undefined || node.arguments.length === 0)
+    ) {
+      found.push("new Date()");
+    }
+    if (ts.isCallExpression(node) && text(node.expression) === "Date") {
+      found.push("Date()");
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+describe("engine reads no clock (S1.2 T7, AC-6)", () => {
+  test("the scanner catches every clock, randomness and environment read", () => {
+    const sample = [
+      "const a = Date.now();",
+      "const b = new Date();",
+      "const c = new Date;",
+      "const d = Date();",
+      "const e = performance.now();",
+      "const f = Math.random();",
+      "const g = process.env.TZ;",
+      "const h = globalThis.Date.now();",
+      "const i = Date . now();",
+      "// Date.now() in a comment is fine",
+      'const j = "Math.random() in a string is fine";',
+      "const k = new Date(Date.UTC(2026, 9, 10));",
+      'const l = new Date("2026-10-09T06:00:00Z");',
+    ].join("\n");
+    expect(impurities("sample.ts", sample)).toEqual([
+      "Date.now",
+      "new Date()",
+      "new Date()",
+      "Date()",
+      "performance.now",
+      "Math.random",
+      "process.env",
+      "Date.now",
+      "Date.now",
+    ]);
+  });
+
+  test("no non-test engine source reads the clock, randomness or the environment", () => {
+    const files = sourceFiles(ENGINE_DIR).filter(
+      (f) => !/\.test(-d)?\.ts$/.test(f),
+    );
+    expect(files.length).toBeGreaterThan(0);
+    const offenders = files.flatMap((file) =>
+      impurities(file, readFileSync(file, "utf8")).map(
+        (what) => `${path.relative(ENGINE_DIR, file)} → ${what}`,
       ),
     );
     expect(offenders).toEqual([]);

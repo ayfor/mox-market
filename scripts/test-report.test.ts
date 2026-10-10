@@ -99,6 +99,17 @@ describe("featureOf", () => {
     ["tests/contract/site-footer.test.ts", "F2 · Live Evaluation"],
     ["tests/helpers/attribution-spec.test.ts", "F2 · Live Evaluation"],
     ["src/lib/recommendation/params.test.ts", "F1 · Recommendation Engine"],
+    // S1.2d12 (T21): this story's tests map to F1; no name starts with an F3 prefix.
+    ["src/lib/recommendation/engine.test.ts", "F1 · Recommendation Engine"],
+    ["src/lib/recommendation/bands.test.ts", "F1 · Recommendation Engine"],
+    ["src/lib/recommendation/signals.test.ts", "F1 · Recommendation Engine"],
+    ["src/lib/recommendation/window.test.ts", "F1 · Recommendation Engine"],
+    ["src/lib/recommendation/reason.test.ts", "F1 · Recommendation Engine"],
+    [
+      "src/lib/recommendation/no-literals.test.ts",
+      "F1 · Recommendation Engine",
+    ],
+    ["src/lib/recommendation/engine.test-d.ts", "F1 · Recommendation Engine"],
     ["src/lib/prisma.test.ts", "F1 · Recommendation Engine"],
     ["prisma/migrate-guard.test.ts", "F1 · Recommendation Engine"],
     ["prisma/baseline.int.test.ts", "F1 · Recommendation Engine"],
