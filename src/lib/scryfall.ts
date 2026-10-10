@@ -22,15 +22,56 @@ import { throttle } from "./throttle";
 
 const BASE_URL = "https://api.scryfall.com";
 
-class ScryfallApiError extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    message: string,
-  ) {
+/**
+ * Any non-2xx Scryfall answer (S2.4d6, AC-5): the HTTP status, the error
+ * body's `code` and `type` when it carries them as strings, and its
+ * `details` as the message. A body that is not Scryfall's JSON error object
+ * (an HTML 502, an empty 500) gives code "unknown", no type and the status
+ * text, so a failure is never a SyntaxError and never a 404 by accident.
+ */
+export class ScryfallApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly type: string | undefined;
+
+  constructor(status: number, code: string, message: string, type?: string) {
     super(message);
     this.name = "ScryfallApiError";
+    this.status = status;
+    this.code = code;
+    this.type = type;
   }
+}
+
+/** A string field of a parsed error body, or undefined. */
+function stringField(
+  body: unknown,
+  key: keyof ScryfallError,
+): string | undefined {
+  if (body === null || typeof body !== "object") return undefined;
+  const value = (body as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * The ScryfallApiError for a non-2xx response, read defensively (S2.4d6).
+ * A body stream that fails (an abort mid-body included) rejects with its own
+ * error, like a failed fetch.
+ */
+async function apiErrorOf(res: Response): Promise<ScryfallApiError> {
+  const text = await res.text();
+  let body: unknown = null;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = null;
+  }
+  return new ScryfallApiError(
+    res.status,
+    stringField(body, "code") ?? "unknown",
+    stringField(body, "details") ?? (res.statusText || `HTTP ${res.status}`),
+    stringField(body, "type"),
+  );
 }
 
 /**
@@ -69,10 +110,7 @@ async function request<T>(
       },
     });
 
-    if (!res.ok) {
-      const error = (await res.json()) as ScryfallError;
-      throw new ScryfallApiError(res.status, error.code, error.details);
-    }
+    if (!res.ok) throw await apiErrorOf(res);
 
     return (await res.json()) as T;
   } finally {
@@ -120,23 +158,25 @@ export async function searchCards(
 }
 
 /**
- * Single card lookup by name. Returns null if not found.
+ * Single card lookup by name (S2.4d6, AC-5). Never resolves null: a miss is
+ * Scryfall's 404 as a ScryfallApiError (`type` "ambiguous" when the fuzzy
+ * name matches several cards), so the caller tells an ambiguous name from an
+ * unknown one and both from a failure. A 2xx body that is not an object
+ * throws a TypeError. Network errors, aborts and a full throttle queue pass
+ * through unchanged.
  */
 export async function getCardByName(
   name: string,
   fuzzy = false,
-): Promise<ScryfallCard | null> {
+): Promise<ScryfallCard> {
   const param = fuzzy ? "fuzzy" : "exact";
-  try {
-    return await request<ScryfallCard>(
-      `/cards/named?${param}=${encodeURIComponent(name)}`,
-    );
-  } catch (error) {
-    if (error instanceof ScryfallApiError && error.status === 404) {
-      return null;
-    }
-    throw error;
+  const card = await request<ScryfallCard | null>(
+    `/cards/named?${param}=${encodeURIComponent(name)}`,
+  );
+  if (card === null || typeof card !== "object") {
+    throw new TypeError("malformed card payload");
   }
+  return card;
 }
 
 /**

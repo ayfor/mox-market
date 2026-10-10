@@ -1,10 +1,23 @@
 // T19 (AC-9; C1.28 = A; S2.1d18) and T17's page half (AC-8): the result
 // page awaited as a function. Bad params never reach Scryfall; a valid query
-// streams the panel through a Suspense boundary keyed by the query.
+// streams the panel through a Suspense boundary keyed by the query. S2.4 adds
+// T12's page half (AC-6, AC-7: the miss states), T14's (AC-9: a fuzzy hit
+// keeps the typed name) and T20 (AC-16: no price, no Scryfall call), with the
+// streamed panel awaited through the real getCardByName and fetch mocked.
 import { EntryForm } from "@/components/entry-form";
+import {
+  ESPER_SENTINEL_PRINTS,
+  scryfallCard,
+} from "@/lib/__fixtures__/esper-sentinel-prints";
+import {
+  defaultEvaluationDeps,
+  type EvaluationDeps,
+  type EvaluationQuery,
+} from "@/lib/evaluation/build-evaluation";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import { render, screen } from "@testing-library/react";
 import {
+  cloneElement,
   isValidElement,
   Suspense,
   type ReactElement,
@@ -23,13 +36,21 @@ const router = vi.hoisted(() => ({
   replace: vi.fn(),
   prefetch: vi.fn(),
 }));
+const redirect = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
   useRouter: () => router,
   usePathname: () => "/",
   notFound: () => {
     throw new Error("NEXT_HTTP_ERROR_FALLBACK;404");
   },
+  redirect,
+  permanentRedirect: redirect,
 }));
+// The throttle spaces real requests 100 ms apart; the page is under test here.
+vi.mock("@/lib/throttle", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/throttle")>();
+  return { ...actual, throttle: () => Promise.resolve() };
+});
 
 const fetchMock = vi.fn<typeof fetch>();
 beforeEach(() => {
@@ -154,4 +175,189 @@ describe("a valid query (T17, AC-8)", () => {
     expect(await keyOf("Esper%20Sentinel", { price: "75" })).not.toBe(base);
     expect(await keyOf("Esper%20Charm", { price: "74.99" })).not.toBe(base);
   });
+});
+
+// --- S2.4: the streamed slot, awaited ---------------------------------------
+/**
+ * The page tree with every ResultPanel replaced by what it renders, awaited
+ * with `deps` (the real Scryfall client, fetch mocked), so RTL can render the
+ * whole page as the browser would see it once the stream settles.
+ */
+async function resolvePanels(
+  node: ReactNode,
+  deps: EvaluationDeps,
+): Promise<ReactNode> {
+  if (Array.isArray(node)) {
+    return Promise.all(node.map((child) => resolvePanels(child, deps)));
+  }
+  if (!isValidElement(node)) return node;
+  if (node.type === ResultPanel) {
+    const { query } = node.props as { query: EvaluationQuery };
+    return ResultPanel({ query, deps });
+  }
+  const { children } = node.props as { children?: ReactNode };
+  if (children === undefined) return node;
+  const resolved = await resolvePanels(children, deps);
+  return cloneElement(
+    node,
+    undefined,
+    ...(Array.isArray(resolved) ? resolved : [resolved]),
+  );
+}
+
+const scryfall404 = (type?: string) =>
+  new Response(
+    JSON.stringify({
+      object: "error",
+      code: "not_found",
+      status: 404,
+      ...(type === undefined ? {} : { type }),
+      details: "x",
+    }),
+    { status: 404, headers: { "Content-Type": "application/json" } },
+  );
+
+/** Renders the settled page with the real client; returns the log. */
+async function renderSettled(
+  card: string,
+  search: Record<string, string>,
+): Promise<ReturnType<typeof vi.fn>> {
+  const log = vi.fn();
+  const deps: EvaluationDeps = { ...defaultEvaluationDeps, log };
+  render(await resolvePanels(await page(card, search), deps));
+  return log;
+}
+
+const cardInput = () => screen.getByRole("combobox", { name: "Card" });
+const priceInput = () => screen.getByRole("textbox", { name: "Your price" });
+
+describe("lookup misses on the page (T12, AC-6, AC-7, AC-10)", () => {
+  test.each<[string, string | undefined, string]>([
+    ["jace", "ambiguous", UI_COPY.ambiguousCard],
+    ["asdfqwer", undefined, UI_COPY.cardNotFound],
+  ])(
+    "%j (type %s): the prefilled form and the message tied to the card field; no panel, skeleton, error or Retry",
+    async (card, type, message) => {
+      fetchMock.mockResolvedValue(scryfall404(type));
+      const log = await renderSettled(card, { price: "$5" });
+      expect(cardInput()).toHaveValue(card);
+      expect(priceInput()).toHaveValue("5");
+      const text = screen.getByText(message);
+      expect(text.textContent).toBe(message);
+      expect(text.id).not.toBe("");
+      expect(cardInput()).toHaveAttribute("aria-describedby", text.id);
+      expect(cardInput()).toHaveAccessibleDescription(message);
+      const other =
+        message === UI_COPY.ambiguousCard
+          ? UI_COPY.cardNotFound
+          : UI_COPY.ambiguousCard;
+      expect(screen.queryByText(other)).toBeNull();
+      expect(document.querySelector(".mm-rec-panel")).toBeNull();
+      expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+      expect(document.querySelector('[data-status="error"]')).toBeNull();
+      expect(screen.queryByText(UI_COPY.errorPanel)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+      expect(
+        document.querySelector(
+          `.mm-lookup-miss[data-status="${type ?? "not_found"}"]`,
+        ),
+      ).not.toBeNull();
+      // One named lookup, nothing after it, nothing logged.
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(String(fetchMock.mock.calls[0][0])).toBe(
+        `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(card)}`,
+      );
+      expect(log).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each<[string, () => Response | Promise<Response>]>([
+    [
+      "503",
+      () =>
+        new Response(JSON.stringify({ code: "x", details: "x" }), {
+          status: 503,
+        }),
+    ],
+    [
+      "429",
+      () =>
+        new Response(JSON.stringify({ code: "x", details: "x" }), {
+          status: 429,
+        }),
+    ],
+    ["an HTML 502", () => new Response("<html>bad</html>", { status: 502 })],
+    ["a rejected fetch", () => Promise.reject(new TypeError("fetch failed"))],
+  ])(
+    "a lookup answering %s renders the error panel, never a miss (AC-8)",
+    async (_name, answer) => {
+      fetchMock.mockImplementation(async () => answer());
+      const log = await renderSettled("jace", { price: "5" });
+      expect(screen.getByText(UI_COPY.errorPanel)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(screen.queryByText(UI_COPY.ambiguousCard)).toBeNull();
+      expect(screen.queryByText(UI_COPY.cardNotFound)).toBeNull();
+      expect(cardInput()).not.toHaveAttribute("aria-describedby");
+      expect(log).toHaveBeenCalledWith("scryfall_failed", expect.anything());
+    },
+  );
+});
+
+describe("a fuzzy hit keeps the typed name (T14, AC-9)", () => {
+  test('"esper sentinal" renders the Esper Sentinel header; the form keeps the typed name; no redirect', async () => {
+    const named = scryfallCard({ name: "Esper Sentinel" });
+    fetchMock.mockImplementation(async (url) =>
+      String(url).includes("/cards/named")
+        ? Response.json(named)
+        : Response.json({
+            object: "list",
+            total_cards: ESPER_SENTINEL_PRINTS.length,
+            has_more: false,
+            data: ESPER_SENTINEL_PRINTS,
+          }),
+    );
+    await renderSettled("esper%20sentinal", { price: "74.99" });
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Esper Sentinel",
+    );
+    expect(cardInput()).toHaveValue("esper sentinal");
+    expect(document.querySelector(".mm-rec-panel")).not.toBeNull();
+    expect(screen.queryByText(UI_COPY.cardNotFound)).toBeNull();
+    expect(cardInput()).not.toHaveAttribute("aria-describedby");
+    expect(redirect).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+  });
+});
+
+describe("no price: the prefilled form, no Scryfall call (T20, AC-16; C2-B.11 = A)", () => {
+  test.each<[string, string, Record<string, string>, string]>([
+    ["/import", "import", {}, "import"],
+    ["/about", "about", {}, "about"],
+    ["/Esper%20Sentinel", "Esper%20Sentinel", {}, "Esper Sentinel"],
+    [
+      "/Esper%20Sentinel?price=",
+      "Esper%20Sentinel",
+      { price: "" },
+      "Esper Sentinel",
+    ],
+    ["?price=%20", "Esper%20Sentinel", { price: " " }, "Esper Sentinel"],
+  ])(
+    "%s → the decoded card, an empty price, submit disabled with the helper",
+    async (_name, card, search, decoded) => {
+      const tree = await page(card, search);
+      const elements = elementsIn(tree);
+      expect(elements.some((e) => e.type === ResultSlot)).toBe(false);
+      expect(elements.some((e) => e.type === ResultPanel)).toBe(false);
+      render(tree);
+      expect(cardInput()).toHaveValue(decoded);
+      expect(priceInput()).toHaveValue("");
+      const submit = screen.getByRole("button", { name: "Evaluate" });
+      expect(submit).toBeDisabled();
+      expect(submit).toHaveAccessibleDescription(UI_COPY.submitHelper);
+      expect(screen.queryByText(UI_COPY.validationError)).toBeNull();
+      expect(document.querySelector(".mm-result-slot")).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -1,5 +1,7 @@
 // T9 (AC-1, AC-4, AC-13), T15 (AC-6, end to end) and T21 (AC-13):
 // buildEvaluation with Scryfall and the reader mocked, through the real engine.
+// S2.4 adds T10 (AC-6, AC-7: the two misses compute nothing), T11 (AC-8: a
+// failure is never a miss) and T14's unit half (AC-9: a fuzzy hit).
 import {
   ESPER_SENTINEL_PRINTS,
   MH2_12_ID,
@@ -8,7 +10,8 @@ import {
 import * as engine from "@/lib/recommendation/engine";
 import { dailyHistory } from "@/lib/recommendation/fixtures";
 import type { RecommendationInput } from "@/lib/recommendation/types";
-import { getCardByName } from "@/lib/scryfall";
+import { getCardByName, ScryfallApiError } from "@/lib/scryfall";
+import { throttle, ThrottleBacklogError } from "@/lib/throttle";
 import type { ScryfallCard } from "@/types/scryfall";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
@@ -32,7 +35,10 @@ vi.mock("@/lib/recommendation/engine", async (importOriginal) => {
     computeRecommendation: vi.fn(actual.computeRecommendation),
   };
 });
-vi.mock("@/lib/throttle", () => ({ throttle: () => Promise.resolve() }));
+vi.mock("@/lib/throttle", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/throttle")>();
+  return { ...actual, throttle: vi.fn(() => Promise.resolve()) };
+});
 
 const computeSpy = vi.mocked(engine.computeRecommendation);
 const NOW = new Date("2026-10-10T12:00:00.000Z");
@@ -132,7 +138,7 @@ describe("Scryfall failures → the error panel, nothing computed (T9, AC-4)", (
         ),
     ],
   ])(
-    "a named lookup that %s → error; prints, reader and engine 0 calls",
+    "a named lookup that %s → error, never a miss; prints, reader and engine 0 calls (T11, AC-8)",
     async (_name, answer) => {
       fetchMock.mockImplementation(answer);
       const { deps, scryfall, reader, log } = depsWith({ getCardByName });
@@ -142,6 +148,7 @@ describe("Scryfall failures → the error panel, nothing computed (T9, AC-4)", (
       expect(vi.mocked(reader.getPriceHistory)).not.toHaveBeenCalled();
       expect(vi.mocked(reader.getHistoryFreshness)).not.toHaveBeenCalled();
       expect(computeSpy).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledOnce();
       expect(log).toHaveBeenCalledWith("scryfall_failed", expect.anything());
     },
   );
@@ -164,6 +171,25 @@ describe("Scryfall failures → the error panel, nothing computed (T9, AC-4)", (
     expect(computeSpy).not.toHaveBeenCalled();
   });
 
+  test("a named lookup that answers 404 ambiguous through fetch → ambiguous, not error", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          object: "error",
+          code: "not_found",
+          status: 404,
+          type: "ambiguous",
+          details: "x",
+        }),
+        { status: 404 },
+      ),
+    );
+    const { deps } = depsWith({ getCardByName });
+    expect(await buildEvaluation(query(7499), deps)).toEqual({
+      status: "ambiguous",
+    });
+  });
+
   test("a prints page failure → error, the reader at 0 calls", async () => {
     const { deps, reader } = depsWith({
       getAllPrintings: async () => {
@@ -178,21 +204,188 @@ describe("Scryfall failures → the error panel, nothing computed (T9, AC-4)", (
   });
 });
 
+describe("lookup misses compute nothing (T10, AC-6, AC-7)", () => {
+  const miss = (type?: string) => async () => {
+    throw new ScryfallApiError(404, "not_found", "x", type);
+  };
+
+  test.each<[string, string | undefined, "ambiguous" | "not_found"]>([
+    ["jace", "ambiguous", "ambiguous"],
+    ["asdfqwer", undefined, "not_found"],
+  ])(
+    "%j: a 404 with type %s → %s; prints, reader and engine 0 calls, nothing logged",
+    async (card, type, status) => {
+      const { deps, scryfall, reader, log } = depsWith({
+        getCardByName: miss(type),
+      });
+      const result = await buildEvaluation(
+        { card, askingPriceCents: 500, finish: "normal" },
+        deps,
+      );
+      expect(result).toEqual({ status });
+      expect(scryfall.getCardByName).toHaveBeenCalledExactlyOnceWith(
+        card,
+        true,
+      );
+      expect(scryfall.getAllPrintings).not.toHaveBeenCalled();
+      expect(vi.mocked(reader.getPriceHistory)).not.toHaveBeenCalled();
+      expect(vi.mocked(reader.getHistoryFreshness)).not.toHaveBeenCalled();
+      expect(computeSpy).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+    },
+  );
+
+  test("the same misses through the real getCardByName with fetch mocked", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const body = (type?: string) =>
+        new Response(
+          JSON.stringify({
+            object: "error",
+            code: "not_found",
+            status: 404,
+            ...(type ? { type } : {}),
+            details: "x",
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } },
+        );
+      fetchMock.mockResolvedValueOnce(body("ambiguous"));
+      const ambiguous = depsWith({ getCardByName });
+      expect(
+        await buildEvaluation(
+          { card: "jace", askingPriceCents: 500, finish: "normal" },
+          ambiguous.deps,
+        ),
+      ).toEqual({ status: "ambiguous" });
+      fetchMock.mockResolvedValueOnce(body());
+      const unknown = depsWith({ getCardByName });
+      expect(
+        await buildEvaluation(
+          { card: "asdfqwer", askingPriceCents: 500, finish: "normal" },
+          unknown.deps,
+        ),
+      ).toEqual({ status: "not_found" });
+      for (const { scryfall, log } of [ambiguous, unknown]) {
+        expect(scryfall.getAllPrintings).not.toHaveBeenCalled();
+        expect(log).not.toHaveBeenCalled();
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(computeSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("a failure is never a miss (T11, AC-8)", () => {
+  test("a full throttle queue on the named lookup → error, logged once", async () => {
+    vi.mocked(throttle).mockRejectedValueOnce(new ThrottleBacklogError(5000));
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const { deps, scryfall, reader, log } = depsWith({ getCardByName });
+      expect(await buildEvaluation(query(7499), deps)).toEqual({
+        status: "error",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledOnce();
+      expect(log).toHaveBeenCalledWith(
+        "scryfall_failed",
+        expect.any(ThrottleBacklogError),
+      );
+      expect(scryfall.getAllPrintings).not.toHaveBeenCalled();
+      expect(vi.mocked(reader.getPriceHistory)).not.toHaveBeenCalled();
+      expect(computeSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test.each([
+    ["404 ambiguous", new ScryfallApiError(404, "not_found", "x", "ambiguous")],
+    ["404", new ScryfallApiError(404, "not_found", "x")],
+    ["503", new ScryfallApiError(503, "x", "x")],
+  ])(
+    "getAllPrintings throwing a %s ScryfallApiError → error, never a miss",
+    async (_name, error) => {
+      const { deps, reader, log } = depsWith({
+        getAllPrintings: async () => {
+          throw error;
+        },
+      });
+      expect(await buildEvaluation(query(7499), deps)).toEqual({
+        status: "error",
+      });
+      expect(log).toHaveBeenCalledExactlyOnceWith("scryfall_failed", error);
+      expect(vi.mocked(reader.getPriceHistory)).not.toHaveBeenCalled();
+      expect(computeSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each<[string, unknown]>([
+    ["null", null],
+    ["undefined", undefined],
+    ["a string", "Esper Sentinel"],
+    ["a number", 5],
+  ])(
+    "a lookup resolving %s → error (scryfall_malformed), nothing else called",
+    async (_name, value) => {
+      const { deps, scryfall, reader, log } = depsWith({
+        getCardByName: async () => value as ScryfallCard,
+      });
+      expect(await buildEvaluation(query(7499), deps)).toEqual({
+        status: "error",
+      });
+      expect(log).toHaveBeenCalledExactlyOnceWith(
+        "scryfall_malformed",
+        expect.any(TypeError),
+      );
+      expect(scryfall.getAllPrintings).not.toHaveBeenCalled();
+      expect(vi.mocked(reader.getPriceHistory)).not.toHaveBeenCalled();
+      expect(computeSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each<[string, unknown]>([
+    ["a TypeError", new TypeError("fetch failed")],
+    ["a 429", new ScryfallApiError(429, "x", "x")],
+    ["a string", "boom"],
+    ["undefined", undefined],
+  ])(
+    "a lookup throwing %s → error, logged once as scryfall_failed",
+    async (_name, thrown) => {
+      const { deps, log } = depsWith({
+        getCardByName: async () => {
+          throw thrown;
+        },
+      });
+      expect(await buildEvaluation(query(7499), deps)).toEqual({
+        status: "error",
+      });
+      expect(log).toHaveBeenCalledExactlyOnceWith("scryfall_failed", thrown);
+    },
+  );
+});
+
 describe("lookup outcomes (T9)", () => {
-  test("a null lookup → not_found, nothing computed", async () => {
-    const { deps, scryfall, reader } = depsWith({
-      getCardByName: async () => null,
+  test("a fuzzy hit evaluates the resolved card (T14, AC-9)", async () => {
+    const resolved = scryfallCard({ id: MH2_12_ID, name: "Esper Sentinel" });
+    const { deps, scryfall } = depsWith({
+      getCardByName: async () => resolved,
     });
-    expect(await buildEvaluation(query(7499), deps)).toEqual({
-      status: "not_found",
-    });
+    const result = ok(
+      await buildEvaluation(
+        { card: "esper sentinal", askingPriceCents: 7499, finish: "normal" },
+        deps,
+      ),
+    );
     expect(scryfall.getCardByName).toHaveBeenCalledExactlyOnceWith(
-      "Esper Sentinel",
+      "esper sentinal",
       true,
     );
-    expect(scryfall.getAllPrintings).not.toHaveBeenCalled();
-    expect(vi.mocked(reader.getPriceHistory)).not.toHaveBeenCalled();
-    expect(computeSpy).not.toHaveBeenCalled();
+    expect(result.printing.name).toBe("Esper Sentinel");
+    expect(scryfall.getAllPrintings).toHaveBeenCalledExactlyOnceWith(resolved);
   });
 
   test.each([

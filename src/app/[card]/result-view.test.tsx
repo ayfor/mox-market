@@ -243,11 +243,32 @@ describe("error and not-found states (T14, AC-4; S2.1d6)", () => {
     expect(container).not.toHaveTextContent(RECOMMENDATION_DISCLAIMER);
   });
 
-  test("not_found renders only the not-found copy", () => {
+  test("not_found renders only the not-found copy (S2.4 AC-7)", () => {
     const { container } = render(
       <ResultView evaluation={{ status: "not_found" }} />,
     );
     expect(container.textContent).toBe(UI_COPY.cardNotFound);
+    expect(container.querySelector('[data-status="not_found"]')).not.toBeNull();
+  });
+
+  test("ambiguous renders only the pick-a-suggestion copy (S2.4 AC-6)", () => {
+    const { container } = render(
+      <ResultView evaluation={{ status: "ambiguous" }} />,
+    );
+    expect(container.textContent).toBe(UI_COPY.ambiguousCard);
+    expect(container.querySelector('[data-status="ambiguous"]')).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  test("error renders the error copy and Retry, never a miss string (S2.4 T13, AC-8)", () => {
+    const { container } = render(
+      <ResultView evaluation={{ status: "error" }} />,
+    );
+    expect(container).toHaveTextContent(UI_COPY.errorPanel);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(container).not.toHaveTextContent(UI_COPY.cardNotFound);
+    expect(container).not.toHaveTextContent(UI_COPY.ambiguousCard);
+    expect(container.querySelector(".mm-lookup-miss")).toBeNull();
   });
 
   test("invalid renders only the validation copy", () => {

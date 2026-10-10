@@ -49,15 +49,13 @@
   transform-origin: center center;
   --landing-scale-w: tan(atan2(calc(100vw - 48px), 1344px));
   --landing-scale-h: tan(atan2(calc(100vh - 48px), 804px));
-  transform: scale(
-    min(1.4, var(--landing-scale-w), var(--landing-scale-h))
-  );
+  transform: scale(min(1.4, var(--landing-scale-w), var(--landing-scale-h)));
 }
 
 /* ───── PANEL — shared shell ─────
-   Border + shadow match the bento tiles in /sample (.mm-tile):
-   subtle 0.08 white edge, soft drop shadow, gloss comes from the
-   backdrop-filter blur on each panel's interior. */
+   Border + shadow match the V2 glass tiles: subtle 0.08 white edge,
+   soft drop shadow, gloss comes from the backdrop-filter blur on each
+   panel's interior. */
 .landing-panel {
   position: relative;
   width: 100%;
@@ -383,12 +381,45 @@
     border-color 120ms ease,
     transform 120ms ease;
 }
-.landing-form-submit:hover {
+.landing-form-submit:hover:not(:disabled) {
   background: #b8003c;
   border-color: #b8003c;
 }
-.landing-form-submit:active {
+.landing-form-submit:active:not(:disabled) {
   transform: translateY(1px);
+}
+.landing-form-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.landing-form-submit[aria-busy="true"] {
+  cursor: progress;
+}
+.landing-form-input[aria-invalid="true"] {
+  box-shadow: 0 0 0 2px rgba(158, 0, 49, 0.8);
+}
+
+/* The helper and the inline errors (S2.4d4) sit in the 42px under the
+   form, out of the flex row, so the designed panels never move. */
+.landing-form-messages {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.landing-form-hint,
+.landing-form-error {
+  margin: 0;
+  font: 500 13px/1.2 var(--font-sans);
+}
+.landing-form-hint {
+  color: var(--mox-grey-olive);
+}
+.landing-form-error {
+  color: var(--mox-white);
 }
 
 /* Note: viewport-width responsiveness for desktop is handled by the
