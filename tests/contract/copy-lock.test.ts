@@ -516,14 +516,11 @@ function duplicates(file: string, source: string): string[] {
 
 /**
  * Exempt from the single-source scan. fixtures.ts is test data, deliberately
- * independent of copy.ts (S1.3d12). The /sample demo is V1 copy that S2.4
- * deletes (S2.4 AC-12); the test below fails once the file is gone, so S2.4
- * drops the entry in the same PR.
+ * independent of copy.ts (S1.3d12). S2.4 deleted the V1 demo and dropped its
+ * entry (S2.4 AC-12, S2.4d12); the test below fails on any entry whose file
+ * is gone.
  */
-const SINGLE_SOURCE_EXEMPT = new Set([
-  "src/lib/recommendation/fixtures.ts",
-  "src/app/sample/decision-analysis.tsx",
-]);
+const SINGLE_SOURCE_EXEMPT = new Set(["src/lib/recommendation/fixtures.ts"]);
 
 describe("every locked sentence has one home (T19, C1.54)", () => {
   test("the locked set holds the sentences that matter", () => {

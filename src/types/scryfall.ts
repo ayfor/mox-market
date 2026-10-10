@@ -149,6 +149,8 @@ export interface ScryfallError {
   code: string;
   status: number;
   details: string;
+  /** Set on some errors, e.g. "ambiguous" on a fuzzy named lookup's 404 (S2.4 AC-5). */
+  type?: string;
 }
 
 // ----- App-level types -----

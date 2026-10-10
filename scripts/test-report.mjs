@@ -68,6 +68,12 @@ export const FEATURES = [
       // surface's labels.
       /src\/lib\/(printings|scryfall)/,
       /src\/lib\/copy\/result-labels/,
+      // S2.4d14: the entry points: the link builder, the shared submit path,
+      // the landing form and its copy, and the Scryfall error type.
+      /src\/lib\/(result-href|entry-submit)/,
+      /src\/app\/landing-form/,
+      /src\/lib\/copy\/entry-points/,
+      /src\/types\/scryfall/,
     ],
   ],
   [
@@ -203,7 +209,7 @@ export function renderReport(
   );
   L.push("");
   L.push(
-    "_No e2e suite yet; S2.1's plan gate added no Playwright (S2.1d17), revisited at S2.4._",
+    "_No e2e suite yet; S2.1 and S2.4 added no Playwright (S2.1d17, S2.4d13); entry journeys are covered by RTL and a local production build._",
   );
   L.push("");
 

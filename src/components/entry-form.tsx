@@ -1,18 +1,16 @@
 "use client";
 
-// The entry form (S2.1d5, S2.1d16; AC-9): card search and asking price.
-// Empty fields disable submit with the helper; a card that fails the
-// server's guard or an invalid price shows its message inline and never
-// navigates (ADV-6). A valid submit pushes the result route inside the shared
-// transition, so the result slot shows the skeleton at once (AC-8); a newer
-// submit while one is pending navigates again, and the latest wins (ADV-8).
-// /evaluate uses it today; S2.4 adds the landing form.
+// The entry form (S2.1d5, S2.1d16; AC-9): card search and asking price, on
+// /evaluate and above every result or lookup miss. Empty fields disable
+// submit with the helper; a card that fails the server's guard or an invalid
+// price shows its message inline and never navigates (ADV-6). A valid submit
+// sets the one-shot marker, then pushes resultHref(card, price) inside the
+// shared transition, so the result slot shows the skeleton at once (AC-8); a
+// newer submit while one is pending navigates again, and the latest wins
+// (ADV-8). The validator and the marker are shared with the landing form
+// (S2.4d3).
 import { FORM_LABELS } from "@/lib/copy/result-labels";
-import {
-  normalisePrice,
-  parseCardParam,
-  parsePriceCents,
-} from "@/lib/evaluation/result-params";
+import { checkEntry, markSubmit } from "@/lib/entry-submit";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import { useId, useRef, useState, type FormEvent, type SVGProps } from "react";
 import { CardCombobox } from "./card-combobox";
@@ -38,11 +36,6 @@ const ArrowRightIcon = (p: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
-
-/** The result route for a card and a typed price; finish defaults to normal. */
-function resultHref(card: string, price: string): string {
-  return `/${encodeURIComponent(card.trim())}?price=${encodeURIComponent(normalisePrice(price))}`;
-}
 
 interface FieldValues {
   readonly card: string;
@@ -104,25 +97,28 @@ export function EntryForm({
     });
   }
 
-  const empty = card.trim() === "" || price.trim() === "";
+  const empty = checkEntry(card, price).status === "empty";
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (empty) return;
-    if (parseCardParam(card) === null) {
+    const entry = checkEntry(card, price);
+    if (entry.status === "empty") return;
+    if (entry.status === "bad_card") {
       setCardError(true);
       return;
     }
-    if (parsePriceCents(price) === null) {
+    if (entry.status === "bad_price") {
       setError(true);
       return;
     }
-    const href = resultHref(card, price);
+    const href = entry.href;
     // The same query again while it loads changes nothing; a different one
     // supersedes it.
     if (navigation.isPending && href === lastHref.current) return;
     lastHref.current = href;
     setBaseline({ card, price });
+    // The marker first, so S5.1 finds it on the page the push lands on.
+    markSubmit(href);
     navigation.navigate(href);
   };
 
