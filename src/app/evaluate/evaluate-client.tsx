@@ -234,6 +234,7 @@ type RecentRowProps = {
 };
 
 function RecentRow({ row, onRemove, onClick }: RecentRowProps) {
+  // eslint-disable-next-line react-hooks/purity -- removed by S2.1 (C1.44)
   const stale = Date.now() - row.timestamp > STALE_MS;
   return (
     <a
@@ -356,6 +357,7 @@ export function EvaluatePageClient() {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored) as RecentEvaluation[];
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- removed by S2.1 (C1.44)
         if (Array.isArray(parsed)) setRecent(parsed);
       }
     } catch {

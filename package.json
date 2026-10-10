@@ -2,12 +2,17 @@
   "name": "@tss/mox-market",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "^22.13.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
     "postinstall": "prisma generate",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:report": "node scripts/test-report.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {
@@ -15,7 +20,6 @@
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "@tailwindcss/postcss": "^4.2.2",
-    "@vercel/postgres": "^0.10.0",
     "clsx": "^2.1.1",
     "dotenv": "^17.3.1",
     "geist": "^1.4.2",
@@ -25,19 +29,25 @@
     "prisma": "^7.5.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "recharts": "^2.15.3",
-    "tailwindcss": "^4.2.2",
-    "zustand": "^5.0.6"
+    "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^24.1.0",
     "@types/pg": "^8.20.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "^6.1.2",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.1.6",
+    "jsdom": "^29.1.1",
     "prettier": "^3.6.2",
     "prettier-plugin-organize-imports": "^4.2.0",
     "prettier-plugin-tailwindcss": "^0.7.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "4.1.11"
   },
   "overrides": {
     "@types/react": "19.2.14",
