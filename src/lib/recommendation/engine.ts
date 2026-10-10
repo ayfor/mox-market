@@ -1,3 +1,5 @@
+import "server-only";
+
 // F1 Tier-1 price-only engine (S1.2). Pure: no React, Next, clock or
 // randomness, and inputs are never mutated. Money is integer cents.
 // Check order (F1 W1 step 2b, S1.2d2): validate the input (throws), then the
