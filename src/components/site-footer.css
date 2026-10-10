@@ -1,0 +1,41 @@
+/* Mox Market — site footer (ruling R6, S2.2).
+   RootLayout renders it once, as the last child of <body>, on every route.
+   Plain, always-visible legal text: no hover reveal, no collapse (AC-6).
+   Normal document flow, never fixed or sticky (S2.2d5). Tokens only.
+   tests/contract/site-footer.test.ts checks visibility, contrast and size. */
+
+.mm-site-footer {
+  /* The same lift as .mm-app > *: paints above the fixed grain overlays. */
+  position: relative;
+  z-index: 1;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--mox-space-6) var(--mox-space-4) var(--mox-space-8);
+  border-top: 1px solid var(--glass-stroke-soft);
+  font: var(--ts-caption);
+  color: var(--fg-secondary);
+  text-align: center;
+}
+
+.mm-site-footer-line {
+  margin: 0;
+}
+
+.mm-site-footer-line + .mm-site-footer-line {
+  margin-top: var(--mox-space-1);
+}
+
+.mm-site-footer-link {
+  color: var(--fg-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.mm-site-footer-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.mm-site-footer-link:focus-visible {
+  outline: 2px solid var(--fg-primary);
+  outline-offset: 2px;
+}

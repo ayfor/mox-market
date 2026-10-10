@@ -333,17 +333,6 @@ function RecentSection({
   );
 }
 
-/* ─── Footer ─── */
-
-function Footer() {
-  return (
-    <footer className="mm-footer">
-      Prices aggregated from Scryfall across TCGplayer, CardKingdom and
-      CardMarket. Updated every 4 hours. Not financial advice.
-    </footer>
-  );
-}
-
 /* ─── Page ─── */
 
 export function EvaluatePageClient() {
@@ -435,7 +424,6 @@ export function EvaluatePageClient() {
           onRowClick={handleRowClick}
           onClearAll={handleClearAll}
         />
-        <Footer />
       </div>
     </div>
   );

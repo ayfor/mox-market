@@ -1,6 +1,8 @@
-import localFont from "next/font/local";
 import type { Metadata } from "next";
+import localFont from "next/font/local";
 import type React from "react";
+
+import { SiteFooter } from "@/components/site-footer";
 import "./globals.css";
 
 const InterVariable = localFont({
@@ -27,7 +29,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={InterVariable.variable}>
-      <body>{children}</body>
+      <body>
+        {children}
+        <SiteFooter />
+      </body>
     </html>
   );
 }

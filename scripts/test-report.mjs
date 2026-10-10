@@ -59,6 +59,11 @@ export const FEATURES = [
       /src\/lib\/evaluation/,
       /ui-copy/,
       /src\/app\/(layout|page)\.test/,
+      // S2.2d13: the legal copy module, the footer contract and the spec
+      // reader. `legal` alone, so S1.3's reason copy can still map to F1.
+      /src\/lib\/copy\/legal/,
+      /site-footer/,
+      /attribution/,
     ],
   ],
   [

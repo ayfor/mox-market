@@ -86,3 +86,4 @@ RULING — *"1 - A, 2 - A, 3 - A, 4 - A, 5 - A"*:
 
 ## 2026-10-10 — Night run (Josh's overnight directive)
 MERGED — S1.1 Engine contract, params & test tooling baseline: F1's typed engine contract and RECOMMENDATION_PARAMS land with Vitest 4 + RTL, ESLint 9, the Node 22 pin, a postgres:16 CI workflow and the 0000_baseline migration behind the prod-migrate guard; adversarial review 8 findings (8 fixed); Codex 1 comment (1 fixed).
+MERGED — S2.2 Attribution footer & recommendation disclaimer: one SiteFooter from the root layout renders the three R6 attribution lines and the Fan Content Policy link verbatim from the spec through src/lib/copy/legal.ts (which also holds the recommendation disclaimer for S2.1), and the false per-page footers on /evaluate and /sample are gone, with production still paused (C2-B.2); adversarial review 6 findings (6 fixed); Codex 0 comments (none to fix).
