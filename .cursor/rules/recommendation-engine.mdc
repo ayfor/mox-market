@@ -12,5 +12,5 @@ alwaysApply: false
 - Boundary rule: strict inequalities. `buy` iff delta < buyThreshold; `wait` iff delta > waitThreshold; equality lands `fair`.
 - User-input problems throw `InvalidRecommendationInputError`. Market-data problems never throw; they return `insufficient_data`.
 - Reason strings come from the locked templates in `copy.ts`. Forbidden words (lint-tested): likely, expect, expected, will rise, will fall, will drop, will climb, should, probably, forecast, predict.
-- Worked examples A–E are canonical fixtures. A param change that flips one updates the fixture in the same PR, and the diff is the review artifact.
+- The F1 design's worked examples (A–G, A-rising, D-buy, D0) are canonical fixtures. A param change that flips one updates the fixture in the same PR, and the diff is the review artifact.
 - History arrays are oldest → newest, may be sparse, and all counting windows are the trailing 30 UTC days.

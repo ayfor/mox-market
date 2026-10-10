@@ -1,13 +1,13 @@
 # Mox Market — Agent Instructions
 
-Read this whole file before any work. It applies to every AI agent working in this repo: Cursor, Claude Code, and others. Claude Code loads it through `CLAUDE.md`. Bitey compiles it from the Notion Standards page; Notion is canonical and this file is generated. Last compiled: 2026-10-05. The Standards page is still **Draft**, and 27 rulings are open (see "Open rulings").
+Read this whole file before any work. It applies to every AI agent working in this repo: Cursor, Claude Code, and others. Claude Code loads it through `CLAUDE.md`. Bitey compiles it from the Notion Standards page; Notion is canonical and this file is generated. Last compiled: 2026-10-08. The Standards page is still **Draft**, and 27 rulings are open (see "Open rulings").
 
 ## Roles
 
 | Lane | Who | Does | Never |
 |------|-----|------|-------|
 | **Implementer** | Cursor agents always, and any Claude Code session not booted as Bitey | Builds one approved story on its existing story branch, writes its tests, keeps the plan doc's Session Log, sets its own story's Notion `Status` | Writes plans for itself, edits Notion beyond its own `Status`, writes to Figma, edits the harness, merges, pushes to `main` |
-| **Bitey** | Josh's Claude Code companion, booted from `~/Documents/bitey-a/` | Compiles plans, creates story branches and draft PRs, commits `.cursor/hooks/active-story.json` on each story branch, keeps `story-pages.json` current, writes all other Notion fields, runs critiques, flips PRs to ready, monitors CI | Merges |
+| **Bitey** | Josh's Claude Code companion, booted from `~/Documents/bitey-a/` | Compiles plans, creates story branches and draft PRs, commits `.cursor/hooks/active-story.json` on each story branch and deletes it in the branch's last commit before the PR goes ready (it must never reach `main`), keeps `story-pages.json` current, writes all other Notion fields, runs critiques, flips PRs to ready, monitors CI | Merges |
 | **Josh** | Owner | Rules, approves plans, merges every PR | — |
 
 The Git, Databases, Migrations, Secrets, Endpoints and Legal-text limits bind **every** agent, Bitey included. The Notion, Figma and Harness limits bind implementers. In Cursor a hook enforces the Notion and Figma limits. In Claude Code nothing enforces them, so they are instructions there.
@@ -71,7 +71,7 @@ Before setting `In Review`: build and tests green locally, and lint green once S
 - **Recommendations are computed server-side** and shipped as rendered HTML. No client-side engine.
 - **Price history is addressed by `(scryfall_id, finish)`.** Never merge history across printings or finishes.
 - **Prettier formats source code** (organize-imports and tailwindcss plugins). Format only the files you change; do not reformat the repo.
-- **Canonical fixtures are the worked examples A–E** in the F1 design. Any param change that flips a fixture updates the fixture in the same PR.
+- **Canonical fixtures are the worked examples in the F1 design** (A–G, A-rising, D-buy, D0). Any param change that flips a fixture updates the fixture in the same PR.
 - Do not touch `src/generated/`. Name any new dependency in the PR body.
 
 ## Workflow for every story
@@ -100,7 +100,7 @@ Before setting `In Review`: build and tests green locally, and lint green once S
   `{ env; cat .env* 2>/dev/null; } | grep -oE 'postgres(ql)?://[^[:space:]"]+' | sed -E 's#^[^@]*@##; s#[:/?].*##' | sort -u`
   If it shows anything other than `localhost` or `127.0.0.1`, stop. Production has no backups.
 - **Migrations:** Prisma Migrate is the only schema tool (ruling C1.01 = A). Author a migration only when your story's approved plan includes one. Numbering: `0000` baseline (S1.1), `0001` price_history (S0.1), `0002` recommendation_log (S5.1). Apply migrations only to a local database; applying to production is Josh's step, after a manual `pg_dump` before any destructive change.
-- **Secrets:** never commit `.env*`, never print environment values, never paste keys into chat or logs.
+- **Secrets:** never commit `.env*` files other than the placeholder-only `.env.example`; never print environment values; never paste keys into chat or logs.
 - **Endpoints:** never call `/api/prices/snapshot` with any method. Its GET writes rows for the cron, and its POST has no authentication.
 - **Writes:** no database writes in page renders or GET route handlers; use Server Actions or POST handlers. The one exception is a secret-guarded cron route, as described under Rulings.
 - **Thresholds and copy:** do not change `RECOMMENDATION_PARAMS` values or the locked copy table text without a plan-doc deviation and Josh's ruling.
