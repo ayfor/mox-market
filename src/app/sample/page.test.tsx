@@ -5,6 +5,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import {
+  FALSE_FOOTER_CLAIMS,
   FOOTER_HEADING,
   readSpec,
   readSpecBlockquotes,
@@ -49,6 +50,6 @@ describe("route /sample inside RootLayout (T10)", () => {
   });
 
   test("carries none of the false per-page footer claims", () => {
-    expect(html).not.toMatch(/CardKingdom|CardMarket|Updated every 4 hours/i);
+    expect(html).not.toMatch(FALSE_FOOTER_CLAIMS);
   });
 });

@@ -132,6 +132,64 @@ describe("readSpecBlockquotes on fixtures (T1)", () => {
     ]);
   });
 
+  test("a lazy continuation line after a blockquote throws instead of being dropped (ADV.4)", () => {
+    const md = [
+      "## Site footer, every page",
+      "> Line one.",
+      "Appended lazy sentence.",
+      "",
+      "> Line two.",
+      "",
+      "> Line three.",
+    ].join("\n");
+    const read = () => readSpecBlockquotes(md, FOOTER_HEADING);
+    expect(read).toThrow(SpecSectionError);
+    expect(read).toThrow(/lazy continuation line .*"Appended lazy sentence\."/);
+  });
+
+  test("a lazy continuation line in another section's quote throws too, with CRLF", () => {
+    const md = fixture(
+      "## Site footer, every page",
+      "> ok",
+      "",
+      "## Recommendation-adjacent disclaimer",
+      "  > First part,",
+      "second part.",
+    ).replace(/\n/g, "\r\n");
+    expect(() => readSpecBlockquotes(md, DISCLAIMER_HEADING)).toThrow(
+      /lazy continuation/,
+    );
+    expect(readSpecBlockquotes(md, FOOTER_HEADING)).toEqual(["ok"]);
+  });
+
+  test.each([
+    ["a list item", "- Appended item."],
+    ["a thematic break", "---"],
+    ["an indented line", "    indented"],
+  ])(
+    "%s directly after a blockquote also throws (fail closed)",
+    (_name, next) => {
+      const md = fixture("## Site footer, every page", "> Line one.", next);
+      expect(() => readSpecBlockquotes(md, FOOTER_HEADING)).toThrow(
+        /lazy continuation/,
+      );
+    },
+  );
+
+  test("a blank line, or a fence, ends a blockquote without a lazy-continuation error", () => {
+    const md = fixture(
+      "## Site footer, every page",
+      "> a",
+      "   ",
+      "Prose.",
+      "> b",
+      "```",
+      "code",
+      "```",
+    );
+    expect(readSpecBlockquotes(md, FOOTER_HEADING)).toEqual(["a", "b"]);
+  });
+
   test("> with no following space is stripped", () => {
     const md = fixture("## Site footer, every page", ">Tight.");
     expect(readSpecBlockquotes(md, FOOTER_HEADING)).toEqual(["Tight."]);

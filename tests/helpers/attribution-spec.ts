@@ -34,6 +34,8 @@ export function readSpec(): string {
 const FENCE = /^ {0,3}(```|~~~)/;
 const SECTION_END = /^(#|##) /;
 const BLOCKQUOTE = /^ {0,3}>/;
+/** An ATX heading ends a blockquote in CommonMark; it is never a lazy continuation. */
+const ATX_HEADING = /^ {0,3}#{1,6}(?:\s|$)/;
 
 /**
  * The body lines of `## <heading>`, up to the next `# ` or `## ` heading or
@@ -76,7 +78,11 @@ function sectionLines(markdown: string, heading: string): string[] {
  * Every blockquote under `## <heading>`, in order. A blockquote is a maximal
  * run of lines starting `>` (up to three leading spaces); each line loses
  * `>` and one optional space, and the lines join with one space, trimmed.
- * Throws SpecSectionError when the section has no blockquote.
+ * Throws SpecSectionError when the section has no blockquote, and when a
+ * non-blank line without `>` other than an ATX heading directly follows a
+ * `>` line (ADV.4): CommonMark renders such a lazy continuation line inside
+ * the quote, so dropping it would let the legal text diverge from what the
+ * spec shows. Failing closed beats guessing which lines CommonMark keeps.
  */
 export function readSpecBlockquotes(
   markdown: string,
@@ -97,6 +103,10 @@ export function readSpecBlockquotes(
   for (const line of sectionLines(markdown, heading)) {
     if (BLOCKQUOTE.test(line)) {
       (run ??= []).push(line.replace(/^ {0,3}>\s?/, ""));
+    } else if (run && line.trim() !== "" && !ATX_HEADING.test(line)) {
+      throw new SpecSectionError(
+        `spec heading "## ${heading}" has a lazy continuation line after a blockquote: "${line.trim()}" (prefix it with ">" or separate it with a blank line)`,
+      );
     } else {
       flush();
     }
@@ -131,6 +141,15 @@ export function readSpecLinkTarget(
     `spec heading "## ${heading}" has no "${linkText}" links to <url> sentence`,
   );
 }
+
+/**
+ * AC-5 (ADV.6): the false claims the old per-page footers made, in any
+ * spelling: the vendors Card Kingdom and Cardmarket (with or without a
+ * space) and a four-hour refresh in digits or words. Prices come from
+ * TCGplayer and refresh daily (spec line 3).
+ */
+export const FALSE_FOOTER_CLAIMS =
+  /card\s*kingdom|card\s*market|every\s+(?:4|four)\s+hours/i;
 
 const CLAIM_PHRASES = [
   "trust our",

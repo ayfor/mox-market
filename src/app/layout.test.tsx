@@ -6,10 +6,15 @@ import type React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import {
+  FALSE_FOOTER_CLAIMS,
   FOOTER_HEADING,
   readSpec,
   readSpecBlockquotes,
 } from "../../tests/helpers/attribution-spec";
+import {
+  FOOTER_PATH,
+  type ModelElement,
+} from "../../tests/helpers/site-footer-css";
 import EvaluatePage from "./evaluate/page";
 import RootLayout from "./layout";
 import LandingPage from "./page";
@@ -65,9 +70,36 @@ describe("RootLayout renders SiteFooter (T8)", () => {
     const empty = renderInLayout(null).doc;
     expect(footerLines(empty)).toEqual(footerQuotes);
   });
-});
 
-const FALSE_CLAIMS = /CardKingdom|CardMarket|Updated every 4 hours/i;
+  test("the rendered footer path matches the CSS reach model (ADV.2)", () => {
+    // tests/contract/site-footer.test.ts decides which selectors can reach
+    // the footer from FOOTER_PATH; this pins that model to the real markup.
+    const shape = (el: Element | null) => ({
+      tag: el?.tagName.toLowerCase(),
+      classes: [...(el?.classList ?? [])],
+      attrs: [...(el?.attributes ?? [])].map((a) => a.name).sort(),
+    });
+    const modelShape = (m: ModelElement) => ({
+      tag: m.tag,
+      classes: [...m.classes],
+      attrs: [...m.attrs].sort(),
+    });
+    // html's one class is next/font's variable class (mocked here).
+    expect(shape(doc.documentElement)).toEqual({
+      ...modelShape(FOOTER_PATH.html),
+      classes: ["font-inter"],
+    });
+    expect(shape(doc.body)).toEqual(modelShape(FOOTER_PATH.body));
+    const footer = doc.querySelector("footer.mm-site-footer");
+    expect(shape(footer)).toEqual(modelShape(FOOTER_PATH.footer));
+    const lines = [...(footer?.children ?? [])];
+    expect(lines.map(shape)).toEqual(FOOTER_PATH.lines.map(modelShape));
+    expect([...lines[0].children].map(shape)).toEqual([
+      modelShape(FOOTER_PATH.link),
+    ]);
+    expect(lines.slice(1).map((l) => l.children.length)).toEqual([0, 0]);
+  });
+});
 
 describe.each([
   ["/", <LandingPage key="landing" />],
@@ -88,7 +120,7 @@ describe.each([
   });
 
   test("carries none of the false per-page footer claims", () => {
-    expect(html).not.toMatch(FALSE_CLAIMS);
+    expect(html).not.toMatch(FALSE_FOOTER_CLAIMS);
   });
 
   test("the footer is plain text: no details, dialog, button or hidden wrapper", () => {
