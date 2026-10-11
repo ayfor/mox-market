@@ -32,7 +32,16 @@ import { loadEnv } from "vite";
 export const FEATURES = [
   [
     "F0 · Price History",
-    [/price-history/i, /price_history/i, /price-sync/i, /mtgjson/i],
+    [
+      /price-history/i,
+      /price_history/i,
+      /price-sync/i,
+      /mtgjson/i,
+      // S0.3d1: the cron guard, the cron contract and the evidence harness.
+      /src\/lib\/cron-auth/,
+      /tests\/contract\/vercel-cron/,
+      /scripts\/sync-evidence/,
+    ],
   ],
   [
     "F3 · Market Adjustments",

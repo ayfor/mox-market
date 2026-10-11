@@ -36,6 +36,15 @@ export const BULK_MIN_FREE_BYTES = 340_000_000;
 /** A run still `running` after this long was abandoned (S0.3 marks it error). */
 export const STALE_RUN_MS = 3_600_000;
 
+/**
+ * The daily sync's own deadline (S0.3d15): 30 s under the route's
+ * maxDuration of 300 s. Checked between parsed entries and between chunks,
+ * so a hung source or database ends the run `error` ("deadline exceeded")
+ * with committed chunks kept and no prune, instead of a kill that leaves the
+ * row `running` until the next run marks it.
+ */
+export const SYNC_DEADLINE_MS = 270_000;
+
 /** F0's "re-checks size every 50 chunks" (identifier and price chunks both count). */
 export const BUDGET_RECHECK_CHUNKS = 50;
 

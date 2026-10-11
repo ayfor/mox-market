@@ -11,7 +11,7 @@ Design F0 (Approved 2026-10-10) and F2; story S0.2. One history, one source, no 
 - Window: the 31 UTC dates from runDate − 30 to runDate; older rows are pruned on every run. A date MTGJson did not publish stays a gap; nothing is synthesized.
 - Gate, per (printing, finish) series: kept when the card's EDHREC rank is at most 5,000 or the series' newest price is at least $1.00 (both inclusive). A cheap printing of an unranked card has no history, so its result reads `insufficient_data` by design.
 - Identity: MTGJson's UUID is mapped to Scryfall's card id through `AllIdentifiers` (`mtgjson_identifiers`), one preferred UUID per Scryfall id (side null, else `a`, else the lowest side), so a double-faced card's faces never write two different prices for one printing.
-- Loaded by the bulk ingest (`scripts/ingest-mtgjson-history.ts`, runbook `docs/runbooks/mtgjson-ingest.md`) from `AllPrices.json.gz` (90 days), and kept current by S0.3's daily sync from `AllPricesToday.json.gz`, through the same parser and transform.
+- Loaded by the bulk ingest (`scripts/ingest-mtgjson-history.ts`, runbook `docs/runbooks/mtgjson-ingest.md`) from `AllPrices.json.gz` (90 days), and kept current by S0.3's daily sync, the cron route `/api/prices/sync-mtgjson` at 17:00 UTC (`src/lib/mtgjson/sync.ts`), from `AllPricesToday.json.gz`, through the same parser and transform.
 
 ## Current price (F2)
 

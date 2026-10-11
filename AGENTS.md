@@ -1,6 +1,6 @@
 # Mox Market — Agent Instructions
 
-Read this whole file before any work. It applies to every AI agent working in this repo: Cursor, Claude Code, and others. Claude Code loads it through `CLAUDE.md`. Bitey compiles it from the Notion Standards page; Notion is canonical and this file is generated. Last compiled: 2026-10-08. The Standards page is still **Draft**, and 27 rulings are open (see "Open rulings").
+Read this whole file before any work. It applies to every AI agent working in this repo: Cursor, Claude Code, and others. Claude Code loads it through `CLAUDE.md`. Bitey compiles it from the Notion Standards page; Notion is canonical and this file is generated. Last compiled: 2026-10-11. The Standards page is still **Draft**, and 27 rulings are open (see "Open rulings").
 
 ## Roles
 
@@ -44,7 +44,7 @@ Bitey creates the branch `story/S#.#-slug`, commits the plan and `.cursor/hooks/
 - Tailwind CSS 4 with per-route CSS files and `src/app/tokens.css` (Mox jewel palette, glass panels). No new design language.
 - Prisma 7 with `@prisma/adapter-pg`; the client is generated into `src/generated/prisma` (gitignored, built by `postinstall`). Database: Supabase Postgres in production.
 - Scryfall API through `src/lib/scryfall.ts` (throttled). Prices are TCGplayer-sourced daily estimates.
-- Vercel hosting; a daily cron hits `/api/prices/snapshot`.
+- Vercel hosting; one daily cron hits `/api/prices/sync-mtgjson` at 17:00 UTC (F0's sync, S0.3; README "Daily price sync").
 - Headless UI, Zustand and Recharts are installed, but V2 code does not use them yet. `src/lib/card-cache.ts` is browser-only.
 - **Node 22 for every command**, including install, dev and build: Next 16 needs Node 20.9 or later and Prisma 7 needs 20.19 or later. The default shell is zsh with Node 18, and each agent shell call starts fresh, so load Node 22 in the same command every time: `source ~/.nvm/nvm.sh && nvm use 22 >/dev/null && npm run build`. Never install or switch Node globally.
 
@@ -59,6 +59,7 @@ Bitey creates the branch `story/S#.#-slug`, commits the plan and `.cursor/hooks/
 | Test | `npm test` (Vitest) | lands S1.1 (Vitest 4.x with React Testing Library, ruling C1.49 = A) |
 | Test report | `npm run test:report` → `docs/test-report.md` | lands S1.1 |
 | MTGJson ingest (paths A, B) | `npx tsx scripts/ingest-mtgjson-history.ts --dry-run` (A, no database); `npx tsx scripts/ingest-mtgjson-history.ts --source-dir .cache/mtgjson` (B, localhost only; host checks first) | since S0.2. Path C (`--production`) is Josh's alone: `docs/runbooks/mtgjson-ingest.md` |
+| Daily sync evidence (local only) | `POSTGRES_URL_NON_POOLING=<localhost URL> npx tsx scripts/sync-evidence.ts --source-dir .cache/mtgjson --days 7` (runs `runDailySync` on a local copy, then 7 re-dated days; refuses any non-local host before connecting) | since S0.3 |
 
 Before setting `In Review`: build and tests green locally, and lint green once S1.1 lands.
 
@@ -104,7 +105,7 @@ Before setting `In Review`: build and tests green locally, and lint green once S
   If it prints anything, stop. Production has no backups.
 - **Migrations:** Prisma Migrate is the only schema tool (ruling C1.01 = A). Author a migration only when your story's approved plan includes one. Numbering: `0000` baseline (S1.1), `0001` price_history (S0.1), `0002` recommendation_log (S5.1). Apply migrations only to a local database; applying to production is Josh's step, after a manual `pg_dump` before any destructive change.
 - **Secrets:** never commit `.env*` files other than the placeholder-only `.env.example`; never print environment values; never paste keys into chat or logs.
-- **Endpoints:** never call `/api/prices/snapshot` with any method. Its GET writes rows for the cron, and its POST has no authentication.
+- **Endpoints:** never call `/api/prices/sync-mtgjson` on any deployed URL, with any method: its GET writes to the production database, and only Vercel Cron calls it there. It is the narrow fail-closed exception to "no writes in GET handlers" (see Rulings): 500 while `CRON_SECRET` is unset, blank or `replace-me`, 401 on a missing or wrong `Authorization: Bearer` header, before any query or download. Trigger it only on `localhost` against a local database (README "Daily price sync"). V1's `/api/prices/snapshot` is deleted (S0.3); the live V1 build still has it behind a Firewall rule, so never call that path either.
 - **Writes:** no database writes in page renders or GET route handlers; use Server Actions or POST handlers. The one exception is a secret-guarded cron route, as described under Rulings.
 - **Thresholds and copy:** do not change `RECOMMENDATION_PARAMS` values or the locked copy table text without a plan-doc deviation and Josh's ruling.
 - **Legal text:** footer and disclaimer wording comes verbatim from `docs/specs/attribution-footer.md`. In code it lives in the copy module, and a test asserts it equals the spec. Never paraphrase it.
@@ -138,4 +139,4 @@ Josh's gate comments (2026-10-05) settled the last questions:
 - **Production deploys are paused.** The Vercel project's Ignored Build Step skips every production build, so merges to `main` do not deploy and the live site serves the March 2026 V1 build. Production resumes only after S2.1, S2.2 and S2.4 are on `main` and Josh signs off; F0's bulk history load runs the same day (ruling C2-B.2 = A). Preview deploys build normally.
 - **Keep-awake:** the Supabase free project pauses after 7 idle days, and a paused store fails every Vercel deployment. Until S0.3's cron runs in production, Josh runs a read-only query on a 5-day calendar reminder (ruling C2-A.2 = A). If PR checks fail with "Resource provisioning failed", the database has paused: stop and tell Josh.
 - The Supabase database was resumed on 2026-10-05 after a months-long pause. The live V1 site's history API still returns 500; leave it.
-- `/api/prices/snapshot` writes on GET and has an unauthenticated POST; `CRON_SECRET` was never set, so the GET guard is skipped too. A Vercel Firewall rule denies the path on the live site. Do not call it with any method; S0.3 deletes it.
+- *Update 2026-10-11 (S0.3):* V1's writer `/api/prices/snapshot` and its 06:00 UTC cron are deleted; `vercel.json` holds exactly one cron, `/api/prices/sync-mtgjson` at `0 17 * * *`, which runs F0's daily MTGJson sync (`src/lib/mtgjson/sync.ts`) through the shared `prisma` client. `CRON_SECRET` is unset in every Vercel environment, so the route answers 500 and writes nothing, previews included, until Josh sets it in Vercel **Production only** before production deploys resume. The live V1 build keeps its own copy of the old route, denied by a Vercel Firewall rule that Josh removes after a production deployment without it is live. The keep-awake reminder continues until the cron runs in production. The rollout order is `docs/runbooks/mtgjson-ingest.md`'s.

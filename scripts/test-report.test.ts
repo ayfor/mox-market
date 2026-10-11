@@ -95,6 +95,18 @@ const S02_TEST_FILES = [
   "tests/contract/mtgjson-env-order.test.ts",
 ] as const;
 
+/** S0.3's new test files (T20): all F0. readme.test.ts, which T18 extends, stays F1's. */
+const S03_TEST_FILES = [
+  "src/lib/cron-auth.test.ts",
+  "src/app/api/prices/sync-mtgjson/route.test.ts",
+  "src/lib/mtgjson/sync-handler.test.ts",
+  "src/lib/mtgjson/sync.test.ts",
+  "src/lib/mtgjson/prisma-db.test.ts",
+  "src/lib/mtgjson/sync.int.test.ts",
+  "tests/contract/vercel-cron.test.ts",
+  "scripts/sync-evidence.test.ts",
+] as const;
+
 describe("featureOf", () => {
   test.each([
     ["src/lib/price-history/reader.test.ts", "F0 · Price History"],
@@ -203,6 +215,10 @@ describe("featureOf", () => {
     // S0.2d26 (T20): every S0.2 test file maps to F0 through /mtgjson/i,
     // ahead of F1's scripts/ and tests/contract/ patterns.
     ...S02_TEST_FILES.map((file) => [file, "F0 · Price History"] as const),
+    // S0.3d1 (T20): the cron guard, the cron contract and the evidence
+    // harness map to F0 ahead of F1's tests/contract/ pattern.
+    ...S03_TEST_FILES.map((file) => [file, "F0 · Price History"] as const),
+    ["tests/contract/readme.test.ts", "F1 · Recommendation Engine"],
     ["tests/contract/dependencies.test.ts", "F1 · Recommendation Engine"],
   ])("%s → %s", (file, feature) => {
     expect(featureOf(file)).toBe(feature);
@@ -263,6 +279,17 @@ describe("featureOf", () => {
     );
     expect(report).not.toMatch(/\|\s*Unmapped\s*\|/);
     for (const file of S02_TEST_FILES) {
+      expect(report, file).toContain(`| \`${file}\` | F0 · Price History |`);
+    }
+  });
+
+  test("the committed docs/test-report.md lists S0.3's test files under F0 and has no Unmapped row (S0.3 T20)", () => {
+    const report = readFileSync(
+      path.join(__dirname, "..", "docs", "test-report.md"),
+      "utf8",
+    );
+    expect(report).not.toMatch(/\|\s*Unmapped\s*\|/);
+    for (const file of S03_TEST_FILES) {
       expect(report, file).toContain(`| \`${file}\` | F0 · Price History |`);
     }
   });

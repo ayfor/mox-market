@@ -228,3 +228,116 @@ describe("README Getting started (T23)", () => {
     expect(readme).not.toContain(text);
   });
 });
+
+// S0.3 T18 (AC-12; S0.3d18): the README documents the daily sync, its
+// fail-closed guard, CRON_SECRET in Production only, the Firewall rule by
+// purpose, and the rollout as step 0 plus the runbook's four steps, with the
+// runbook as the canonical order.
+describe("README Daily price sync (S0.3 T18)", () => {
+  const sync = section(readme, "Daily price sync", 2);
+  const rollout = section(readme, "Production rollout (Josh only)", 3);
+  const runbook = readFileSync(
+    path.join(ROOT, "docs", "runbooks", "mtgjson-ingest.md"),
+    "utf8",
+  );
+  const runbookSteps = (() => {
+    const lines = runbook.split("\n");
+    const start = lines.indexOf("### Production rollout order");
+    const end = lines.findIndex((l, i) => i > start && /^#{1,3} /.test(l));
+    return lines
+      .slice(start + 1, end === -1 ? undefined : end)
+      .filter((l) => /^\d+\. /.test(l));
+  })();
+  const readmeSteps = rollout.split("\n").filter((l) => /^\d+\. /.test(l));
+
+  test("names the route and its schedule", () => {
+    expect(sync).toContain("/api/prices/sync-mtgjson");
+    expect(sync).toContain("`0 17 * * *`");
+  });
+
+  test("states the guard: 500 when CRON_SECRET is unset, 401 on a wrong header", () => {
+    expect(sync).toMatch(/`CRON_SECRET` unset[^\n]*\*\*500\*\*/);
+    expect(sync).toMatch(
+      /wrong `Authorization: Bearer <CRON_SECRET>` header: \*\*401\*\*/,
+    );
+  });
+
+  test("CRON_SECRET in Vercel Production only, never Preview or Development, because previews share the production database", () => {
+    expect(sync).toMatch(
+      /`CRON_SECRET` goes in Vercel \*\*Production only\*\*, never Preview or Development, because previews share the production database/,
+    );
+  });
+
+  test("the Firewall rule stays until a production deployment without the V1 route is live, then is removed; the runbook names the path", () => {
+    expect(rollout).toMatch(
+      /Firewall rule[^\n]*stays in place until a production deployment without that route is live[^\n]*then Josh removes it[^\n]*runbook names the path/,
+    );
+    expect(readme).not.toContain(["prices", "snapshot"].join("/"));
+  });
+
+  test("links the runbook as the canonical order and duplicates no path C command", () => {
+    expect(rollout).toMatch(
+      /canonical order is the runbook's \[production rollout order\]\(docs\/runbooks\/mtgjson-ingest\.md#production-rollout-order\)/,
+    );
+    expect(rollout).not.toContain("--production");
+    expect(sync).not.toContain("--production");
+    expect(readme).not.toMatch(/before merging S0\.3|before S0\.3 merges/i);
+    expect(rollout).toContain("before production deploys resume");
+  });
+
+  test("step 0 is README Production (a) to (e), POSTGRES_SSL_ROOT_CERT included, before the first production deploy", () => {
+    const step0 = rollout.split("\n").find((l) => l.startsWith("0. "));
+    expect(step0).toMatch(
+      /^0\. Before the first production deploy: README "Production" steps \(a\) to \(d\), then step \(e\), `POSTGRES_SSL_ROOT_CERT`/,
+    );
+    expect(rollout.indexOf("0. ")).toBeLessThan(rollout.indexOf("1. "));
+  });
+
+  test("lists the runbook's four steps in the same order with the same key phrases", () => {
+    expect(runbookSteps).toHaveLength(4);
+    expect(readmeSteps.map((l) => l.slice(0, 2))).toEqual([
+      "0.",
+      "1.",
+      "2.",
+      "3.",
+      "4.",
+    ]);
+    const keyPhrases: string[][] = [
+      [
+        "Set `CRON_SECRET` in Vercel **Production only**, before production deploys resume",
+      ],
+      [
+        "Resume production deploys after S0.3 is merged and Josh signs off",
+        "a production deployment containing `/api/prices/sync-mtgjson` is live",
+      ],
+      ["The same UTC day: path C, identifiers then prices"],
+      [
+        "The next day: confirm a cron `ok` run whose `rows_written` is within 10% of the dry-run's rows/day",
+      ],
+    ];
+    keyPhrases.forEach((phrases, i) => {
+      for (const phrase of phrases) {
+        expect(runbookSteps[i], `runbook step ${i + 1}`).toContain(phrase);
+        expect(readmeSteps[i + 1], `README step ${i + 1}`).toContain(phrase);
+      }
+    });
+  });
+
+  test("the env table's CRON_SECRET row names the route and the fail-closed rule", () => {
+    const row = section(readme, "Environment", 3)
+      .split("\n")
+      .find((l) => l.startsWith("| `CRON_SECRET` |"));
+    expect(row).toContain("/api/prices/sync-mtgjson");
+    expect(row).toMatch(
+      /fails closed: 500 while it is unset[^|]*401 on a missing or wrong/,
+    );
+    expect(row).toMatch(/\*\*Production only\*\*/);
+  });
+
+  test("never tells anyone to call the route on a deployed URL", () => {
+    expect(sync).toMatch(/Never call the route on a deployed URL/);
+    const curl = sync.split("\n").filter((l) => l.startsWith("curl "));
+    expect(curl).toHaveLength(1);
+    expect(curl[0]).toContain("http://localhost:3000/api/prices/sync-mtgjson");
+  });
+});

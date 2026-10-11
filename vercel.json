@@ -1,8 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/prices/snapshot",
-      "schedule": "0 6 * * *"
+      "path": "/api/prices/sync-mtgjson",
+      "schedule": "0 17 * * *"
     }
   ]
 }
