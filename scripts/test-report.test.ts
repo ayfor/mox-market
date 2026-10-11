@@ -1,5 +1,5 @@
 // T10 (AC-6): the report script's pure functions.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -180,6 +180,23 @@ describe("featureOf", () => {
 
   test("only the legal copy module maps to F2, so other copy stays free for S1.3 (S2.2d13)", () => {
     expect(featureOf("src/lib/copy/reasons.test.ts")).toBe("Unmapped");
+  });
+
+  test("the committed docs/test-report.md lists S2.3's test files and has no Unmapped row (S2.3 T17)", () => {
+    const report = readFileSync(
+      path.join(__dirname, "..", "docs", "test-report.md"),
+      "utf8",
+    );
+    // An Unmapped row is a table cell: "| Unmapped |" (failure text aside).
+    expect(report).not.toMatch(/\|\s*Unmapped\s*\|/);
+    for (const file of [
+      "src/lib/selection-href.test.ts",
+      "src/components/printing-select.test.tsx",
+      "src/components/finish-select.test.tsx",
+      "src/components/selection-controls.test.tsx",
+    ]) {
+      expect(report).toContain(file);
+    }
   });
 
   test("an unknown path is Unmapped", () => {

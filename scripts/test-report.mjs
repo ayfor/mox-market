@@ -210,7 +210,7 @@ export function renderReport(
   );
   L.push("");
   L.push(
-    "_No e2e suite yet; S2.1 and S2.4 added no Playwright (S2.1d17, S2.4d13); entry journeys are covered by RTL and a local production build._",
+    "_No e2e suite yet; S2.1, S2.3 and S2.4 added no Playwright (S2.1d17, S2.3d10, S2.4d13); entry and switch journeys are covered by RTL and a local production build._",
   );
   L.push("");
 
