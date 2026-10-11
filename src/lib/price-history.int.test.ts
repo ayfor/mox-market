@@ -18,11 +18,21 @@ import {
   buildEvaluation,
   type EvaluationDeps,
 } from "@/lib/evaluation/build-evaluation";
+import { HISTORY_TIMEOUT_MS } from "@/lib/evaluation/consts";
 import type { PriceHistoryReader } from "@/lib/evaluation/history-reader";
+import { consoleLog } from "@/lib/evaluation/load-market-snapshot";
+import {
+  HistoryTimeoutError,
+  withTimeout,
+} from "@/lib/evaluation/with-timeout";
 import { createPriceHistoryReader } from "@/lib/price-history";
+import { HISTORY_POOL_LIMITS, runtimePoolConfig } from "@/lib/prisma-pool";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { withClient } from "../../tests/helpers/local-db";
 import {
   CI_UNREACHABLE_TEST,
   createScratchDatabase,
@@ -69,15 +79,17 @@ interface InstrumentedReader {
 /**
  * Builds the reader over a client whose connections are read-only
  * (`options=-c default_transaction_read_only=on`, S0.1d11), optionally with a
- * session TimeZone.
+ * session TimeZone and further `-c` settings.
  */
 function instrumentedReader(
   dbUrl: string,
   timeZone?: string,
+  settings: readonly string[] = [],
 ): InstrumentedReader {
   const url = new URL(dbUrl);
   const options = ["-c default_transaction_read_only=on"];
   if (timeZone) options.push(`-c TimeZone=${timeZone}`);
+  for (const setting of settings) options.push(`-c ${setting}`);
   url.searchParams.set("options", options.join(" "));
   const pool = new pg.Pool({ connectionString: url.toString(), max: 2 });
   const wire: InstrumentedReader["wire"] = [];
@@ -350,6 +362,36 @@ describe.skipIf(!server.reachable)(
         }
       });
 
+      // S0.1 ADV.13: to_char, not ::text, writes the dates, so a session
+      // DateStyle cannot change them (S0.1d5).
+      test("with the session DateStyle at SQL, DMY each date is still YYYY-MM-DD", async () => {
+        const dmy = instrumentedReader(db.url, undefined, [
+          "DateStyle=SQL,DMY",
+        ]);
+        try {
+          const [{ style }] = await dmy.prisma.$queryRaw<
+            { style: string }[]
+          >`SELECT current_setting('DateStyle') AS style`;
+          expect(style).toBe("SQL, DMY");
+          expect(await readTzRows(dmy.reader)).toEqual([
+            "2026-10-05",
+            "2026-03-08",
+            "2026-11-01",
+          ]);
+          await seed.query("TRUNCATE price_sync_runs RESTART IDENTITY");
+          await seed.query(
+            `INSERT INTO price_sync_runs (trigger, status, finished_at, source_date)
+             VALUES ('cron', 'ok', '2026-10-10T09:30:00.456Z'::timestamptz, '2026-10-09')`,
+          );
+          await expect(dmy.reader.getHistoryFreshness()).resolves.toEqual({
+            lastSuccessAt: new Date("2026-10-10T09:30:00.456Z"),
+            sourceDate: "2026-10-09",
+          });
+        } finally {
+          await dmy.close();
+        }
+      });
+
       // S0.1 Deviation 2: @prisma/adapter-pg 7.5 rewrites a timestamptz's
       // offset to +00:00, so a raw timestamptz column read under a non-UTC
       // session shifts by the offset. CI's postgres:16 runs in UTC, so each
@@ -426,6 +468,61 @@ describe.skipIf(!server.reachable)(
           AS_OF,
         );
         expect(latestSnapshotAt).toBeNull();
+      });
+
+      // S0.1 ADV.3: rows stored out of date order (as S0.2's upserts leave
+      // them) and read by a plain heap scan still come back ascending, and
+      // latestSnapshotAt is still the asOf row's.
+      test("rows stored out of order and read by a sequential scan come back ascending (ADV.3)", async () => {
+        const id = "0b9a3f4e-4444-4c1d-9d2e-000000000001";
+        await insertRow(id, "foil", AS_OF, 900, "2026-10-10T06:00:00.000Z");
+        await insertRow(
+          id,
+          "foil",
+          addDays(AS_OF, -30),
+          870,
+          "2026-09-10T06:00:00.000Z",
+        );
+        await insertRow(
+          id,
+          "foil",
+          addDays(AS_OF, -1),
+          890,
+          "2026-10-09T06:00:00.000Z",
+        );
+        // An upsert-style UPDATE moves the oldest row's tuple to the heap end.
+        await seed.query(
+          `UPDATE price_history SET price_cents = 871, synced_at = '2026-10-10T07:00:00.000Z'
+            WHERE scryfall_id = $1 AND finish = 'foil' AND date = $2`,
+          [id, addDays(AS_OF, -30)],
+        );
+        const heap = await seed.query<{ date: string }>(
+          `SELECT to_char(date, 'YYYY-MM-DD') AS date FROM price_history
+            WHERE scryfall_id = $1 ORDER BY ctid`,
+          [id],
+        );
+        expect(heap.rows.map((r) => r.date)).not.toEqual(
+          [...heap.rows.map((r) => r.date)].sort(),
+        );
+        const seqScan = instrumentedReader(db.url, undefined, [
+          "enable_indexscan=off",
+          "enable_bitmapscan=off",
+          "enable_indexonlyscan=off",
+        ]);
+        try {
+          const { history, latestSnapshotAt } =
+            await seqScan.reader.getPriceHistory(id, "foil", AS_OF);
+          expect(history).toEqual([
+            { date: "2026-09-10", priceCents: 871 },
+            { date: "2026-10-09", priceCents: 890 },
+            { date: "2026-10-10", priceCents: 900 },
+          ]);
+          expect(latestSnapshotAt?.toISOString()).toBe(
+            "2026-10-10T06:00:00.000Z",
+          );
+        } finally {
+          await seqScan.close();
+        }
       });
     });
 
@@ -797,6 +894,232 @@ describe.skipIf(!server.reachable)(
           await refused.$disconnect().catch(() => undefined);
         }
       });
+    });
+
+    // S0.1 ADV.12: the shipped wiring (defaultHistoryReader → historyPrisma
+    // in @/lib/prisma, built from POSTGRES_PRISMA_URL) reads seeded rows.
+    describe("the default reader over the real @/lib/prisma (ADV.12, AC-3)", () => {
+      const clear = async () => {
+        const g = globalThis as {
+          prisma?: { $disconnect(): Promise<void> };
+          historyPrisma?: { $disconnect(): Promise<void> };
+        };
+        await g.historyPrisma?.$disconnect().catch(() => undefined);
+        await g.prisma?.$disconnect().catch(() => undefined);
+        delete g.historyPrisma;
+        delete g.prisma;
+      };
+
+      afterAll(async () => {
+        await clear();
+        vi.unstubAllEnvs();
+        vi.resetModules();
+      });
+
+      test("defaultHistoryReader reads (ID_A, foil) and the newest ok run from POSTGRES_PRISMA_URL's database", async () => {
+        await clear();
+        vi.stubEnv("POSTGRES_PRISMA_URL", db.url);
+        vi.stubEnv("POSTGRES_SSL_ROOT_CERT", undefined);
+        vi.resetModules();
+        const { defaultHistoryReader } =
+          await import("@/lib/evaluation/history-reader");
+        const { prismaHistoryReader } = await import("@/lib/price-history");
+        expect(defaultHistoryReader).toBe(prismaHistoryReader);
+        const { history } = await defaultHistoryReader.getPriceHistory(
+          ID_A,
+          "foil",
+          AS_OF,
+        );
+        expect(history).toEqual([
+          { date: "2026-09-10", priceCents: 1001 },
+          { date: "2026-10-09", priceCents: 1002 },
+          { date: "2026-10-10", priceCents: 1003 },
+        ]);
+        await seed.query("TRUNCATE price_sync_runs RESTART IDENTITY");
+        await seed.query(
+          `INSERT INTO price_sync_runs (trigger, status, finished_at, source_date)
+           VALUES ('cron', 'ok', '2026-10-10T09:30:00.456Z', '2026-10-09')`,
+        );
+        await expect(
+          defaultHistoryReader.getHistoryFreshness(),
+        ).resolves.toEqual({
+          lastSuccessAt: new Date("2026-10-10T09:30:00.456Z"),
+          sourceDate: "2026-10-09",
+        });
+        // It reads through the bounded history client, not the shared one.
+        const { historyPrisma, prisma } = await import("@/lib/prisma");
+        expect(historyPrisma).not.toBe(prisma);
+      });
+    });
+
+    // S0.1 ADV.5: until Josh applies 0001, previews read a database with
+    // 0000_baseline only. The real reader rejects, the page degrades, and the
+    // log line names the cause without a secret.
+    describe("a database with 0000_baseline only (ADV.5, the pre-0001 state)", () => {
+      let v1Only: ScratchDatabase;
+      let prisma: InstanceType<typeof PrismaClient>;
+
+      beforeAll(async () => {
+        v1Only = await createScratchDatabase(serverUrl, "mox_s01_pre");
+        const baselineSql = readFileSync(
+          path.join(
+            __dirname,
+            "..",
+            "..",
+            "prisma",
+            "migrations",
+            "0000_baseline",
+            "migration.sql",
+          ),
+          "utf8",
+        );
+        await withClient(v1Only.url, (c) => c.query(baselineSql));
+        prisma = new PrismaClient({
+          adapter: new PrismaPg({ connectionString: v1Only.url }),
+        });
+      });
+
+      afterAll(async () => {
+        await prisma?.$disconnect().catch(() => undefined);
+        if (v1Only) await dropScratchDatabase(serverUrl, v1Only.name);
+      });
+
+      test("buildEvaluation → ok, insufficient_data, history unavailable and the banner; both failures logged", async () => {
+        const log = vi.fn();
+        const result = await buildEvaluation(
+          { card: "Esper Sentinel", askingPriceCents: 7499, finish: "normal" },
+          {
+            scryfall: {
+              getCardByName: async () => scryfallCard(),
+              getAllPrintings: async () => [...ESPER_SENTINEL_PRINTS],
+            },
+            reader: createPriceHistoryReader(async () => prisma),
+            now: () => new Date("2026-10-10T12:00:00.000Z"),
+            log,
+          },
+        );
+        if (result.status !== "ok") throw new Error(result.status);
+        expect(result.recommendation.kind).toBe("insufficient_data");
+        expect(result.historyUnavailable).toBe(true);
+        expect(result.syncStale).toBe(true);
+        expect(log.mock.calls.map(([event]) => event).sort()).toEqual([
+          "freshness_read_failed",
+          "history_read_failed",
+        ]);
+      });
+
+      test("the log line carries P2010, TableDoesNotExist and 42P01, and never the URL", async () => {
+        const error = await createPriceHistoryReader(async () => prisma)
+          .getPriceHistory(ID_A, "normal", AS_OF)
+          .then(
+            () => null,
+            (e: unknown) => e,
+          );
+        const lines: string[] = [];
+        const spy = vi
+          .spyOn(console, "error")
+          .mockImplementation((line: unknown) => {
+            lines.push(String(line));
+          });
+        try {
+          consoleLog("history_read_failed", error);
+        } finally {
+          spy.mockRestore();
+        }
+        expect(lines).toEqual([
+          "[evaluation] history_read_failed: PrismaClientKnownRequestError [P2010 TableDoesNotExist 42P01]",
+        ]);
+        const url = new URL(v1Only.url);
+        expect(lines[0]).not.toContain(url.hostname);
+        expect(lines[0]).not.toContain(url.port);
+        expect(lines[0]).not.toContain(v1Only.name);
+      });
+    });
+
+    // S0.1 ADV.4 (S0.1d21): a lock on price_history (DDL) stalls every
+    // history read. The race answers the page at HISTORY_TIMEOUT_MS; the
+    // bounded pool then frees every slot, so abandoned reads do not pile up
+    // and a freshness read gets through while the lock is still held.
+    describe("abandoned reads do not pile up (ADV.4)", () => {
+      test("12 raced reads against a locked price_history settle, the pool drains, and freshness still reads", async () => {
+        const pool = new pg.Pool(
+          runtimePoolConfig(db.url, {
+            limits: HISTORY_POOL_LIMITS,
+          }) as pg.PoolConfig,
+        );
+        pool.on("error", () => undefined);
+        const prisma = new PrismaClient({
+          adapter: new PrismaPg(
+            pool as unknown as ConstructorParameters<typeof PrismaPg>[0],
+          ),
+        });
+        const reader = createPriceHistoryReader(async () => prisma);
+        const locker = new pg.Client({ connectionString: db.url });
+        await locker.connect();
+        try {
+          await seed.query("TRUNCATE price_sync_runs RESTART IDENTITY");
+          await seed.query(
+            `INSERT INTO price_sync_runs (trigger, status, finished_at, source_date)
+             VALUES ('cron', 'ok', '2026-10-10T09:30:00.456Z', '2026-10-09')`,
+          );
+          await locker.query("BEGIN");
+          await locker.query(
+            "LOCK TABLE price_history IN ACCESS EXCLUSIVE MODE",
+          );
+          const inner: Promise<unknown>[] = [];
+          const started = Date.now();
+          const outcomes = await Promise.all(
+            Array.from({ length: 12 }, () =>
+              withTimeout(() => {
+                const read = reader.getPriceHistory(ID_A, "foil", AS_OF);
+                inner.push(read.catch((e: unknown) => e));
+                return read;
+              }, HISTORY_TIMEOUT_MS).then(
+                () => null,
+                (e: unknown) => e,
+              ),
+            ),
+          );
+          for (const outcome of outcomes) {
+            expect(outcome).toBeInstanceOf(HistoryTimeoutError);
+          }
+          expect(pool.totalCount).toBeLessThanOrEqual(HISTORY_POOL_LIMITS.max);
+          // Every abandoned read settles within two query bounds (one for
+          // the first five, one for the waiters that got their slots).
+          const settled = await Promise.all(inner);
+          expect(settled.every((e) => e instanceof Error)).toBe(true);
+          expect(Date.now() - started).toBeLessThan(
+            2 * HISTORY_POOL_LIMITS.query_timeout + 1_500,
+          );
+          expect(pool.waitingCount).toBe(0);
+          // The lock is still held, and freshness reads within the race.
+          await expect(
+            withTimeout(() => reader.getHistoryFreshness(), HISTORY_TIMEOUT_MS),
+          ).resolves.toEqual({
+            lastSuccessAt: new Date("2026-10-10T09:30:00.456Z"),
+            sourceDate: "2026-10-09",
+          });
+        } finally {
+          await locker.query("ROLLBACK").catch(() => undefined);
+          await locker.end().catch(() => undefined);
+          await prisma.$disconnect().catch(() => undefined);
+          await pool.end().catch(() => undefined);
+        }
+        // Once the lock goes, the server-side leftovers finish and leave.
+        const deadline = Date.now() + 5_000;
+        let lingering = -1;
+        while (Date.now() < deadline) {
+          const { rows } = await seed.query<{ n: number }>(
+            `SELECT count(*)::int AS n FROM pg_stat_activity
+              WHERE datname = current_database() AND pid <> pg_backend_pid()
+                AND state = 'active' AND query LIKE '%FROM "price_history"%'`,
+          );
+          lingering = rows[0].n;
+          if (lingering === 0) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        expect(lingering).toBe(0);
+      }, 30_000);
     });
   },
 );

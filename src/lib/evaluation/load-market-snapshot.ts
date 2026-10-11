@@ -22,10 +22,54 @@ import { withTimeout } from "./with-timeout";
 /** A server-side failure log: an event name and the error, never a URL or secret. */
 export type EvaluationLog = (event: string, error: unknown) => void;
 
-/** The default log: one console.error line per failure. */
+/** A code is logged only when it is a short bare token: no URL, host or message. */
+const SAFE_CODE = /^[A-Za-z0-9_]{1,64}$/;
+
+/**
+ * Non-secret codes that tell one read failure from another (S0.1 ADV.5,
+ * S0.1d22): the error's own code (a Prisma code such as P2010, or a Node one
+ * such as ECONNREFUSED), then the driver adapter's cause kind and Postgres
+ * SQLSTATE. A missing table (42P01), a refused connection and a certificate
+ * failure (TlsConnectionError) all share PrismaClientKnownRequestError as
+ * their name. Messages, hosts and ports are never read.
+ */
+export function errorCodes(error: unknown): string[] {
+  const codes: string[] = [];
+  const add = (value: unknown) => {
+    if (typeof value === "string" && SAFE_CODE.test(value)) {
+      if (!codes.includes(value)) codes.push(value);
+    }
+  };
+  if (error !== null && typeof error === "object") {
+    const { code, meta } = error as { code?: unknown; meta?: unknown };
+    add(code);
+    const adapterError = (meta as { driverAdapterError?: unknown } | undefined)
+      ?.driverAdapterError;
+    const cause = (adapterError as { cause?: unknown } | undefined)?.cause;
+    if (cause !== null && typeof cause === "object") {
+      const {
+        kind,
+        originalCode,
+        code: causeCode,
+      } = cause as {
+        kind?: unknown;
+        originalCode?: unknown;
+        code?: unknown;
+      };
+      add(kind);
+      add(originalCode);
+      add(causeCode);
+    }
+  }
+  return codes;
+}
+
+/** The default log: one console.error line per failure, name then codes. */
 export const consoleLog: EvaluationLog = (event, error) => {
   const name = error instanceof Error ? error.name : typeof error;
-  console.error(`[evaluation] ${event}: ${name}`);
+  const codes = errorCodes(error);
+  const suffix = codes.length > 0 ? ` [${codes.join(" ")}]` : "";
+  console.error(`[evaluation] ${event}: ${name}${suffix}`);
 };
 
 export interface LoadMarketSnapshotArgs {

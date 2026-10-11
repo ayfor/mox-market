@@ -1,3 +1,8 @@
+-- One transaction (S0.1 ADV.2): prisma migrate deploy sends a migration's
+-- statements one by one, so without it a failure part-way would leave some
+-- of the objects below behind and the migration marked failed.
+BEGIN;
+
 -- CreateEnum
 CREATE TYPE "card_finish" AS ENUM ('normal', 'foil', 'etched');
 
@@ -53,3 +58,13 @@ CREATE INDEX "price_sync_runs_status_finished_at_idx" ON "price_sync_runs"("stat
 -- Hand-added (F0 §Fields, C2-A.8): Prisma's schema cannot express these two.
 ALTER TABLE "price_history" ADD CONSTRAINT "price_history_price_cents_check" CHECK ("price_cents" > 0);
 ALTER TABLE "price_history" SET (autovacuum_vacuum_scale_factor = 0.02, autovacuum_vacuum_insert_scale_factor = 0.02);
+
+-- Hand-added (S0.1 ADV.7): row level security with no policy, so Supabase's
+-- anon and authenticated roles can neither read nor write these tables
+-- through the Data API. The owning role, which the app, the ingest and the
+-- cron use, is not subject to it.
+ALTER TABLE "price_history" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "mtgjson_identifiers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "price_sync_runs" ENABLE ROW LEVEL SECURITY;
+
+COMMIT;

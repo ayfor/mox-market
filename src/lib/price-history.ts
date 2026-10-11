@@ -42,9 +42,13 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** What UTC_INSTANT's to_char pattern writes: milliseconds and a Z. */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-/** A real calendar date written 'YYYY-MM-DD' (rejects 2026-02-30). */
+/**
+ * A real calendar date written 'YYYY-MM-DD' (rejects 2026-02-30). Year 0000
+ * is refused too: JavaScript accepts it, Postgres does not (S0.1 ADV.8).
+ */
 export function isCalendarDate(value: unknown): value is string {
   if (typeof value !== "string" || !ISO_DATE.test(value)) return false;
+  if (value.startsWith("0000")) return false;
   const time = Date.parse(`${value}T00:00:00.000Z`);
   return (
     !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === value
@@ -140,6 +144,16 @@ export function createPriceHistoryReader(
         "getPriceHistory",
       );
       const history = rows.map(toSnapshot);
+      // S0.1 ADV.3: the ORDER BY is the contract (F1 reads an ascending
+      // series, and latestSnapshotAt is the last row's). A result out of
+      // order rejects, so F2 shows "unavailable" rather than a wrong stale flag.
+      for (let i = 1; i < history.length; i++) {
+        if (history[i - 1].date >= history[i].date) {
+          throw new TypeError(
+            "getPriceHistory: rows are not in strictly ascending date order",
+          );
+        }
+      }
       // S0.1d7: the newest returned row's synced_at, not MAX(synced_at), so a
       // republished older price never hides F2's 36h stale flag (C1.31).
       let latestSnapshotAt: Date | null = null;
@@ -186,8 +200,9 @@ export function createPriceHistoryReader(
  * The production reader (S0.1d8). The Prisma client is imported on the first
  * call, so loading the page never reads the environment: a missing
  * POSTGRES_PRISMA_URL rejects that read, and F2 renders "Price history
- * temporarily unavailable".
+ * temporarily unavailable". It reads through historyPrisma, the bounded,
+ * TLS-explicit client (S0.1d20, S0.1d21).
  */
 export const prismaHistoryReader: PriceHistoryReader = createPriceHistoryReader(
-  () => import("@/lib/prisma").then((m) => m.prisma),
+  () => import("@/lib/prisma").then((m) => m.historyPrisma),
 );

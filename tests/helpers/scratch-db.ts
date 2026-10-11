@@ -82,13 +82,20 @@ export async function createScratchDatabase(
   return { name, url };
 }
 
+/**
+ * The shape scratchDatabaseName returns: prefix, pid, 13-digit millisecond
+ * time. Only such a name may be force-dropped, so a slip that passes the
+ * developer's own database (mox_market) or postgres is refused (S0.1 ADV.11).
+ */
+export const SCRATCH_NAME = /^[a-z_][a-z0-9_]*_\d+_\d{13}$/;
+
 /** DROP DATABASE … WITH (FORCE), so an open pool never blocks the drop. */
 export async function dropScratchDatabase(
   serverUrl: string,
   name: string,
 ): Promise<void> {
   assertLocalDatabaseUrl(serverUrl);
-  if (!/^[a-z_][a-z0-9_]*$/.test(name)) {
+  if (!SCRATCH_NAME.test(name)) {
     throw new Error("bad scratch database name");
   }
   await withClient(serverUrl, (c) =>

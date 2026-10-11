@@ -33,7 +33,9 @@ const {
   dropScratchDatabase,
   prismaCli,
   probeScratchServer,
+  SCRATCH_NAME,
 } = await import("./scratch-db");
+const { scratchDatabaseName } = await import("./local-db");
 
 const REMOTE = [
   "postgresql://postgres:pw@db.abcdefgh.supabase.co:5432/postgres",
@@ -85,6 +87,37 @@ describe("scratch-db refuses non-local URLs before any client (T12)", () => {
       createScratchDatabase(
         "postgresql://postgres:pw@localhost:55432/postgres",
         "mox_x",
+      ),
+    ).rejects.toThrow("a pg.Client was constructed");
+    expect(clientBuilt).toHaveBeenCalledOnce();
+  });
+
+  test.each([
+    "mox_market",
+    "postgres",
+    "template1",
+    "mox_s01_x",
+    "mox_s01_x_1",
+  ])(
+    "dropScratchDatabase refuses %s, which scratchDatabaseName never returns (ADV.11)",
+    async (name) => {
+      await expect(
+        dropScratchDatabase(
+          "postgresql://postgres:pw@localhost:55432/postgres",
+          name,
+        ),
+      ).rejects.toThrow("bad scratch database name");
+      expect(clientBuilt).not.toHaveBeenCalled();
+    },
+  );
+
+  test("dropScratchDatabase accepts a scratchDatabaseName name (it reaches the client)", async () => {
+    const name = scratchDatabaseName("mox_s01_x");
+    expect(name).toMatch(SCRATCH_NAME);
+    await expect(
+      dropScratchDatabase(
+        "postgresql://postgres:pw@localhost:55432/postgres",
+        name,
       ),
     ).rejects.toThrow("a pg.Client was constructed");
     expect(clientBuilt).toHaveBeenCalledOnce();

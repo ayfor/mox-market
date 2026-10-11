@@ -1,5 +1,6 @@
 // T1 (AC-1; S0.1d3): 0001_price_history checked as text. Every statement is
-// on an allowlist (the generated F0 DDL plus the two hand-added lines), and
+// on an allowlist (the generated F0 DDL, the hand-added CHECK, autovacuum and
+// row-level-security lines, inside one BEGIN … COMMIT), and
 // the raw file, comments included, carries nothing destructive. The checker
 // is exercised against planted statements so a weakened rule is noticed.
 import { readdirSync, readFileSync } from "node:fs";
@@ -25,6 +26,13 @@ const HAND_ADDED = [
   `ALTER TABLE "price_history" ADD CONSTRAINT "price_history_price_cents_check" CHECK ("price_cents" > 0)`,
   `ALTER TABLE "price_history" SET (autovacuum_vacuum_scale_factor = 0.02, autovacuum_vacuum_insert_scale_factor = 0.02)`,
 ];
+/** S0.1 ADV.7 (S0.1d24): row level security on each F0 table, no policy. */
+const RLS = TABLES.map((t) => `ALTER TABLE "${t}" ENABLE ROW LEVEL SECURITY`);
+/** S0.1 ADV.2 (S0.1d25): the whole migration is one transaction. */
+const BEGIN = "BEGIN";
+const COMMIT = "COMMIT";
+const TRANSACTION_CONTROL =
+  /^(BEGIN|COMMIT|ROLLBACK|END|ABORT|START TRANSACTION|SAVEPOINT|RELEASE)\b/i;
 
 /** Statements with `--` comments stripped, whitespace-trimmed, empty ones dropped. */
 function statements(text: string): string[] {
@@ -40,7 +48,7 @@ function statements(text: string): string[] {
 /** Which allowlist entry a statement is, or null. */
 function allowlisted(statement: string): string | null {
   const flat = statement.replace(/\s+/g, " ");
-  for (const e of [...ENUMS, INDEX, ...HAND_ADDED]) {
+  for (const e of [BEGIN, COMMIT, ...ENUMS, INDEX, ...HAND_ADDED, ...RLS]) {
     if (flat === e) return e;
   }
   const table = flat.match(/^CREATE TABLE "(\w+)" \(/)?.[1];
@@ -64,10 +72,20 @@ function migrationFindings(text: string): string[] {
     findings.push("ALTER TABLE … DROP");
   if (/tracked_cards|price_snapshots/i.test(text))
     findings.push("names a V1 table");
-  for (const statement of statements(text)) {
+  const all = statements(text);
+  for (const statement of all) {
     if (allowlisted(statement) === null) {
       findings.push(`off-list: ${statement.replace(/\s+/g, " ").slice(0, 60)}`);
     }
+  }
+  // One transaction: BEGIN first, COMMIT last, no other transaction control.
+  const control = all.filter((st) => TRANSACTION_CONTROL.test(st));
+  if (
+    all[0] !== BEGIN ||
+    all[all.length - 1] !== COMMIT ||
+    control.length !== 2
+  ) {
+    findings.push("transaction: not exactly one BEGIN first and COMMIT last");
   }
   return findings;
 }
@@ -77,10 +95,13 @@ describe("0001_price_history (T1)", () => {
     const seen = statements(sql).map(allowlisted);
     expect(seen).not.toContain(null);
     expect(seen).toEqual([
+      BEGIN,
       ...ENUMS,
       ...TABLES.map((t) => `CREATE TABLE "${t}"`),
       INDEX,
       ...HAND_ADDED,
+      ...RLS,
+      COMMIT,
     ]);
   });
 
@@ -89,11 +110,24 @@ describe("0001_price_history (T1)", () => {
   });
 
   test("the hand-added lines are verbatim", () => {
-    for (const line of HAND_ADDED) expect(sql).toContain(`${line};`);
+    for (const line of [...HAND_ADDED, ...RLS]) {
+      expect(sql).toContain(`${line};`);
+    }
   });
 
-  test("is pure SQL: starts with -- CreateEnum, no CLI banner", () => {
-    expect(sql.trimStart().startsWith("-- CreateEnum")).toBe(true);
+  test("is one transaction: BEGIN is the first statement, COMMIT the last, nothing else controls it (ADV.2)", () => {
+    const all = statements(sql);
+    expect(all[0]).toBe(BEGIN);
+    expect(all[all.length - 1]).toBe(COMMIT);
+    expect(all.filter((st) => TRANSACTION_CONTROL.test(st))).toEqual([
+      BEGIN,
+      COMMIT,
+    ]);
+  });
+
+  test("is pure SQL: the generated part starts at -- CreateEnum right after BEGIN, no CLI banner", () => {
+    expect(sql).toMatch(/^BEGIN;\n\n-- CreateEnum\n/m);
+    expect(sql.trimEnd().endsWith("COMMIT;")).toBe(true);
     expect(sql).not.toMatch(
       /Loaded Prisma config|prisma\.config\.ts|Update available|Prisma schema loaded/,
     );
@@ -142,6 +176,23 @@ describe("the T1 checker notices what it must (negative cases)", () => {
   });
 
   test("an off-list statement is flagged even in otherwise clean SQL", () => {
-    expect(migrationFindings("SELECT 1;")).toEqual(["off-list: SELECT 1"]);
+    expect(migrationFindings("BEGIN;\nSELECT 1;\nCOMMIT;")).toEqual([
+      "off-list: SELECT 1",
+    ]);
+  });
+
+  test.each([
+    ["no BEGIN", sql.replace(/^BEGIN;$/m, "")],
+    ["no COMMIT", sql.replace(/^COMMIT;$/m, "")],
+    [
+      "a COMMIT before the hand-added block",
+      sql.replace("-- Hand-added (F0", "COMMIT;\n-- Hand-added (F0"),
+    ],
+    ["a ROLLBACK", sql.replace(/^COMMIT;$/m, "ROLLBACK;\nCOMMIT;")],
+  ])("the transaction shape is checked: %s", (_name, text) => {
+    expect(text).not.toBe(sql);
+    expect(
+      migrationFindings(text).some((f) => f.startsWith("transaction")),
+    ).toBe(true);
   });
 });

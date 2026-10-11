@@ -3,7 +3,15 @@
 // POSTGRES_URL_NON_POOLING (localhost only), dropped afterwards; seeding uses
 // parameterized pg inserts. Unreachable server: fails when CI=true, skips
 // with a warning otherwise (S0.1d10, AC-10).
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  cpSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -138,7 +146,7 @@ async function v1Catalog(c: pg.Client) {
     [V1_TABLES],
   );
   const reloptions = await c.query(
-    `SELECT relname, reloptions FROM pg_class
+    `SELECT relname, reloptions, relrowsecurity FROM pg_class
       WHERE relname = ANY($1::text[]) AND relkind = 'r' ORDER BY 1`,
     [V1_TABLES],
   );
@@ -309,6 +317,78 @@ describe.skipIf(!server.reachable)(
         expect(rows).toEqual([{ def: "CHECK ((price_cents > 0))" }]);
       });
 
+      test("row level security is on for the three F0 tables, with no policy, and off for V1's (ADV.7)", async () => {
+        const { rows } = await client.query(
+          `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
+            WHERE relkind = 'r' AND relname = ANY($1::text[]) ORDER BY relname`,
+          [[...NEW_TABLES, ...V1_TABLES]],
+        );
+        expect(rows).toEqual(
+          [...NEW_TABLES, ...V1_TABLES].sort().map((relname) => ({
+            relname,
+            relrowsecurity: NEW_TABLES.includes(relname),
+            relforcerowsecurity: false,
+          })),
+        );
+        const policies = await client.query(
+          `SELECT tablename FROM pg_policies WHERE tablename = ANY($1::text[])`,
+          [NEW_TABLES],
+        );
+        expect(policies.rows).toEqual([]);
+      });
+
+      test("a granted role without BYPASSRLS (Supabase's anon) can neither write nor read; the owner still reads (ADV.7)", async () => {
+        const role = `mox_s01_anon_${process.pid}`;
+        await client.query(`CREATE ROLE "${role}" NOLOGIN NOBYPASSRLS`);
+        try {
+          await client.query(
+            `GRANT ALL ON "price_history", "mtgjson_identifiers", "price_sync_runs" TO "${role}"`,
+          );
+          await client.query(
+            `GRANT USAGE ON SEQUENCE "price_sync_runs_id_seq" TO "${role}"`,
+          );
+          await client.query(
+            `INSERT INTO price_history (scryfall_id, finish, date, price_cents)
+             VALUES ($1, 'normal', '2026-09-01', 999)`,
+            [ID_A],
+          );
+          await client.query("BEGIN");
+          try {
+            await client.query(`SET LOCAL ROLE "${role}"`);
+            const read = await client.query(
+              "SELECT count(*)::int AS n FROM price_history",
+            );
+            expect(read.rows).toEqual([{ n: 0 }]);
+            for (const write of [
+              `INSERT INTO price_history (scryfall_id, finish, date, price_cents)
+               VALUES ('${ID_B}', 'normal', '2026-09-02', 1)`,
+              `INSERT INTO price_sync_runs (trigger, status, finished_at)
+               VALUES ('cron', 'ok', now() + interval '1 day')`,
+              `INSERT INTO mtgjson_identifiers (mtgjson_uuid, scryfall_id)
+               VALUES ('5f8287b1-5bb6-5f4c-ad17-316a40d5bb0d', '${ID_B}')`,
+            ]) {
+              await client.query("SAVEPOINT w");
+              expect((await pgError(() => client.query(write))).code).toBe(
+                "42501",
+              );
+              await client.query("ROLLBACK TO SAVEPOINT w");
+            }
+          } finally {
+            await client.query("ROLLBACK");
+          }
+          const owner = await client.query(
+            "SELECT count(*)::int AS n FROM price_history WHERE date = '2026-09-01'",
+          );
+          expect(owner.rows).toEqual([{ n: 1 }]);
+        } finally {
+          await client.query(
+            "DELETE FROM price_history WHERE date = '2026-09-01'",
+          );
+          await client.query(`DROP OWNED BY "${role}"`);
+          await client.query(`DROP ROLE "${role}"`);
+        }
+      });
+
       test("V1's tables are unchanged: their catalog equals 0000_baseline's alone", async () => {
         const after = await v1Catalog(client);
         const reference = await withClient(baselineOnly.url, v1Catalog);
@@ -463,6 +543,257 @@ describe.skipIf(!server.reachable)(
         expect(await pgError(insert)).toEqual({
           code: "23505",
           constraint: "mtgjson_identifiers_pkey",
+        });
+      });
+    });
+
+    // S0.1 ADV.2 (S0.1d25): a failure inside 0001 leaves nothing behind, and
+    // the README's recovery (resolve --rolled-back, then deploy) works.
+    describe("a failing 0001 is all or nothing (ADV.2)", () => {
+      let failing: ScratchDatabase;
+      let dir: string;
+
+      beforeAll(async () => {
+        failing = await createScratchDatabase(serverUrl, "mox_s01_fail");
+        dir = mkdtempSync(path.join(tmpdir(), "mox-s01-fail-"));
+        cpSync(
+          path.join(__dirname, "migrations"),
+          path.join(dir, "migrations"),
+          {
+            recursive: true,
+          },
+        );
+        const file = path.join(
+          dir,
+          "migrations",
+          "0001_price_history",
+          "migration.sql",
+        );
+        const original = readFileSync(file, "utf8");
+        // The failing statement goes inside the transaction, before COMMIT.
+        const planted = original.replace(
+          /\nCOMMIT;\n$/,
+          "\nSELECT 1/0;\n\nCOMMIT;\n",
+        );
+        expect(planted).not.toBe(original);
+        writeFileSync(file, planted);
+        // A config with no imports: only the migrations path differs. The
+        // URL is the scratch database, checked local by prismaCli.
+        writeFileSync(
+          path.join(dir, "prisma.config.mjs"),
+          `export default {
+  schema: ${JSON.stringify(path.join(__dirname, "schema.prisma"))},
+  migrations: { path: ${JSON.stringify(path.join(dir, "migrations"))} },
+  datasource: { url: process.env.POSTGRES_URL_NON_POOLING },
+};
+`,
+        );
+      });
+
+      afterAll(async () => {
+        if (failing) await dropScratchDatabase(serverUrl, failing.name);
+        if (dir) rmSync(dir, { recursive: true, force: true });
+      });
+
+      test("deploy fails, no F0 type, table or setting is left, and resolve --rolled-back then deploy recovers", async () => {
+        const bad = prismaCli(
+          [
+            "migrate",
+            "deploy",
+            "--config",
+            path.join(dir, "prisma.config.mjs"),
+          ],
+          failing.url,
+        );
+        expect(bad.status, bad.output).not.toBe(0);
+
+        await withClient(failing.url, async (c) => {
+          const types = await c.query(
+            `SELECT typname FROM pg_type
+              WHERE typname = ANY($1::text[])`,
+            [Object.keys(ENUM_VALUES)],
+          );
+          expect(types.rows).toEqual([]);
+          const tables = await c.query(
+            `SELECT relname FROM pg_class WHERE relname = ANY($1::text[])`,
+            [[...NEW_TABLES, "price_history_price_cents_check"]],
+          );
+          expect(tables.rows).toEqual([]);
+          const { rows } = await c.query(
+            `SELECT migration_name, finished_at IS NOT NULL AS finished
+               FROM _prisma_migrations ORDER BY started_at`,
+          );
+          expect(rows).toEqual([
+            { migration_name: "0000_baseline", finished: true },
+            { migration_name: "0001_price_history", finished: false },
+          ]);
+        });
+
+        // Re-running deploy as is refuses (P3009): the README says stop.
+        const again = prismaCli(
+          [
+            "migrate",
+            "deploy",
+            "--config",
+            path.join(dir, "prisma.config.mjs"),
+          ],
+          failing.url,
+        );
+        expect(again.status).not.toBe(0);
+        expect(again.output).toMatch(/P3009/);
+
+        // The README's recovery, with the real migration file.
+        const resolved = prismaCli(
+          ["migrate", "resolve", "--rolled-back", "0001_price_history"],
+          failing.url,
+        );
+        expect(resolved.status, resolved.output).toBe(0);
+        const fixed = prismaCli(["migrate", "deploy"], failing.url);
+        expect(fixed.status, fixed.output).toBe(0);
+        expect(fixed.output).toMatch(/0001_price_history/);
+        await withClient(failing.url, async (c) => {
+          const { rows } = await c.query(
+            `SELECT count(*)::int AS n FROM pg_class
+              WHERE relkind = 'r' AND relname = ANY($1::text[]) AND relrowsecurity`,
+            [NEW_TABLES],
+          );
+          expect(rows).toEqual([{ n: 3 }]);
+        });
+      });
+    });
+
+    // S0.1 ADV.6: Josh's production sequence (README, Production), rehearsed
+    // on a database built the way production was: 0000's SQL applied outside
+    // Migrate, V1 rows present, no _prisma_migrations table.
+    describe("the README's production steps, rehearsed locally (ADV.6, T14)", () => {
+      let prod: ScratchDatabase;
+      let dir: string;
+      let schema0000: string;
+      const V1_ROWS = {
+        card: ["card-1", "Esper Sentinel", "mh2", "Modern Horizons 2", "12"],
+        snapshot: ["snap-1", "card-1", 59.17, 120.5],
+      };
+
+      beforeAll(async () => {
+        prod = await createScratchDatabase(serverUrl, "mox_s01_prod");
+        dir = mkdtempSync(path.join(tmpdir(), "mox-s01-prod-"));
+        const baselineSql = readFileSync(
+          path.join(__dirname, "migrations", "0000_baseline", "migration.sql"),
+          "utf8",
+        );
+        await withClient(prod.url, async (c) => {
+          await c.query(baselineSql);
+          await c.query(
+            `INSERT INTO tracked_cards (id, name, set, set_name, collector_number)
+             VALUES ($1, $2, $3, $4, $5)`,
+            V1_ROWS.card,
+          );
+          await c.query(
+            `INSERT INTO price_snapshots (id, card_id, usd, usd_foil)
+             VALUES ($1, $2, $3, $4)`,
+            V1_ROWS.snapshot,
+          );
+        });
+        // README step (a)'s reference: the S1.1 merge's schema. CI checks out
+        // full history (fetch-depth: 0) so this commit is present.
+        schema0000 = path.join(dir, "schema-0000.prisma");
+        writeFileSync(
+          schema0000,
+          execFileSync("git", ["show", "9a2837b:prisma/schema.prisma"], {
+            cwd: path.join(__dirname, ".."),
+            encoding: "utf8",
+          }),
+        );
+      });
+
+      afterAll(async () => {
+        if (prod) await dropScratchDatabase(serverUrl, prod.name);
+        if (dir) rmSync(dir, { recursive: true, force: true });
+      });
+
+      const v1Rows = (url: string) =>
+        withClient(url, async (c) => ({
+          cards: (await c.query("SELECT * FROM tracked_cards ORDER BY id"))
+            .rows,
+          snapshots: (
+            await c.query("SELECT * FROM price_snapshots ORDER BY id")
+          ).rows,
+        }));
+
+      test("(a) diff, (b) resolve, (c0) status, (c) deploy, (d) status and diff behave as the README says", async () => {
+        const before = await v1Rows(prod.url);
+        expect(before.cards).toHaveLength(1);
+
+        const a = prismaCli(
+          [
+            "migrate",
+            "diff",
+            "--from-config-datasource",
+            "--to-schema",
+            schema0000,
+            "--exit-code",
+          ],
+          prod.url,
+        );
+        expect(a.status, a.output).toBe(0);
+        expect(a.output).toMatch(/No difference detected/);
+
+        const b = prismaCli(
+          ["migrate", "resolve", "--applied", "0000_baseline"],
+          prod.url,
+        );
+        expect(b.status, b.output).toBe(0);
+
+        // (c0): the pre-check shows exactly 0001_price_history pending.
+        const c0 = prismaCli(["migrate", "status"], prod.url);
+        expect(c0.output).toMatch(
+          /Following migration have not yet been applied:\s+0001_price_history\s/,
+        );
+        expect(c0.output).not.toMatch(/000[2-9]_/);
+
+        const c = prismaCli(["migrate", "deploy"], prod.url);
+        expect(c.status, c.output).toBe(0);
+        expect(c.output).toMatch(/Applying migration `0001_price_history`/);
+        expect(c.output).not.toMatch(/Applying migration `0000_baseline`/);
+
+        const d1 = prismaCli(["migrate", "status"], prod.url);
+        expect(d1.status, d1.output).toBe(0);
+        expect(d1.output).toMatch(/Database schema is up to date/);
+        const d2 = prismaCli(
+          [
+            "migrate",
+            "diff",
+            "--from-config-datasource",
+            "--to-schema",
+            "prisma/schema.prisma",
+            "--exit-code",
+          ],
+          prod.url,
+        );
+        expect(d2.status, d2.output).toBe(0);
+
+        const twice = prismaCli(["migrate", "deploy"], prod.url);
+        expect(twice.status, twice.output).toBe(0);
+        expect(twice.output).toMatch(/No pending migrations to apply/i);
+
+        expect(await v1Rows(prod.url)).toEqual(before);
+        await withClient(prod.url, async (c2) => {
+          const { rows } = await c2.query(
+            `SELECT migration_name, applied_steps_count, finished_at IS NOT NULL AS finished
+               FROM _prisma_migrations ORDER BY started_at`,
+          );
+          expect(rows).toEqual([
+            {
+              migration_name: "0000_baseline",
+              applied_steps_count: 0,
+              finished: true,
+            },
+            {
+              migration_name: "0001_price_history",
+              applied_steps_count: 1,
+              finished: true,
+            },
+          ]);
         });
       });
     });

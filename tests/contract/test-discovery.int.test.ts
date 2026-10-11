@@ -193,6 +193,7 @@ describe("test discovery", () => {
         "tsconfig.json",
         "tsconfig.vitest.json",
         "src/test/setup-dom.ts",
+        "src/test/no-database.ts",
       ]) {
         mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
         copyFileSync(path.join(ROOT, file), path.join(dir, file));

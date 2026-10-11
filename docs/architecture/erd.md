@@ -68,7 +68,7 @@ Indexes and settings:
 - `price_snapshots_card_id_timestamp_idx` on `price_snapshots (card_id, timestamp)` (V1).
 - `price_history_pkey` on `price_history (scryfall_id, finish, date)`, the table's only index.
 - `price_sync_runs_status_finished_at_idx` on `price_sync_runs (status, finished_at)`, for the freshness read.
-- Hand-added in `0001_price_history` (Prisma's schema cannot express them): `price_history_price_cents_check` `CHECK (price_cents > 0)`, and `price_history`'s `autovacuum_vacuum_scale_factor = 0.02` and `autovacuum_vacuum_insert_scale_factor = 0.02` (C2-A.8).
+- Hand-added in `0001_price_history` (Prisma's schema cannot express them): `price_history_price_cents_check` `CHECK (price_cents > 0)`, and `price_history`'s `autovacuum_vacuum_scale_factor = 0.02` and `autovacuum_vacuum_insert_scale_factor = 0.02` (C2-A.8), and row level security enabled with no policy on all three F0 tables, so Supabase's `anon` and `authenticated` roles can neither read nor write them while the owning role is unaffected (S0.1 ADV.7). The whole migration is one transaction (S0.1 ADV.2).
 
 ## Enums
 

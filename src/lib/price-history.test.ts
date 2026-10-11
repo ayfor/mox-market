@@ -3,6 +3,7 @@
 // S0.1d8).
 import { CardFinish } from "@/generated/prisma/enums";
 import { FINISHES, type Finish } from "@/lib/recommendation/types";
+import { refusingPrismaModule } from "@/test/no-database";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   createPriceHistoryReader,
@@ -56,6 +57,9 @@ describe("input validation before any query (T7, AC-6)", () => {
     ["month 00", "2026-00-10"],
     ["a Date", new Date("2026-10-05T00:00:00Z")],
     ["null", null],
+    // S0.1 ADV.8: JavaScript round-trips year 0000; Postgres refuses it.
+    ["year 0000", "0000-01-01"],
+    ["year 0000's Feb 29", "0000-02-29"],
   ];
   const BAD_FINISHES: [string, unknown][] = [
     ["Foil", "Foil"],
@@ -150,6 +154,8 @@ describe("input validation before any query (T7, AC-6)", () => {
     expect(isCalendarDate("2026-02-30")).toBe(false);
     expect(isCalendarDate("2026-04-31")).toBe(false);
     expect(isCalendarDate(20261010)).toBe(false);
+    expect(isCalendarDate("0000-01-01")).toBe(false);
+    expect(isCalendarDate("0001-01-01")).toBe(true);
   });
 });
 
@@ -165,7 +171,48 @@ describe("the query and its result (T7, AC-6)", () => {
     expect(sql).toMatch(/^SELECT /);
     expect(sql).toContain('FROM "price_history"');
     expect(sql).not.toContain(ID_A);
+    // S0.1 ADV.3: the order is the statement's, not the heap's.
+    expect(sql).toMatch(/ORDER BY "price_history"\."date" ASC$/);
   });
+
+  test.each([
+    [
+      "descending dates",
+      [
+        ["2026-10-10", "2026-10-10T06:00:00.000Z"],
+        ["2026-10-09", "2026-10-09T06:00:00.000Z"],
+      ],
+    ],
+    [
+      "a repeated date",
+      [
+        ["2026-10-09", "2026-10-09T06:00:00.000Z"],
+        ["2026-10-09", "2026-10-10T06:00:00.000Z"],
+      ],
+    ],
+    [
+      "one row out of place",
+      [
+        ["2026-09-12", "2026-09-12T06:00:00.000Z"],
+        ["2026-10-10", "2026-10-10T06:00:00.000Z"],
+        ["2026-10-01", "2026-10-11T06:00:00.000Z"],
+      ],
+    ],
+  ])(
+    "rows not in strictly ascending date order (%s) reject with TypeError, never a wrong latestSnapshotAt (ADV.3)",
+    async (_name, rows) => {
+      const { reader } = fakeClient(
+        rows.map(([date, synced_at]) => ({
+          date,
+          price_cents: 100,
+          synced_at,
+        })),
+      );
+      await expect(
+        reader.getPriceHistory(ID_A, "normal", AS_OF),
+      ).rejects.toThrow(/strictly ascending/);
+    },
+  );
 
   test("getHistoryFreshness sends one statement with no values", async () => {
     const { reader, $queryRaw } = fakeClient();
@@ -351,14 +398,23 @@ describe("the default reader (T8, S0.1d8)", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.doUnmock("@prisma/adapter-pg");
+    // Restore the unit project's no-database barrier (S0.1d23).
+    vi.doMock("@/lib/prisma", refusingPrismaModule);
     vi.resetModules();
     delete (globalThis as { prisma?: unknown }).prisma;
+    delete (globalThis as { historyPrisma?: unknown }).historyPrisma;
   });
 
-  /** Fresh modules, POSTGRES_PRISMA_URL unset, PrismaPg construction counted. */
+  /**
+   * Fresh modules, POSTGRES_PRISMA_URL unset, PrismaPg construction counted.
+   * These tests are about the real @/lib/prisma's lazy load, so they lift the
+   * barrier; with no URL it can never connect.
+   */
   function freshWithoutUrl() {
     vi.resetModules();
+    vi.doUnmock("@/lib/prisma");
     delete (globalThis as { prisma?: unknown }).prisma;
+    delete (globalThis as { historyPrisma?: unknown }).historyPrisma;
     vi.stubEnv("POSTGRES_PRISMA_URL", undefined);
     const adapterBuilt = vi.fn();
     vi.doMock("@prisma/adapter-pg", async (importOriginal) => {
