@@ -37,6 +37,10 @@ jobs:
           --health-timeout 5s --health-retries 5
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history: the README's production rehearsal test reads the
+          # S1.1 merge's schema with git show 9a2837b (S0.1 ADV.6).
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc

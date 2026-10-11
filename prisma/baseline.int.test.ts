@@ -164,6 +164,8 @@ describe.skipIf(!reachable)(
       ]);
     });
 
+    // S0.1d9: by name. The full migration list is S0.1's T2
+    // (prisma/price-history-migration.int.test.ts), since 0001 follows.
     test("_prisma_migrations records 0000_baseline as finished", async () => {
       const rows = await withClient(scratchUrl, (c) =>
         c.query<{
@@ -172,7 +174,7 @@ describe.skipIf(!reachable)(
           rolled_back: boolean;
         }>(
           `SELECT migration_name, finished_at IS NOT NULL AS finished, rolled_back_at IS NOT NULL AS rolled_back
-           FROM _prisma_migrations ORDER BY migration_name`,
+           FROM _prisma_migrations WHERE migration_name = '0000_baseline'`,
         ),
       );
       expect(rows.rows).toEqual([

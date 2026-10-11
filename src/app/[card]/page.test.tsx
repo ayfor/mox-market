@@ -25,6 +25,7 @@ import {
   type EvaluationDeps,
   type EvaluationQuery,
 } from "@/lib/evaluation/build-evaluation";
+import { emptyHistoryReader } from "@/lib/evaluation/history-reader";
 import { FALLBACK_NOTICE, fillTemplate } from "@/lib/recommendation/copy";
 import { dailyHistory } from "@/lib/recommendation/fixtures";
 import { FINISH_LABELS, UI_COPY } from "@/lib/recommendation/ui-copy";
@@ -238,14 +239,23 @@ const scryfall404 = (type?: string) =>
     { status: 404, headers: { "Content-Type": "application/json" } },
   );
 
-/** Renders the settled page with the real client; returns the log. */
+/**
+ * Renders the settled page with the real Scryfall client; returns the log.
+ * The reader defaults to the empty one: since S0.1 the default reaches
+ * Postgres, which a component test never does (S0.1 Deviation 1).
+ */
 async function renderSettled(
   card: string,
   search: Record<string, string>,
   overrides: Partial<EvaluationDeps> = {},
 ): Promise<ReturnType<typeof vi.fn>> {
   const log = vi.fn();
-  const deps: EvaluationDeps = { ...defaultEvaluationDeps, ...overrides, log };
+  const deps: EvaluationDeps = {
+    ...defaultEvaluationDeps,
+    reader: emptyHistoryReader,
+    ...overrides,
+    log,
+  };
   render(await resolvePanels(await page(card, search), deps));
   return log;
 }

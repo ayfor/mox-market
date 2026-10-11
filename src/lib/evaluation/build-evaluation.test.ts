@@ -49,6 +49,7 @@ import {
 import { SCRYFALL_TIMEOUT_MS } from "./consts";
 import {
   defaultHistoryReader,
+  emptyHistoryReader,
   type PriceHistoryReader,
 } from "./history-reader";
 import { parseResultParams } from "./result-params";
@@ -470,8 +471,9 @@ describe("lookup outcomes (T9)", () => {
     },
   );
 
-  test("the default empty reader → insufficient_data, no history, syncStale", async () => {
-    const { deps } = depsWith({ reader: defaultHistoryReader });
+  // S0.1d9: the empty reader by name; since S0.1 the default reaches Postgres.
+  test("the empty reader → insufficient_data, no history, syncStale", async () => {
+    const { deps } = depsWith({ reader: emptyHistoryReader });
     const result = ok(await buildEvaluation(query(7499), deps));
     expect(result.recommendation.kind).toBe("insufficient_data");
     expect(result.latestSnapshotAt).toBeNull();
@@ -512,7 +514,7 @@ describe("lookup outcomes (T9)", () => {
     );
   });
 
-  test("the default deps use the empty reader and the real Scryfall client", () => {
+  test("the default deps use the default (F0) reader and the real Scryfall client", () => {
     expect(defaultEvaluationDeps.reader).toBe(defaultHistoryReader);
     expect(defaultEvaluationDeps.scryfall.getCardByName).toBe(getCardByName);
   });

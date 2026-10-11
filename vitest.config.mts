@@ -34,6 +34,9 @@ export default defineConfig(({ mode }) => {
   }
   if (IN_CI) delete process.env[SNAPSHOT_UPDATE_VAR];
 
+  // S0.1 ADV.10 (S0.1d23): unit and component tests run with no database URL
+  // and with @/lib/prisma refusing every use (src/test/no-database.ts); only
+  // the integration project sees the URLs loaded above.
   const shared = {
     plugins: [react()],
     resolve: {
@@ -54,6 +57,7 @@ export default defineConfig(({ mode }) => {
           test: {
             name: "unit",
             environment: "node",
+            setupFiles: ["src/test/no-database.ts"],
             include: [`${TEST_ROOTS}/**/*.test.ts`],
             exclude: [
               "**/node_modules/**",
@@ -78,7 +82,7 @@ export default defineConfig(({ mode }) => {
             environment: "jsdom",
             include: [`${TEST_ROOTS}/**/*.test.tsx`],
             exclude: ["**/node_modules/**", "scripts/__fixtures__/**"],
-            setupFiles: ["src/test/setup-dom.ts"],
+            setupFiles: ["src/test/no-database.ts", "src/test/setup-dom.ts"],
           },
         },
         {

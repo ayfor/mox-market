@@ -1,9 +1,10 @@
-// The price-history reader contract (S2.1d2; pivot, F0 not approved). F2
-// reads history and freshness only through this interface, with F0 W3's
-// signatures and F1's PriceSnapshot. S0.1 adds src/lib/price-history.ts,
-// implementing it over price_history and price_sync_runs, and repoints
-// defaultHistoryReader at it in its PR. Until then the default is empty, so
-// every card is insufficient_data and the stale-data banner shows.
+// The price-history reader contract (S2.1d2). F2 reads history and
+// freshness only through this interface, with F0 W3's signatures and F1's
+// PriceSnapshot. Since S0.1 the default is the real reader in
+// src/lib/price-history.ts, over price_history and price_sync_runs; the empty
+// reader stays for tests that mean "no history". The tables stay empty until
+// S0.2's ingest, so cards remain insufficient_data until then.
+import { prismaHistoryReader } from "@/lib/price-history";
 import type { Finish, PriceSnapshot } from "@/lib/recommendation/types";
 
 /** F0 W3 getPriceHistory's result. */
@@ -32,7 +33,7 @@ export interface PriceHistoryReader {
   getHistoryFreshness(): Promise<HistoryFreshness>;
 }
 
-/** No rows and null freshness: the reader until S0.1 lands. */
+/** No rows and null freshness: for tests that mean "no history" (S0.1d9). */
 export const emptyHistoryReader: PriceHistoryReader = Object.freeze({
   async getPriceHistory(): Promise<PriceHistoryResult> {
     return { history: [], latestSnapshotAt: null };
@@ -42,5 +43,5 @@ export const emptyHistoryReader: PriceHistoryReader = Object.freeze({
   },
 });
 
-/** The reader the result page uses. S0.1 repoints this at its reader. */
-export const defaultHistoryReader: PriceHistoryReader = emptyHistoryReader;
+/** The reader the result page uses: F0's, over Postgres (S0.1d8). */
+export const defaultHistoryReader: PriceHistoryReader = prismaHistoryReader;

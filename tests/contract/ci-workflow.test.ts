@@ -64,6 +64,12 @@ describe(".github/workflows/ci.yml", () => {
     expect(ci.match(/cancel-in-progress:/g)).toHaveLength(1);
   });
 
+  test("checks out full history, so git show 9a2837b works in the README rehearsal (S0.1 ADV.6)", () => {
+    expect(ci).toMatch(
+      /- uses: actions\/checkout@v\d+\s*\n\s+with:\s*\n(?:\s+#.*\n)*\s+fetch-depth: 0\s*$/m,
+    );
+  });
+
   test("reads Node from .nvmrc and holds read-only permissions", () => {
     expect(ci).toMatch(/node-version-file:\s*\.nvmrc/);
     expect(ci).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*$/m);
