@@ -4,3 +4,5 @@ src/generated/
 docs/
 AGENTS.md
 CLAUDE.md
+# MTGJson downloads (S0.2)
+.cache/

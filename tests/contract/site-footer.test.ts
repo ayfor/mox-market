@@ -53,6 +53,9 @@ const SRC_FILES = filesUnder("src").filter(
 );
 const CODE_FILES = SRC_FILES.filter((f) => /\.[cm]?[jt]sx?$/.test(f));
 
+/** Fixture data that names MTGJson's other providers as JSON keys (S0.2 Deviation 2). */
+const PROVIDER_FIXTURES = ["src/lib/mtgjson/__fixtures__/build.ts"];
+
 /** Every file whose source makes one of the old footers' false claims. */
 const falseClaimFiles = (files: { path: string; source: string }[]) =>
   files.filter((f) => FALSE_FOOTER_CLAIMS.test(f.source)).map((f) => f.path);
@@ -74,12 +77,22 @@ describe("the false per-page footers are gone (T11)", () => {
     expect(SRC_FILES.some((f) => f.startsWith("src/generated/"))).toBe(false);
   });
 
-  test.each(SRC_FILES)(
+  test.each(SRC_FILES.filter((f) => !PROVIDER_FIXTURES.includes(f)))(
     "%s makes none of the old footers' false claims",
     (file) => {
       expect(read(file)).not.toMatch(FALSE_FOOTER_CLAIMS);
     },
   );
+
+  // S0.2 Deviation 2: MTGJson's fixture builder writes the provider keys
+  // F0 must ignore (cardkingdom, cardmarket) as decoy data. It is test data,
+  // not copy: nothing a page renders may import it.
+  test("the provider-key fixtures are imported only by tests", () => {
+    for (const file of CODE_FILES) {
+      if (PROVIDER_FIXTURES.includes(file)) continue;
+      expect(read(file), file).not.toMatch(/__fixtures__\/build["']/);
+    }
+  });
 
   test("the claim pattern catches every spelling (ADV.6)", () => {
     for (const hit of [
