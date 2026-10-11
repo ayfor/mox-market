@@ -6,8 +6,12 @@
 // A .gz file is never decompressed to disk: `open` gunzips it as a stream
 // each time it is read, and `verify` reads it once end to end into a null
 // sink so a truncated or corrupted download fails on its gzip CRC before any
-// database connection. The only file writer in this module is `download`,
-// whose input is the raw response body (T7).
+// database connection. The only file writer in this module is `download`.
+// fetch decodes any Content-Encoding it is served, so for a .gz file
+// `download` refuses every encoding but identity and requires the gzip magic
+// bytes before writing, and it gunzips the `.part` end to end before the
+// rename, so neither a decompressed copy nor a corrupt file ever replaces a
+// good cached one (ADV.3).
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
@@ -66,6 +70,13 @@ const nullSink = () =>
     },
   });
 
+/** The two bytes every gzip member starts with (RFC 1952). */
+export const GZIP_MAGIC = Buffer.from([0x1f, 0x8b]);
+
+/** Gunzips a file on disk end to end into a null sink (CRC and length). */
+const verifyGzipFile = (file: string): Promise<void> =>
+  pipeline(createReadStream(file), createGunzip(), nullSink());
+
 /**
  * A raw byte stream, gunzipped when the name ends in .gz. Destroying the
  * returned stream (a reader that stops at meta) destroys the raw one, and a
@@ -98,11 +109,7 @@ export function createDirSource(dir: string): MtgjsonSource {
     },
     async verify(name) {
       if (!isGzip(name)) return;
-      await pipeline(
-        createReadStream(fileOf(name)),
-        createGunzip(),
-        nullSink(),
-      );
+      await verifyGzipFile(fileOf(name));
     },
   };
 }
@@ -117,9 +124,11 @@ export interface HttpSourceOptions {
 
 /**
  * Downloads each file from MTGJSON_BASE_URL into `<cacheDir>/<name>.part`,
- * checks the byte count against Content-Length, then renames it into place
- * (an existing file is replaced only on success). The body stream is written
- * as received: compressed bytes for a .gz file.
+ * checks the byte count against Content-Length, gunzips a .gz `.part` end to
+ * end, then renames it into place (an existing file is replaced only on
+ * success). A .gz file must arrive with no Content-Encoding (or identity) and
+ * start with the gzip magic bytes, so what is written is the compressed file
+ * itself: fetch would otherwise decode it (ADV.3).
  */
 export async function download(
   name: MtgjsonFileName,
@@ -174,13 +183,33 @@ export async function download(
     const encoding = (response.headers.get("content-encoding") ?? "identity")
       .trim()
       .toLowerCase();
+    const gzip = isGzip(name);
+    if (gzip && encoding !== "identity" && encoding !== "") {
+      throw new DownloadError(
+        name,
+        `served with Content-Encoding ${JSON.stringify(encoding.slice(0, 40))}; fetch would decode it, so nothing is written`,
+      );
+    }
     const header = response.headers.get("content-length");
     const expected =
       header === null || encoding !== "identity" ? null : Number(header);
     let bytes = 0;
     let nextLog = 25_000_000;
+    let head = Buffer.alloc(0);
     const counter = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
+        if (gzip && head.length < GZIP_MAGIC.length) {
+          head = Buffer.concat([head, chunk]).subarray(0, GZIP_MAGIC.length);
+          if (!GZIP_MAGIC.subarray(0, head.length).equals(head)) {
+            callback(
+              new DownloadError(
+                name,
+                "the body is not gzip data (magic bytes)",
+              ),
+            );
+            return;
+          }
+        }
         bytes += chunk.length;
         arm();
         if (log && bytes >= nextLog) {
@@ -207,6 +236,25 @@ export async function download(
         );
       }
     }
+    if (gzip) {
+      if (bytes < GZIP_MAGIC.length) {
+        throw new DownloadError(
+          name,
+          "the body is not gzip data (magic bytes)",
+        );
+      }
+      // The integrity pass runs on the .part, so a bad CRC or a truncation
+      // never replaces a good cached file.
+      clearTimeout(timer);
+      try {
+        await verifyGzipFile(part);
+      } catch (error) {
+        throw new DownloadError(
+          name,
+          `failed its gzip check (${error instanceof Error ? error.message : String(error)})`,
+        );
+      }
+    }
     await rename(part, target);
     return bytes;
   } catch (error) {
@@ -222,17 +270,21 @@ export async function download(
 /** The default source: download into the cache, then read from it. */
 export function createHttpSource(options: HttpSourceOptions): MtgjsonSource {
   const dir = createDirSource(options.cacheDir);
+  /** Files this source downloaded, whose .part already passed the gzip check. */
+  const verified = new Set<string>();
   return {
     description: `MTGJson v5 download, cached in ${options.cacheDir}`,
     async prepare(names) {
       for (const name of names) {
         options.log?.(`downloading ${name}`);
         const bytes = await download(name, options);
+        if (isGzip(name)) verified.add(name);
         options.log?.(`  ${name}: ${bytes} bytes`);
       }
     },
     open: (name) => dir.open(name),
-    verify: (name) => dir.verify(name),
+    verify: (name) =>
+      verified.has(name) ? Promise.resolve() : dir.verify(name),
   };
 }
 

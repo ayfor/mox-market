@@ -8,32 +8,53 @@ export interface Statement {
   readonly values: readonly unknown[];
 }
 
+export interface FailRule {
+  readonly match: RegExp;
+  /** 1-based count of matches; the nth matching statement throws. */
+  readonly nth: number;
+  readonly error: Error;
+}
+
 export interface FakeDbOptions {
   /** pg_database_size() answers, read in order; the last one repeats. */
   readonly sizes?: readonly number[];
   /** Whether price_history is empty for the pre-check. */
   readonly empty?: boolean;
-  /** Throw this from the matching statement (1-based count of matches). */
-  readonly failOn?: { match: RegExp; nth: number; error: Error };
+  /** Throw from the matching statement; several rules count independently. */
+  readonly failOn?: FailRule | readonly FailRule[];
+  /** Called with each statement before it is answered (an abort hook). */
+  readonly onStatement?: (statement: Statement) => void;
 }
 
 export class FakeDb implements Db {
   readonly statements: Statement[] = [];
   ended = false;
   private sizeReads = 0;
-  private matches = 0;
+  private readonly matches: number[];
+  private readonly rules: readonly FailRule[];
 
-  constructor(private readonly options: FakeDbOptions = {}) {}
+  constructor(private readonly options: FakeDbOptions = {}) {
+    const failOn = options.failOn;
+    this.rules =
+      failOn === undefined
+        ? []
+        : Array.isArray(failOn)
+          ? (failOn as readonly FailRule[])
+          : [failOn as FailRule];
+    this.matches = this.rules.map(() => 0);
+  }
 
   async query(
     text: string,
     values: readonly unknown[] = [],
   ): Promise<QueryResultLike> {
-    this.statements.push({ text, values });
-    const fail = this.options.failOn;
-    if (fail && fail.match.test(text)) {
-      this.matches += 1;
-      if (this.matches === fail.nth) throw fail.error;
+    const statement = { text, values };
+    this.statements.push(statement);
+    this.options.onStatement?.(statement);
+    for (const [i, rule] of this.rules.entries()) {
+      if (!rule.match.test(text)) continue;
+      this.matches[i] += 1;
+      if (this.matches[i] === rule.nth) throw rule.error;
     }
     if (/pg_database_size/.test(text)) {
       const sizes = this.options.sizes ?? [100_000_000];

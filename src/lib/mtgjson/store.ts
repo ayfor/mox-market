@@ -218,7 +218,13 @@ WHERE "id" = $1::int4`,
 /** The longest error text a run row stores (F0 §Fields). */
 export const RUN_ERROR_MAX_CHARS = 1_000;
 
-const URL_PATTERN = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi;
+/**
+ * A URL, with one or more slashes after the scheme (`path.resolve` turns
+ * `postgresql://` into `postgresql:/`), and bare `user:password@host`
+ * userinfo (ADV.13).
+ */
+const URL_PATTERN = /[a-z][a-z0-9+.-]*:\/+[^\s"'<>]+/gi;
+const USERINFO_PATTERN = /[^\s"'<>@/:]*:[^\s"'<>@/]*@[^\s"'<>]+/g;
 
 /** An error as run-row text: `name: message`. */
 export function errorText(error: unknown): string {
@@ -227,12 +233,13 @@ export function errorText(error: unknown): string {
 }
 
 /**
- * Run-row error text (F0 §Fields: "message only; never a secret or URL"):
- * every URL becomes "[redacted url]", then the text is cut to 1,000
- * characters.
+ * Run-row and terminal error text (F0 §Fields: "message only; never a secret
+ * or URL"): every URL and every `user:password@host` becomes
+ * "[redacted url]", then the text is cut to 1,000 characters.
  */
 export function sanitizeErrorMessage(text: string): string {
   return text
     .replace(URL_PATTERN, "[redacted url]")
+    .replace(USERINFO_PATTERN, "[redacted url]")
     .slice(0, RUN_ERROR_MAX_CHARS);
 }

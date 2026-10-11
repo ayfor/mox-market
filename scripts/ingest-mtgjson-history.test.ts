@@ -38,6 +38,7 @@ interface Run {
 function cli(
   args: readonly string[],
   env: Record<string, string> = {},
+  cwd = ROOT,
 ): Promise<Run> {
   const childEnv: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -46,10 +47,11 @@ function cli(
   }
   Object.assign(childEnv, env);
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [TSX, SCRIPT, ...args], {
-      cwd: ROOT,
-      env: childEnv,
-    });
+    const child = spawn(
+      process.execPath,
+      [TSX, path.join(ROOT, SCRIPT), ...args],
+      { cwd, env: childEnv },
+    );
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => (stdout += chunk));
@@ -180,6 +182,38 @@ describe("the ingest CLI (T14)", () => {
       expect(run.stderr).toMatch(/refusing/);
       expect(run.stdout + run.stderr).not.toContain("pw-XYZZY-123");
       expect(run.stdout).not.toContain("target database:");
+    },
+  );
+
+  test.each([
+    [["postgresql://u:pw-XYZZY@db.example.invalid/db"]],
+    [["--dry-run", "--source-dir", "postgresql://u:pw-XYZZY@h/db"]],
+  ])(
+    "a connection string in argv exits 2 and is echoed nowhere (ADV.13): %j",
+    { timeout: TIMEOUT },
+    async (args) => {
+      const run = await cli(args);
+      expect(run.code).toBe(2);
+      expect(run.stderr).toMatch(/^usage error: /);
+      expect(run.stdout + run.stderr).not.toContain("pw-XYZZY");
+    },
+  );
+
+  test(
+    "run from scripts/, --help and a dry-run still work (ADV.5)",
+    { timeout: TIMEOUT },
+    async () => {
+      const scripts = path.join(ROOT, "scripts");
+      const help = await cli(["--help"], {}, scripts);
+      expect(help.code).toBe(0);
+      const dry = await cli(
+        ["--dry-run", "--source-dir", fixtures],
+        {},
+        scripts,
+      );
+      expect(dry.stderr).not.toMatch(/run error/);
+      expect(dry.code).toBe(0);
+      expect(dry.stdout).toContain("MTGJson ingest report");
     },
   );
 

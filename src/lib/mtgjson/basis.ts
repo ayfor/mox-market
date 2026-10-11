@@ -11,7 +11,7 @@
 // at least 100 ms apart and which sends the app's User-Agent and
 // `Accept: application/json` (Scryfall's guidance).
 import { priceCentsFor } from "../printings";
-import { getCardById } from "../scryfall";
+import { getCardById, ScryfallApiError } from "../scryfall";
 import type { KeptSeries } from "./transform";
 
 /** A median absolute gap over this many basis points (2%) is flagged. */
@@ -95,10 +95,17 @@ export interface BasisResult {
   readonly skippedNotFound: number;
   readonly skippedNoPrice: number;
   readonly skippedErrors: number;
+  /**
+   * Set when Scryfall answered 429 (rate limited): the walk stops at once,
+   * per Scryfall's guidance to back off, and the sample is incomplete.
+   */
+  readonly stoppedOnRateLimit: boolean;
   readonly medianAbsGapBp: number | null;
   readonly medianSignedGapBp: number | null;
   /** True when the median absolute gap exceeds 2% (an open ruling for Josh). */
   readonly flagged: boolean;
+  /** True when fewer pairs than requested were found: no verdict (ADV.9). */
+  readonly incomplete: boolean;
 }
 
 /** The median of a list (the mean of the middle two for an even count). */
@@ -133,6 +140,7 @@ export async function runBasisSample(
   let skippedNotFound = 0;
   let skippedNoPrice = 0;
   let skippedErrors = 0;
+  let stoppedOnRateLimit = false;
   for (const series of reservoir.candidates()) {
     if (pairs.length >= size) break;
     if (series.finish === "etched") continue;
@@ -140,6 +148,11 @@ export async function runBasisSample(
     try {
       card = await fetchCard(series.scryfallId);
     } catch (error) {
+      if (error instanceof ScryfallApiError && error.status === 429) {
+        stoppedOnRateLimit = true;
+        log?.("  basis: Scryfall answered 429 (rate limited); the walk stops");
+        break;
+      }
       skippedErrors += 1;
       log?.(
         `  basis: Scryfall request failed (${error instanceof Error ? error.name : "error"}), skipped`,
@@ -174,8 +187,10 @@ export async function runBasisSample(
     skippedNotFound,
     skippedNoPrice,
     skippedErrors,
+    stoppedOnRateLimit,
     medianAbsGapBp: medianAbs,
     medianSignedGapBp: median(pairs.map((p) => p.gapBp)),
     flagged: medianAbs !== null && medianAbs > BASIS_FLAG_BP,
+    incomplete: pairs.length < size,
   };
 }

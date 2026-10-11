@@ -69,6 +69,122 @@ const ok = (body: Buffer, length: number | null = body.length) =>
     headers: length === null ? {} : { "content-length": String(length) },
   });
 
+describe("a .gz download never writes a decoded or corrupt file over the cache (T16, ADV.3)", () => {
+  const JSON_BODY =
+    '{"meta":{"date":"2026-10-05","version":"5.3.0"},"data":{"a":1}}';
+
+  /** A good cached AllPrices.json.gz; returns its bytes. */
+  const seedCache = () => {
+    writeFileSync(path.join(dir, ALL_PRICES_FILE), GZ);
+    return GZ;
+  };
+
+  test.each(["gzip", "br", "deflate", "x-gzip"])(
+    "a Content-Encoding %s is refused before anything is written, and the cached file stays",
+    async (encoding) => {
+      const good = seedCache();
+      const { fetchImpl } = stubFetch({
+        [ALL_PRICES_FILE]: () =>
+          new Response(JSON_BODY, {
+            headers: { "content-encoding": encoding },
+          }),
+      });
+      const error = await download(ALL_PRICES_FILE, {
+        cacheDir: dir,
+        fetchImpl,
+      }).catch((e) => e);
+      expect(error).toBeInstanceOf(DownloadError);
+      expect(error.message).toMatch(
+        /served with Content-Encoding .*; fetch would decode it, so nothing is written/,
+      );
+      expect(readdirSync(dir)).toEqual([ALL_PRICES_FILE]);
+      expect(readFileSync(path.join(dir, ALL_PRICES_FILE))).toEqual(good);
+    },
+  );
+
+  test("Meta.json (not gzip at rest) may still arrive transfer-compressed", async () => {
+    const { fetchImpl } = stubFetch({
+      [META_FILE]: () =>
+        new Response(metaJson(), { headers: { "content-encoding": "gzip" } }),
+    });
+    await download(META_FILE, { cacheDir: dir, fetchImpl });
+    expect(readFileSync(path.join(dir, META_FILE), "utf8")).toBe(metaJson());
+  });
+
+  test("an identity body that is not gzip (no 1f 8b) is refused, and the cached file stays", async () => {
+    const good = seedCache();
+    const { fetchImpl } = stubFetch({
+      [ALL_PRICES_FILE]: () => ok(Buffer.from(JSON_BODY)),
+    });
+    await expect(
+      download(ALL_PRICES_FILE, { cacheDir: dir, fetchImpl }),
+    ).rejects.toThrow(/the body is not gzip data \(magic bytes\)/);
+    expect(readdirSync(dir)).toEqual([ALL_PRICES_FILE]);
+    expect(readFileSync(path.join(dir, ALL_PRICES_FILE))).toEqual(good);
+  });
+
+  test("the magic bytes are checked across chunk boundaries", async () => {
+    const { fetchImpl } = stubFetch({
+      [ALL_PRICES_FILE]: () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([0x1f]));
+              controller.enqueue(new Uint8Array([0x00, 0x01]));
+              controller.close();
+            },
+          }),
+        ),
+    });
+    await expect(
+      download(ALL_PRICES_FILE, { cacheDir: dir, fetchImpl }),
+    ).rejects.toThrow(/magic bytes/);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  test("a full-length body with a flipped CRC byte fails its gzip check on the .part, and the cached file stays", async () => {
+    const good = seedCache();
+    const bad = Buffer.from(GZ);
+    bad[bad.length - 6] ^= 0xff;
+    const { fetchImpl } = stubFetch({ [ALL_PRICES_FILE]: () => ok(bad) });
+    const error = await download(ALL_PRICES_FILE, {
+      cacheDir: dir,
+      fetchImpl,
+    }).catch((e) => e);
+    expect(error).toBeInstanceOf(DownloadError);
+    expect(error.message).toMatch(/failed its gzip check/);
+    expect(readdirSync(dir)).toEqual([ALL_PRICES_FILE]);
+    expect(readFileSync(path.join(dir, ALL_PRICES_FILE))).toEqual(good);
+  });
+
+  test("a truncated body with no Content-Length fails its gzip check, and nothing is left", async () => {
+    const { fetchImpl } = stubFetch({
+      [ALL_PRICES_FILE]: () => ok(GZ.subarray(0, GZ.length - 8), null),
+    });
+    await expect(
+      download(ALL_PRICES_FILE, { cacheDir: dir, fetchImpl }),
+    ).rejects.toThrow(/failed its gzip check/);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  test("the http source skips the second integrity pass for a file it just verified", async () => {
+    const { fetchImpl } = stubFetch({
+      [META_FILE]: () => ok(Buffer.from(metaJson())),
+      [ALL_PRICES_FILE]: () => ok(GZ),
+    });
+    const source = createHttpSource({ cacheDir: dir, fetchImpl });
+    await source.prepare([META_FILE, ALL_PRICES_FILE]);
+    // Corrupt the cached copy behind the source's back: verify() trusts the
+    // pass the .part already made in this process, so it does not re-read.
+    writeFileSync(path.join(dir, ALL_PRICES_FILE), Buffer.from("not gzip"));
+    await expect(source.verify(ALL_PRICES_FILE)).resolves.toBeUndefined();
+    // A directory source always re-reads.
+    await expect(
+      createDirSource(dir).verify(ALL_PRICES_FILE),
+    ).rejects.toThrow();
+  });
+});
+
 describe("download (T16)", () => {
   test("writes <name>.part, checks the byte count, then renames", async () => {
     const { fetchImpl, requests } = stubFetch({

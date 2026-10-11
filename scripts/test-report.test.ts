@@ -88,6 +88,11 @@ const S02_TEST_FILES = [
   "scripts/ingest-mtgjson-history.int.test.ts",
   "tests/contract/mtgjson-streaming.test.ts",
   "tests/contract/mtgjson-runbook.test.ts",
+  // The adversarial fix round's new files (ADV.4, ADV.7, ADV.13, ADV.15).
+  "src/lib/mtgjson/cli.test.ts",
+  "src/lib/mtgjson/store.test.ts",
+  "src/lib/mtgjson/db.int.test.ts",
+  "tests/contract/mtgjson-env-order.test.ts",
 ] as const;
 
 describe("featureOf", () => {

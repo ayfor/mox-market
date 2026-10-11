@@ -10,6 +10,13 @@
 // outright, flags or not: an unset or unparsable URL, a non-postgres scheme,
 // an empty host, hostaddr, any host query parameter, ::1 and socket
 // directories. Messages name the host and never the user or password.
+//
+// The printed target line is the operator's last check before a write, so it
+// must be what pg dials (ADV.14): a write URL names its port and database
+// explicitly (pg would otherwise take PGPORT, PGDATABASE or a default), may
+// not carry the query parameters pg reads as connection settings (port,
+// dbname, database, user, options; any case), and writes a local host
+// exactly as `localhost` or `127.0.0.1` (pg dials the raw string).
 import { parseArgs } from "node:util";
 import { hostsOf } from "../../../prisma/migrate-guard";
 import { rootCertFrom } from "../prisma-pool";
@@ -110,6 +117,16 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
   if (options.sourceDir !== null && options.sourceDir.trim() === "") {
     throw new UsageError("--source-dir needs a directory");
   }
+  // A connection string pasted here by mistake would be echoed in a
+  // missing-file message, so anything URL-shaped is refused unechoed (ADV.13).
+  if (
+    options.sourceDir !== null &&
+    (options.sourceDir.includes("://") || options.sourceDir.includes("@"))
+  ) {
+    throw new UsageError(
+      "--source-dir takes a directory path, not a URL (the value is not shown)",
+    );
+  }
   const sample = values["basis-sample"];
   let basisSample: number | null = null;
   if (typeof sample === "string") {
@@ -166,6 +183,19 @@ export function usage(): string {
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
 
+/**
+ * Query parameters pg-connection-string turns into connection settings that
+ * change where or as whom pg connects (ADV.14). `host` and `hostaddr` have
+ * their own messages above.
+ */
+export const REFUSED_URL_PARAMS = [
+  "port",
+  "dbname",
+  "database",
+  "user",
+  "options",
+] as const;
+
 export type IngestTarget =
   | { readonly kind: "dry-run" }
   | {
@@ -178,15 +208,8 @@ export type IngestTarget =
     };
 
 /** host:port/database for printing; never the user or password. */
-function displayOf(url: URL, host: string): string {
-  const port = url.port || "5432";
-  let database = url.pathname.replace(/^\//, "");
-  try {
-    database = decodeURIComponent(database);
-  } catch {
-    // leave it encoded
-  }
-  return `${host}:${port}/${database || "(default)"}`;
+function displayOf(host: string, port: string, database: string): string {
+  return `${host}:${port}/${database}`;
 }
 
 /**
@@ -249,7 +272,41 @@ export function resolveTarget(
       throw refuse("::1 is not on the local list; use localhost or 127.0.0.1");
     }
   }
-  const remote = parsed.hosts.find((h) => !LOCAL_HOSTS.has(h));
+  const settings = [...url.searchParams.keys()]
+    .map((key) => key.trim().toLowerCase())
+    .filter((key) => (REFUSED_URL_PARAMS as readonly string[]).includes(key));
+  if (settings.length > 0) {
+    throw refuse(
+      `the database URL sets ${[...new Set(settings)].join(", ")} as a query parameter, which pg dials instead of what the target line shows`,
+    );
+  }
+  // pg dials the raw host string; the guard's list is the normalized one.
+  const rawHosts = url.hostname.split(",");
+  for (const [i, host] of parsed.hosts.entries()) {
+    if (LOCAL_HOSTS.has(host) && rawHosts[i] !== host) {
+      throw refuse(
+        "write a local host exactly as localhost or 127.0.0.1 (lower case, no trailing dot)",
+      );
+    }
+  }
+  if (url.port === "") {
+    throw refuse(
+      "the database URL must name its port (pg would otherwise use PGPORT or 5432)",
+    );
+  }
+  let database = url.pathname.replace(/^\//, "");
+  try {
+    database = decodeURIComponent(database);
+  } catch {
+    throw refuse("the database name does not decode");
+  }
+  if (database === "") {
+    throw refuse(
+      "the database URL must name its database (pg would otherwise use PGDATABASE or the user's name)",
+    );
+  }
+  const remoteAt = parsed.hosts.findIndex((h) => !LOCAL_HOSTS.has(h));
+  const remote = remoteAt === -1 ? undefined : parsed.hosts[remoteAt];
   if (remote === undefined) {
     if (options.production) {
       throw refuse(
@@ -259,7 +316,7 @@ export function resolveTarget(
     return {
       kind: "local",
       url: raw,
-      display: displayOf(url, parsed.hosts[0]),
+      display: displayOf(parsed.hosts[0], url.port, database),
     };
   }
   if (!options.production || allowProdIngest !== "1") {
@@ -281,7 +338,7 @@ export function resolveTarget(
   return {
     kind: "production",
     url: raw,
-    display: displayOf(url, remote),
+    display: displayOf(rawHosts[remoteAt] ?? remote, url.port, database),
     caCert,
   };
 }

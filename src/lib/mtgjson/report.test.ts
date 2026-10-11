@@ -1,6 +1,8 @@
 // T9 (AC-6; S0.2d19): the report's stable labels, the 31 window dates with
 // gaps marked MISSING, the staleness warning, and nothing secret in it.
-import { describe, expect, test } from "vitest";
+import type { ScryfallCard } from "@/types/scryfall";
+import { describe, expect, test, vi } from "vitest";
+import { ScryfallApiError } from "../scryfall";
 import {
   fixtureFiles,
   META,
@@ -37,19 +39,40 @@ async function reportFor(
   target: IngestTarget = { kind: "dry-run" },
   files = fixtureFiles(),
   identifiersOnly = false,
+  basis?: {
+    size: number;
+    fetchCard: (id: string) => Promise<ScryfallCard | null>;
+  },
 ): Promise<IngestReport> {
   const db = new FakeDb();
   const { report } = await runBulkIngest(
-    { target, identifiersOnly },
+    {
+      target,
+      identifiersOnly,
+      basisSample: basis ? { size: basis.size, seed: 1 } : undefined,
+    },
     {
       source: createFixtureSource(files),
       now: () => NOW,
       dbFactory: async () => db as unknown as IngestDb,
       peakRssBytes: () => 279_000_000,
+      basis: basis ? { fetchCard: basis.fetchCard } : undefined,
     },
   );
   return report;
 }
+
+const scryfallCard = (usd: string | null) =>
+  ({
+    prices: {
+      usd,
+      usd_foil: usd,
+      usd_etched: null,
+      eur: null,
+      eur_foil: null,
+      tix: null,
+    },
+  }) as ScryfallCard;
 
 describe("the ingest report (T9, AC-6)", () => {
   test("has a stable label for every AC-6 field", async () => {
@@ -59,6 +82,7 @@ describe("the ingest report (T9, AC-6)", () => {
       "distinct series: 7",
       "distinct printings: 6",
       "gate: rank only 2, price only 3, both 2, dropped 2, no valid price 0",
+      "kept without window rows: 0",
       "unmappedUuids: 1",
       "scryfallCollisions: 1",
       "collisionLosses: 0",
@@ -160,5 +184,41 @@ describe("the ingest report (T9, AC-6)", () => {
       expect(text).not.toContain("ALLOW_PROD_INGEST");
       expect(text).not.toContain("BEGIN CERTIFICATE");
     }
+  });
+
+  test("a basis sample short of its size prints INCOMPLETE, not a verdict, and warns (ADV.9)", async () => {
+    let calls = 0;
+    const report = await reportFor({ kind: "dry-run" }, fixtureFiles(), false, {
+      size: 25,
+      fetchCard: async () => (++calls <= 2 ? scryfallCard("1.00") : null),
+    });
+    expect(report.basis?.pairs).toHaveLength(2);
+    const text = formatReport(report);
+    expect(text).toContain(
+      "  verdict: INCOMPLETE: 2 of 25 pairs; no verdict (re-run the sample)",
+    );
+    expect(text).not.toContain("within 2%");
+    expect(report.warnings).toContain(
+      "basis sample incomplete: 2 of 25 pairs, no verdict",
+    );
+  });
+
+  test("a Scryfall 429 stops the walk at once and is reported (ADV.9)", async () => {
+    const fetchCard = vi.fn(async () => {
+      throw new ScryfallApiError(429, "rate_limited", "Too Many Requests");
+    });
+    const report = await reportFor({ kind: "dry-run" }, fixtureFiles(), false, {
+      size: 3,
+      fetchCard,
+    });
+    expect(fetchCard).toHaveBeenCalledTimes(1);
+    expect(report.basis).toMatchObject({
+      stoppedOnRateLimit: true,
+      incomplete: true,
+      skippedErrors: 0,
+    });
+    const text = formatReport(report);
+    expect(text).toContain("; stopped on a Scryfall 429)");
+    expect(text).toContain("verdict: INCOMPLETE: 0 of 3 pairs");
   });
 });

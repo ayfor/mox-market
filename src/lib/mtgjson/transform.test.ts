@@ -2,7 +2,7 @@
 // gate on parsed entries; T5 (AC-3, S0.2d10, S0.2d11) identifiers,
 // collisions and the per-statement dedupe guard on a fake Db.
 import { PassThrough } from "node:stream";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   BEFORE_WINDOW,
   RUN_DATE,
@@ -26,6 +26,7 @@ import {
   PriceTransform,
   toCents,
   windowDates,
+  type KeptSeries,
   type PriceRow,
 } from "./transform";
 
@@ -68,10 +69,11 @@ function transformAll(
   identifiers: readonly RawIdentifier[],
   entries: readonly PriceEntry[],
   runDate = RUN_DATE,
+  onKeptSeries?: (series: KeptSeries) => void,
 ) {
   const index = new IdentifierIndex();
   for (const raw of identifiers) index.add(raw);
-  const transform = new PriceTransform(index, runDate);
+  const transform = new PriceTransform(index, runDate, onKeptSeries);
   const rows: PriceRow[] = [];
   for (const e of entries) rows.push(...transform.rowsFor(e));
   return { rows: sortRows(rows), stats: transform.finish(), index };
@@ -247,6 +249,7 @@ describe("the gate (T3, AC-1, S0.2d9)", () => {
       both: 1,
       dropped: 2,
       noValidPrice: 0,
+      keptNoWindowRows: 0,
     });
     expect(stats.beforeWindow).toBe(7);
     expect(stats.afterRunDate).toBe(7);
@@ -296,13 +299,42 @@ describe("the gate (T3, AC-1, S0.2d9)", () => {
   });
 
   test("the gate reads the newest price in the file, even before the window", () => {
+    const onKeptSeries = vi.fn();
     const { rows, stats } = transformAll(
       [identifier(1, { edhrecRank: 9000 })],
       [entry(1, { normal: { "2026-08-01": 0.5, [BEFORE_WINDOW]: 2.0 } })],
+      RUN_DATE,
+      onKeptSeries,
     );
     expect(stats.gate.priceOnly).toBe(1);
     expect(rows).toEqual([]);
     expect(stats.distinctSeries).toBe(0);
+    // ADV.9: kept, but with no row in the window: counted on its own and
+    // never offered to the basis sample (its price is weeks old).
+    expect(stats.gate.keptNoWindowRows).toBe(1);
+    expect(onKeptSeries).not.toHaveBeenCalled();
+  });
+
+  test("a rank-10 series priced only on 2026-08-01 is kept without window rows and never a basis candidate (ADV.9)", () => {
+    const onKeptSeries = vi.fn();
+    const { rows, stats } = transformAll(
+      [identifier(1, { edhrecRank: 10 }), identifier(2, { edhrecRank: 10 })],
+      [
+        entry(1, { normal: { "2026-08-01": 3.0 } }),
+        entry(2, { normal: { [RUN_DATE]: 3.0 } }),
+      ],
+      RUN_DATE,
+      onKeptSeries,
+    );
+    expect(rows.map((r) => r.date)).toEqual([RUN_DATE]);
+    expect(stats.gate.both).toBe(2);
+    expect(stats.gate.keptNoWindowRows).toBe(1);
+    expect(stats.distinctSeries).toBe(1);
+    expect(onKeptSeries).toHaveBeenCalledTimes(1);
+    expect(onKeptSeries.mock.calls[0][0]).toMatchObject({
+      newestDate: RUN_DATE,
+      newestCents: 300,
+    });
   });
 
   test("a series with no valid price is dropped as noValidPrice", () => {

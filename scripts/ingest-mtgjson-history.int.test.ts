@@ -4,16 +4,22 @@
 // No --production, and ALLOW_PROD_INGEST is never set. Unreachable server:
 // fails when CI=true, skips with a warning otherwise.
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
+  allPricesJson,
   fixtureFiles,
+  gz,
+  manyCards,
+  shift,
   standardCards,
   standardRows,
+  WINDOW_START,
 } from "../src/lib/mtgjson/__fixtures__/build";
+import { ALL_PRICES_FILE } from "../src/lib/mtgjson/consts";
 import {
   CI_UNREACHABLE_TEST,
   createScratchDatabase,
@@ -157,6 +163,133 @@ describe.skipIf(!server.reachable)(
           `SELECT trigger::text, status::text FROM price_sync_runs ORDER BY id DESC LIMIT 1`,
         );
         expect(runs.rows[0]).toEqual({ trigger: "identifiers", status: "ok" });
+      },
+    );
+  },
+);
+
+describe.skipIf(!server.reachable)(
+  "the ingest CLI's exit codes 1 and 2 at the process boundary (T15, ADV.7)",
+  () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const meta = { date: today, version: "5.3.0+fixture" };
+    const dirs: string[] = [];
+    const scratches: ScratchDatabase[] = [];
+
+    /** Fixture files dated around today, with AllPrices replaced when given. */
+    const writeFixtures = (allPrices?: Buffer, count = 3) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "mtgjson-cli-exit-"));
+      dirs.push(dir);
+      const cards = manyCards(count, 2).map((card) => ({
+        ...card,
+        retail: {
+          normal: Object.fromEntries(
+            Object.keys(card.retail!.normal!).map((d) => [
+              shift(
+                today,
+                -Math.round(
+                  (Date.parse(d) - Date.parse(WINDOW_START)) / 86_400_000,
+                ),
+              ),
+              1.5,
+            ]),
+          ),
+        },
+      }));
+      const files = fixtureFiles(
+        cards,
+        { meta, identifiersMeta: meta, pricesMeta: meta },
+        today,
+      );
+      if (allPrices) files[ALL_PRICES_FILE] = allPrices;
+      for (const [name, bytes] of Object.entries(files)) {
+        writeFileSync(path.join(dir, name), bytes);
+      }
+      return { dir, cards };
+    };
+
+    afterAll(async () => {
+      for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+      for (const scratch of scratches)
+        await dropScratchDatabase(server.url!, scratch.name);
+    });
+
+    test(
+      "malformed JSON after the first entries: exit 1, 'run error: SourceFormatError', a bulk error row, identifiers kept",
+      { timeout: 60_000 },
+      async () => {
+        const scratch = await createScratchDatabase(
+          server.url!,
+          "mtgjson_cli_e1",
+        );
+        scratches.push(scratch);
+        const deploy = prismaCli(["migrate", "deploy"], scratch.url);
+        expect(deploy.status, deploy.output).toBe(0);
+        // 300 cards, so the fault sits past the chunk the meta check reads.
+        const { cards } = writeFixtures(undefined, 300);
+        const text = allPricesJson(cards, meta);
+        const broken = `${text.slice(0, text.length - 40)},"x":{"paper":}}}`;
+        const { dir } = writeFixtures(gz(broken), 300);
+        const run = await cli(["--source-dir", dir], scratch.url);
+        expect(run.code).toBe(1);
+        expect(run.stderr).toMatch(
+          /^run error: SourceFormatError: AllPrices\.json\.gz: malformed JSON .*\. Earlier chunks stay committed; a re-run is safe\.$/m,
+        );
+        expect(run.stdout + run.stderr).not.toMatch(/postgres(ql)?:\/\//);
+        const client = new pg.Client({ connectionString: scratch.url });
+        await client.connect();
+        try {
+          const runs = await client.query(
+            `SELECT trigger::text, status::text, error FROM price_sync_runs`,
+          );
+          expect(runs.rows).toEqual([
+            {
+              trigger: "bulk",
+              status: "error",
+              error: expect.stringMatching(/^SourceFormatError: /),
+            },
+          ]);
+          const ids = await client.query(
+            `SELECT count(*)::int AS n FROM mtgjson_identifiers`,
+          );
+          expect(ids.rows[0].n).toBe(cards.length);
+        } finally {
+          await client.end();
+        }
+      },
+    );
+
+    test(
+      "a database without 0001: exit 2, stopped before any database write, no table created",
+      { timeout: 60_000 },
+      async () => {
+        const scratch = await createScratchDatabase(
+          server.url!,
+          "mtgjson_cli_e2",
+        );
+        scratches.push(scratch);
+        const client = new pg.Client({ connectionString: scratch.url });
+        await client.connect();
+        try {
+          await client.query(
+            readFileSync(
+              path.join(ROOT, "prisma/migrations/0000_baseline/migration.sql"),
+              "utf8",
+            ),
+          );
+          const { dir } = writeFixtures();
+          const run = await cli(["--source-dir", dir], scratch.url);
+          expect(run.code).toBe(2);
+          expect(run.stderr).toMatch(
+            /relation "price_history" does not exist; stopped before any database write/,
+          );
+          const tables = await client.query(
+            `SELECT to_regclass('price_sync_runs') AS runs, to_regclass('price_history') AS prices`,
+          );
+          expect(tables.rows[0]).toEqual({ runs: null, prices: null });
+        } finally {
+          await client.end();
+        }
       },
     );
   },

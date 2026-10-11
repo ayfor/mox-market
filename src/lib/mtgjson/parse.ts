@@ -9,7 +9,13 @@
 // Shape (S0.2d5): the top level must be an object whose first key is
 // `meta`. MTGJson writes meta before data, and requiring it lets a file's
 // version be checked before its first row. A violation rejects with
-// SourceFormatError before any item. A JSON syntax error rejects with
+// SourceFormatError before any item. A data file (AllIdentifiers, AllPrices,
+// AllPricesToday) must also hold a `data` object: `readMeta` with
+// `requireData` checks that `data` is the key right after `meta`, which is
+// how every MTGJson file is written, so a write run can refuse a file with no
+// data before it connects; the full readers check again at the top level's
+// close (ADV.1: a file with no data must never end a run `ok` with 0 rows).
+// A JSON syntax error rejects with
 // SourceFormatError after the items already yielded; gzip errors (Z_BUF_ERROR,
 // Z_DATA_ERROR) and I/O errors pass through with their own codes.
 //
@@ -18,9 +24,9 @@
 import type { Readable } from "node:stream";
 import { chainUnchecked } from "stream-chain";
 import { parser } from "stream-json";
+import { Assembler } from "stream-json/assembler.js";
 import { pick } from "stream-json/filters/pick.js";
 import { streamObject } from "stream-json/streamers/stream-object.js";
-import { streamValues } from "stream-json/streamers/stream-values.js";
 
 /** A file whose structure or JSON is not what MTGJson v5 writes. */
 export class SourceFormatError extends Error {
@@ -82,13 +88,19 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * A chain stage that passes tokens through unchanged while checking the
- * document's top level: an object whose first key is `meta`. With
- * `streamValues: false` the parser emits one packed `keyValue` per key.
+ * document's top level: an object whose first key is `meta`, and, with
+ * `requireData`, a `data` key somewhere at the top level by the time the
+ * object closes. With `streamValues: false` the parser emits one packed
+ * `keyValue` per key.
  */
-function topLevelShape(label: string): (token: Token) => Token {
+function topLevelShape(
+  label: string,
+  { requireData }: { requireData: boolean },
+): (token: Token) => Token {
   let depth = 0;
   let keys = 0;
   let started = false;
+  let sawData = false;
   return (token) => {
     if (!started) {
       started = true;
@@ -107,6 +119,9 @@ function topLevelShape(label: string): (token: Token) => Token {
         if (depth === 0 && keys === 0) {
           throw new SourceFormatError(`${label}: no meta object`);
         }
+        if (depth === 0 && requireData && !sawData) {
+          throw new SourceFormatError(`${label}: no data object`);
+        }
         break;
       case "keyValue":
         if (depth === 1) {
@@ -118,6 +133,7 @@ function topLevelShape(label: string): (token: Token) => Token {
               )})`,
             );
           }
+          if (token.value === "data") sawData = true;
         }
         break;
       default:
@@ -152,7 +168,7 @@ async function* dataEntries(
   const pipeline = chainUnchecked<unknown, { key: string; value: unknown }>([
     input,
     parser({ streamValues: false }),
-    topLevelShape(label),
+    topLevelShape(label, { requireData: true }),
     pick({ filter: "data" }),
     streamObject(),
   ]);
@@ -172,35 +188,67 @@ async function* dataEntries(
 
 /**
  * Reads a file's `meta` object and stops (AC-4): the source is destroyed as
- * soon as meta closes, so a 2 GB file costs a few bytes. The file must start
- * with `{"meta": {...}`; anything else rejects with SourceFormatError.
+ * soon as meta closes (or, with `requireData`, as soon as the next top-level
+ * key is read), so a 2 GB file costs a few bytes. The file must start with
+ * `{"meta": {...}`; with `requireData` the next key must be `data` (ADV.1).
+ * Anything else rejects with SourceFormatError.
  */
 export async function readMeta(
   input: Readable,
   label: string,
+  { requireData = false }: { requireData?: boolean } = {},
 ): Promise<MtgjsonMeta> {
-  const pipeline = chainUnchecked<unknown, { value: unknown }>([
+  const tokens = chainUnchecked<unknown, Token>([
     input,
     parser({ streamValues: false }),
-    topLevelShape(label),
-    pick({ filter: "meta", once: true }),
-    streamValues(),
+    topLevelShape(label, { requireData: false }),
   ]);
+  let depth = 0;
+  let assembler: Assembler | null = null;
+  let meta: MtgjsonMeta | null = null;
   try {
-    for await (const item of pipeline) {
-      const meta = item.value;
-      if (!isObject(meta)) {
-        throw new SourceFormatError(`${label}: meta is not an object`);
+    for await (const token of tokens) {
+      if (assembler !== null) {
+        assembler.consume(token as Parameters<Assembler["consume"]>[0]);
+        if (!assembler.done) continue;
+        const value: unknown = assembler.current;
+        assembler = null;
+        if (!isObject(value)) {
+          throw new SourceFormatError(`${label}: meta is not an object`);
+        }
+        meta = {
+          date: typeof value.date === "string" ? value.date : null,
+          version: typeof value.version === "string" ? value.version : null,
+        };
+        if (!requireData) return meta;
+        continue;
       }
-      return {
-        date: typeof meta.date === "string" ? meta.date : null,
-        version: typeof meta.version === "string" ? meta.version : null,
-      };
+      if (token.name === "startObject" || token.name === "startArray") {
+        depth += 1;
+      } else if (token.name === "endObject" || token.name === "endArray") {
+        depth -= 1;
+        if (depth === 0 && meta !== null) {
+          throw new SourceFormatError(`${label}: no data object`);
+        }
+      } else if (token.name === "keyValue" && depth === 1) {
+        // topLevelShape has already refused any first key but `meta`.
+        if (meta === null) {
+          assembler = new Assembler();
+        } else if (token.value === "data") {
+          return meta;
+        } else {
+          throw new SourceFormatError(
+            `${label}: no data object after meta (found ${JSON.stringify(
+              String(token.value).slice(0, 40),
+            )})`,
+          );
+        }
+      }
     }
   } catch (error) {
     throw sourceError(label, error);
   } finally {
-    pipeline.destroy();
+    tokens.destroy();
     input.destroy();
   }
   throw new SourceFormatError(`${label}: no meta object`);

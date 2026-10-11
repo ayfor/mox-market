@@ -3,6 +3,8 @@
 // the real createIngestDb over a localhost URL (S0.1d20: a local URL passes
 // through unchanged). Unreachable server: fails when CI=true, skips with a
 // warning otherwise.
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import pg from "pg";
 import {
   afterAll,
@@ -41,7 +43,12 @@ import {
 } from "./__fixtures__/build";
 import { ALL_PRICES_FILE } from "./consts";
 import { createIngestDb, type IngestDb } from "./db";
-import { EXIT, runBulkIngest, type IngestDeps } from "./ingest";
+import {
+  EXIT,
+  NothingToWriteError,
+  runBulkIngest,
+  type IngestDeps,
+} from "./ingest";
 import { createFixtureSource } from "./source";
 import { IngestRefusedError, type IngestTarget } from "./target";
 
@@ -122,6 +129,15 @@ describe.skipIf(!server.reachable)(
          FROM price_history ORDER BY scryfall_id, finish::text, date`,
         )
       ).rows;
+    const sortedStandardRows = () =>
+      [...STANDARD_ROWS]
+        .map((r) => ({ ...r }))
+        .sort((a, b) =>
+          `${a.scryfallId}|${a.finish}|${a.date}` <
+          `${b.scryfallId}|${b.finish}|${b.date}`
+            ? -1
+            : 1,
+        );
     const syncedAt = async () =>
       (
         await client.query(
@@ -279,6 +295,67 @@ describe.skipIf(!server.reachable)(
         expect(row.error).toBe("Error: injected fault after chunk 1");
       });
 
+      test("a re-run after the chunk-2 fault converges: every row, runs [error, ok], the rest written once (ADV.7)", async () => {
+        let priceChunks = 0;
+        await expect(
+          ingest({
+            chunkRows: 3,
+            wrap: (db) => ({
+              query: (text, values) => {
+                if (text.startsWith(`INSERT INTO "price_history"`)) {
+                  priceChunks += 1;
+                  if (priceChunks === 2)
+                    return Promise.reject(new Error("injected fault"));
+                }
+                return db.query(text, values);
+              },
+              end: () => db.end(),
+            }),
+          }),
+        ).rejects.toThrow(/injected fault/);
+        expect(await prices()).toHaveLength(3);
+        const { result } = await ingest({ chunkRows: 3 });
+        expect(result.exitCode).toBe(EXIT.ok);
+        expect(await prices()).toStrictEqual(sortedStandardRows());
+        expect(
+          (await runs()).map((r) => [r.trigger, r.status, r.rows_written]),
+        ).toEqual([
+          ["bulk", "error", 3],
+          ["bulk", "ok", STANDARD_ROWS.length - 3],
+        ]);
+      });
+
+      test("an empty AllPrices data object ends the row error and prunes nothing; no bulk ok row (ADV.1)", async () => {
+        await client.query(
+          `INSERT INTO price_history (scryfall_id, finish, date, price_cents) VALUES ($1, 'normal', $2, 500)`,
+          [S.ETCHED, BEFORE_WINDOW],
+        );
+        const files = {
+          ...fixtureFiles(),
+          [ALL_PRICES_FILE]: gz(JSON.stringify({ meta: META, data: {} })),
+        };
+        await expect(ingest({ files })).rejects.toBeInstanceOf(
+          NothingToWriteError,
+        );
+        const rows = await runs();
+        expect(rows.map((r) => [r.trigger, r.status])).toEqual([
+          ["bulk", "error"],
+        ]);
+        expect(rows[0].error).toMatch(
+          /^NothingToWriteError: no price rows emitted/,
+        );
+        expect(rows.some((r) => r.status === "ok")).toBe(false);
+        // The pre-seeded runDate − 31 row is still there: no prune ran.
+        expect(await prices()).toEqual([
+          {
+            scryfallId: S.ETCHED,
+            finish: "normal",
+            date: BEFORE_WINDOW,
+            priceCents: 500,
+          },
+        ]);
+      });
+
       test("malformed JSON after the first chunk keeps it and ends the row error", async () => {
         const cards = manyCards(300, 2);
         const text = allPricesJson(cards);
@@ -294,6 +371,25 @@ describe.skipIf(!server.reachable)(
           /^SourceFormatError: AllPrices\.json\.gz: malformed JSON/,
         );
       });
+    });
+
+    test("AC-10 provenance: a bulk row carries AllPrices' date and version, an identifiers row AllIdentifiers' (ADV.16)", async () => {
+      const files = fixtureFiles(STANDARD_CARDS, {
+        meta: { date: "2026-10-04", version: "5.3.0+meta" },
+        identifiersMeta: { date: "2026-10-03", version: "5.3.0+ids" },
+        pricesMeta: { date: RUN_DATE, version: "5.3.0+prices" },
+      });
+      const bulk = await ingest({ files });
+      expect(bulk.result.report.warnings).toEqual([
+        "Meta.json is dated 2026-10-04, AllPrices.json.gz 2026-10-05",
+      ]);
+      await ingest({ files, identifiersOnly: true });
+      expect(
+        (await runs()).map((r) => [r.trigger, r.source_date, r.source_version]),
+      ).toEqual([
+        ["bulk", RUN_DATE, "5.3.0+prices"],
+        ["identifiers", "2026-10-03", "5.3.0+ids"],
+      ]);
     });
 
     test("AC-11: --identifiers-only writes identifiers only, never prunes, never opens AllPrices", async () => {
@@ -369,6 +465,58 @@ describe.skipIf(!server.reachable)(
         rows_pruned: 1,
         finished: true,
       });
+    });
+  },
+);
+
+describe.skipIf(!server.reachable)(
+  "path B against a database without 0001 (T13, ADV.7; runbook path C precondition 3)",
+  () => {
+    let scratch: ScratchDatabase;
+    let client: pg.Client;
+
+    beforeAll(async () => {
+      scratch = await createScratchDatabase(server.url!, "mtgjson_pre0001");
+      client = new pg.Client({ connectionString: scratch.url });
+      await client.connect();
+      // Only the baseline: the database as production stands before Josh's
+      // README step (c).
+      await client.query(
+        readFileSync(
+          path.resolve(
+            __dirname,
+            "../../../prisma/migrations/0000_baseline/migration.sql",
+          ),
+          "utf8",
+        ),
+      );
+    });
+
+    afterAll(async () => {
+      await client?.end().catch(() => undefined);
+      if (scratch) await dropScratchDatabase(server.url!, scratch.name);
+    });
+
+    test("the pre-check refuses (exit 2) naming price_history, and creates or writes nothing", async () => {
+      const run = runBulkIngest(
+        {
+          target: { kind: "local", url: scratch.url, display: "scratch" },
+          identifiersOnly: false,
+        },
+        {
+          source: createFixtureSource(fixtureFiles()),
+          now: () => NOW,
+          dbFactory: (t) => createIngestDb(t.url),
+        },
+      );
+      await expect(run).rejects.toBeInstanceOf(IngestRefusedError);
+      await expect(run).rejects.toThrow(
+        /relation "price_history" does not exist; stopped before any database write/,
+      );
+      const tables = await client.query(
+        `SELECT to_regclass('price_history') AS a, to_regclass('price_sync_runs') AS b, to_regclass('mtgjson_identifiers') AS c`,
+      );
+      expect(tables.rows[0]).toEqual({ a: null, b: null, c: null });
     });
   },
 );

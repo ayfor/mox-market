@@ -138,7 +138,7 @@ describe("streaming (T6, AC-5)", () => {
         });
       },
     });
-    const meta = await readMeta(source, "AllPrices");
+    const meta = await readMeta(source, "AllPrices", { requireData: true });
     expect(meta).toEqual({ date: META.date, version: META.version });
     expect(source.destroyed).toBe(true);
     expect(pulled).toBeLessThan(total / 100);
@@ -209,6 +209,73 @@ describe("unhappy paths (T6, AC-4, AC-5)", () => {
       SourceFormatError,
     );
   });
+
+  test.each([
+    [
+      "no data key at all",
+      `{"meta":${JSON.stringify(META)}}`,
+      /AllPrices: no data object$/,
+    ],
+    [
+      "data after another key",
+      `{"meta":${JSON.stringify(META)},"other":1,"data":{}}`,
+      /AllPrices: no data object after meta \(found "other"\)/,
+    ],
+    [
+      "a nested data only",
+      `{"meta":${JSON.stringify({ ...META, data: {} })}}`,
+      /AllPrices: no data object$/,
+    ],
+  ])(
+    "readMeta with requireData: %s rejects (ADV.1)",
+    async (_label, text, why) => {
+      const source = new PassThrough();
+      source.end(text);
+      await expect(
+        readMeta(source, "AllPrices", { requireData: true }),
+      ).rejects.toThrow(why);
+    },
+  );
+
+  test("readMeta without requireData accepts a file that is meta alone (Meta.json)", async () => {
+    const source = new PassThrough();
+    source.end(JSON.stringify({ meta: META }));
+    await expect(readMeta(source, "Meta.json")).resolves.toEqual({
+      date: META.date,
+      version: META.version,
+    });
+  });
+
+  test("readMeta with requireData returns as soon as data follows meta", async () => {
+    const source = new PassThrough();
+    source.write(`{"meta":${JSON.stringify(META)},"data":{`);
+    // The rest never arrives: readMeta must not wait for it.
+    await expect(
+      readMeta(source, "AllPrices", { requireData: true }),
+    ).resolves.toEqual({ date: META.date, version: META.version });
+    expect(source.destroyed).toBe(true);
+  });
+
+  test.each([
+    ["no data key", `{"meta":${JSON.stringify(META)}}`],
+    ["a meta-only file with a nested data", `{"meta":{"data":{}}}`],
+  ])(
+    "the full readers reject %s at the top level's close (ADV.1)",
+    async (_label, text) => {
+      for (const label of ["AllPrices", "AllIdentifiers"]) {
+        const source = new PassThrough();
+        source.end(text);
+        const read = async () => {
+          const reader =
+            label === "AllPrices"
+              ? parsePrices(source, emptyParseStats(), label)
+              : parseIdentifiers(source, emptyParseStats(), label);
+          for await (const _item of reader) void _item;
+        };
+        await expect(read()).rejects.toThrow(`${label}: no data object`);
+      }
+    },
+  );
 
   test("malformed JSON after the first entry rejects after yielding it", async () => {
     const [head] = split(priceValue(1), priceValue(2));

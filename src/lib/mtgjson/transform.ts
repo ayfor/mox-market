@@ -209,6 +209,12 @@ export interface GateBreakdown {
   dropped: number;
   /** Dropped: no valid price on or before runDate in the file. */
   noValidPrice: number;
+  /**
+   * Kept by the gate (and counted above) but with no valid price inside the
+   * window, so no row is emitted and the series is not a basis candidate
+   * (ADV.9): its newest price is older than runDate − 30.
+   */
+  keptNoWindowRows: number;
 }
 
 export interface PriceStats {
@@ -254,7 +260,14 @@ export const emptyPriceStats = (): PriceStats => ({
   invalidDates: 0,
   beforeWindow: 0,
   afterRunDate: 0,
-  gate: { rankOnly: 0, priceOnly: 0, both: 0, dropped: 0, noValidPrice: 0 },
+  gate: {
+    rankOnly: 0,
+    priceOnly: 0,
+    both: 0,
+    dropped: 0,
+    noValidPrice: 0,
+    keptNoWindowRows: 0,
+  },
   rowsByFinish: { normal: 0, foil: 0, etched: 0 },
   rowsByDate: new Map(),
   distinctSeries: 0,
@@ -354,13 +367,18 @@ export class PriceTransform {
       if (rankOk && priceOk) stats.gate.both += 1;
       else if (rankOk) stats.gate.rankOnly += 1;
       else stats.gate.priceOnly += 1;
+      if (inWindow.length === 0) {
+        stats.gate.keptNoWindowRows += 1;
+        continue;
+      }
+      // Only a series that stores rows is a basis candidate, so a months-old
+      // MTGJson price is never compared with today's Scryfall price (ADV.9).
       this.onKeptSeries?.({
         scryfallId: identifier.scryfallId,
         finish: series.finish,
         newestDate: newest.date,
         newestCents: newest.cents,
       });
-      if (inWindow.length === 0) continue;
       inWindow.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
       stats.distinctSeries += 1;
       this.printingsWithRows.add(identifier.scryfallId);

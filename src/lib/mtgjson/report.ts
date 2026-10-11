@@ -52,7 +52,7 @@ export function rowsPerDay(
 function basisLines(basis: BasisResult): string[] {
   const lines = [
     `basis sample (F0 Open Question 3): requested ${basis.requested}, seed ${basis.seed}, eligible series ${n(basis.eligibleSeries)}`,
-    `  pairs: ${basis.pairs.length} (skipped: not found ${basis.skippedNotFound}, no Scryfall price ${basis.skippedNoPrice}, request errors ${basis.skippedErrors})`,
+    `  pairs: ${basis.pairs.length} (skipped: not found ${basis.skippedNotFound}, no Scryfall price ${basis.skippedNoPrice}, request errors ${basis.skippedErrors}${basis.stoppedOnRateLimit ? "; stopped on a Scryfall 429" : ""})`,
   ];
   for (const pair of basis.pairs) {
     lines.push(
@@ -63,8 +63,8 @@ function basisLines(basis: BasisResult): string[] {
     `  median absolute gap: ${basis.medianAbsGapBp === null ? "n/a" : percent(basis.medianAbsGapBp).replace("+", "")}`,
     `  median signed gap: ${basis.medianSignedGapBp === null ? "n/a" : percent(basis.medianSignedGapBp)}`,
     `  verdict: ${
-      basis.medianAbsGapBp === null
-        ? "no pairs"
+      basis.incomplete
+        ? `INCOMPLETE: ${basis.pairs.length} of ${basis.requested} pairs; no verdict (re-run the sample)`
         : basis.flagged
           ? "OVER 2%: open ruling for Josh (should in-gate printings use MTGJson's newest price as currentPriceCents?)"
           : "within 2%"
@@ -102,6 +102,7 @@ export function formatReport(report: IngestReport): string {
       `  distinct series: ${n(p.distinctSeries)}`,
       `  distinct printings: ${n(p.distinctPrintings)}`,
       `  gate: rank only ${n(p.gate.rankOnly)}, price only ${n(p.gate.priceOnly)}, both ${n(p.gate.both)}, dropped ${n(p.gate.dropped)}, no valid price ${n(p.gate.noValidPrice)}`,
+      `  kept without window rows: ${n(p.gate.keptNoWindowRows)}`,
       `  unmappedUuids: ${n(p.unmappedUuids)}`,
       `  scryfallCollisions: ${n(p.scryfallCollisions)}`,
       `  collisionLosses: ${n(p.collisionLosses)}`,

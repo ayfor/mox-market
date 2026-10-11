@@ -6,6 +6,7 @@
 // price is F2's currentPriceCents source, priceCentsFor.
 import type { ScryfallCard } from "@/types/scryfall";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { ScryfallApiError } from "../scryfall";
 import {
   BASIS_FLAG_BP,
   BasisReservoir,
@@ -181,6 +182,39 @@ describe("skips and replacements (T17)", () => {
       gapBp: 0,
       scryfallDate: "2026-10-11",
     });
+  });
+
+  test("a Scryfall 429 stops the walk: one request, no replacement, incomplete (ADV.9)", async () => {
+    const fetchCard = vi.fn(async () => {
+      throw new ScryfallApiError(429, "rate_limited", "Too Many Requests");
+    });
+    const result = await runBasisSample(
+      reservoirOf([series(1), series(2), series(3)]),
+      2,
+      { today: "2026-10-11", fetchCard },
+    );
+    expect(fetchCard).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      stoppedOnRateLimit: true,
+      incomplete: true,
+      skippedErrors: 0,
+      flagged: false,
+    });
+    expect(result.pairs).toEqual([]);
+  });
+
+  test("a sample short of its size is incomplete; a full one is not (ADV.9)", async () => {
+    const short = await runBasisSample(reservoirOf([series(1)]), 25, {
+      today: "2026-10-11",
+      fetchCard: async () => card({ usd: "10.00" }),
+    });
+    expect(short.pairs).toHaveLength(1);
+    expect(short.incomplete).toBe(true);
+    const full = await runBasisSample(reservoirOf([series(1)]), 1, {
+      today: "2026-10-11",
+      fetchCard: async () => card({ usd: "10.00" }),
+    });
+    expect(full.incomplete).toBe(false);
   });
 
   test("stops at the requested size", async () => {

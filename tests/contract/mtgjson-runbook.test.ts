@@ -136,7 +136,7 @@ describe("the opt-in flag and the URL (T18)", () => {
       .split("\n")
       .filter((l) => l.includes("ALLOW_PROD_INGEST=1"));
     expect(lines).toEqual([
-      'POSTGRES_URL_NON_POOLING="$PROD_DB_URL" ALLOW_PROD_INGEST=1 npx tsx scripts/ingest-mtgjson-history.ts --production --source-dir .cache/mtgjson',
+      'POSTGRES_URL_NON_POOLING="postgresql://$PGUSER@$PGHOST:5432/postgres" ALLOW_PROD_INGEST=1 npx tsx scripts/ingest-mtgjson-history.ts --production --source-dir .cache/mtgjson',
     ]);
     for (const text of [readme, agents, provenance]) {
       expect(text).not.toContain("ALLOW_PROD_INGEST=1");
@@ -152,11 +152,102 @@ describe("the opt-in flag and the URL (T18)", () => {
     );
   });
 
-  test("reads the production URL at a hidden prompt and unsets it", () => {
+  test("reads the password at a hidden prompt into PGPASSWORD and unsets everything", () => {
     const pathC = section(runbook, "Steps");
-    expect(pathC).toMatch(/^read -rs 'PROD_DB_URL\?/m);
-    expect(pathC).toMatch(/^unset PROD_DB_URL/m);
+    expect(pathC).toMatch(/^read -rs 'PGPASSWORD\?/m);
+    expect(pathC).toMatch(
+      /^unset PGHOST PGUSER PGPASSWORD PGPORT PGDATABASE PGSSLMODE PGSSLROOTCERT POSTGRES_SSL_ROOT_CERT$/m,
+    );
     expect(pathC).toMatch(/hidden prompt/);
+  });
+});
+
+/** The path C shell block's lines (comments and blank lines dropped). */
+const pathCCommands = () => {
+  const steps = section(runbook, "Steps");
+  const block = steps.slice(
+    steps.indexOf("```bash") + "```bash".length,
+    steps.indexOf("```", steps.indexOf("```bash") + 1),
+  );
+  return block
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !l.startsWith("#"));
+};
+
+describe("path C's own production commands (T18, ADV.10, ADV.11)", () => {
+  const commands = pathCCommands();
+
+  test("finds the psql and pg_dump lines", () => {
+    expect(commands.filter((l) => /^(\S+=\S+ )*psql /.test(l))).toHaveLength(1);
+    expect(commands.filter((l) => /\bpg_dump /.test(l))).toHaveLength(1);
+  });
+
+  test("the dump goes to an absolute path outside the repository, made first", () => {
+    const dump = commands.find((l) => /\bpg_dump /.test(l))!;
+    const target = dump.match(/-f "([^"]+)"/)?.[1];
+    expect(target).toBeDefined();
+    expect(target).toMatch(/^\$HOME\/mox-backups\//);
+    expect(target).toMatch(/\.dump$/);
+    const mkdir = commands.findIndex(
+      (l) => l === 'mkdir -p "$HOME/mox-backups"',
+    );
+    expect(mkdir).toBeGreaterThan(-1);
+    expect(mkdir).toBeLessThan(commands.indexOf(dump));
+  });
+
+  test("git ignores *.dump as a backstop (the repository is public)", () => {
+    for (const file of ["mox-market-20261011.dump", "scripts/x.dump"]) {
+      expect(
+        execFileSync("git", ["check-ignore", file], {
+          cwd: ROOT,
+          encoding: "utf8",
+        }).trim(),
+      ).toBe(file);
+    }
+  });
+
+  test("psql and pg_dump verify TLS: PGSSLMODE=verify-full and the pinned root are exported before them", () => {
+    const tls = commands.findIndex((l) =>
+      /^export PGSSLMODE=verify-full PGSSLROOTCERT="\$HOME\/[^"]+\.crt"(\s+#.*)?$/.test(
+        l,
+      ),
+    );
+    expect(tls).toBeGreaterThan(-1);
+    for (const [i, line] of commands.entries()) {
+      if (/\b(psql|pg_dump) /.test(line)) expect(i).toBeGreaterThan(tls);
+    }
+    expect(commands).toContain(
+      'export POSTGRES_SSL_ROOT_CERT="$(cat "$PGSSLROOTCERT")"',
+    );
+  });
+
+  test("no command carries a connection string or the password as an argument", () => {
+    for (const line of commands) {
+      if (/\b(psql|pg_dump) /.test(line)) {
+        expect(line).not.toMatch(/postgres(ql)?:\/\//);
+        expect(line).not.toMatch(/PROD_DB_URL/);
+      }
+      expect(line).not.toMatch(/\$\{?PGPASSWORD\b/);
+    }
+    // The script's URL names host, port and database and carries no password.
+    const pathCLine = commands.find((l) => l.includes("--production"))!;
+    expect(pathCLine).toMatch(
+      /^POSTGRES_URL_NON_POOLING="postgresql:\/\/\$PGUSER@\$PGHOST:5432\/postgres" /,
+    );
+  });
+
+  test("path C goes on only after a path A that printed warnings: none (ADV.2)", () => {
+    const steps = section(runbook, "Steps");
+    expect(steps).toMatch(
+      /\*\*Stop unless path A printed `warnings: none`\.\*\*/,
+    );
+    const pathA = commands.findIndex(
+      (l) => l === "npx tsx scripts/ingest-mtgjson-history.ts --dry-run",
+    );
+    const pathC = commands.findIndex((l) => l.includes("--production"));
+    expect(pathA).toBeGreaterThan(-1);
+    expect(pathA).toBeLessThan(pathC);
   });
 });
 

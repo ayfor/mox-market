@@ -6,7 +6,7 @@ The one-shot bulk load of F0's price history (Design F0 W1) and the identifier r
 
 It reads three MTGJson v5 files: `Meta.json`, `AllIdentifiers.json.gz` (≈233 MB) and `AllPrices.json.gz` (≈149 MB). By default it downloads them into `.cache/mtgjson/`, which git ignores; `--source-dir <dir>` reads them from a directory instead, with no network. The `.gz` files are gunzipped as streams and parsed with `stream-json`; nothing is ever decompressed to disk.
 
-Before any database connection it checks that every file's `meta.version` starts with `5.` and gunzips each `.gz` file end to end to check its CRC. Then it keeps paper TCGplayer retail USD only, the 31 UTC dates from today − 30 to today, and the gated series (EDHREC rank ≤ 5,000 or newest price ≥ $1.00), converts prices to integer cents, and keeps one MTGJson UUID per Scryfall id (side null, else `a`, else the lowest side).
+Before any database connection it checks that every file's `meta.version` starts with `5.` and that each `.gz` file's `data` object follows its `meta`, checks the files' dates (a refusal on path C, a warning otherwise), gunzips each `.gz` file end to end to check its CRC, and reads AllIdentifiers into memory (a file with no usable identifier is refused). Then it keeps paper TCGplayer retail USD only, the 31 UTC dates from today − 30 to today, and the gated series (EDHREC rank ≤ 5,000 or newest price ≥ $1.00), converts prices to integer cents, and keeps one MTGJson UUID per Scryfall id (side null, else `a`, else the lowest side).
 
 A write run then upserts, in this order and in its own commits: `mtgjson_identifiers` (identifiers first), then `price_history` (prices), in chunks of 5,000 rows. Every upsert is idempotent: a re-run with the same data writes 0 rows and moves no `synced_at`. Then it prunes rows dated before today − 30, runs `ANALYZE`, and records one `price_sync_runs` row (`bulk`, or `identifiers` for W4).
 
@@ -19,16 +19,16 @@ A write run then upserts, in this order and in its own commits: `mtgjson_identif
 | C, production | see "Path C" below | **Josh only**, from his laptop, after his sign-off | Supabase, through `--production` and the inline flag |
 | W4, identifier refresh | add `--identifiers-only` to path B or C | B: an agent or Josh; C: Josh only | as for that path |
 
-No agent, test or CI job ever runs path C or passes `--production`. The script refuses, before any download or connection, any URL that is unset, does not parse, names an empty host, carries `hostaddr` or a `host` query parameter, or names `::1` or a socket directory. It refuses any host other than `localhost` and `127.0.0.1` unless `--production` and the inline flag are both present, and `--production` also needs `POSTGRES_SSL_ROOT_CERT` (PEM) and refuses a local host. It prints `target database: <host>:<port>/<db> (local|PRODUCTION)` before connecting and never prints a user name, password or environment value.
+No agent, test or CI job ever runs path C or passes `--production`. The script refuses, before any download or connection, any URL that is unset, does not parse, names an empty host, carries `hostaddr` or a `host` query parameter, names `::1` or a socket directory, omits its port or its database, carries a `port`, `dbname`, `database`, `user` or `options` query parameter, or writes a local host other than exactly `localhost` or `127.0.0.1`, so the printed target line is what `pg` dials. It refuses any host other than `localhost` and `127.0.0.1` unless `--production` and the inline flag are both present, and `--production` also needs `POSTGRES_SSL_ROOT_CERT` (PEM) and refuses a local host. It prints `target database: <host>:<port>/<db> (local|PRODUCTION)` before connecting and never prints a user name, password or environment value.
 
 ## Exit codes
 
 | Code | Meaning | What to do |
 |------|---------|------------|
 | 0 | `ok` | Nothing. The report is on stdout. |
-| 1 | run error after the run row started | Earlier chunks stay committed and the run row says `error` with the message. Read the message, fix the cause, and re-run: a re-run is safe (idempotent upserts). If the run row stayed `running` (a lost connection), S0.3's next sync marks it `error` after an hour. |
-| 2 | refused before any write | A usage error, the target guard, a version or file check, a gzip check, a failed connection or the budget pre-check. Nothing was written, not even a run row. Read the message. |
-| 3 | `budget_stop` | The database passed 450 MB at a re-check. Earlier chunks stay committed and the prune ran. **Stop and ask Bitey** before any re-run. |
+| 1 | run error after the run row started | Earlier chunks stay committed and the run row says `error` with the message. Read the message, fix the cause, and re-run: a re-run is safe (idempotent upserts). A source that yields no price row at all (`NothingToWriteError`) also ends here, without a prune. Ctrl-C (or SIGTERM) after the run row started stops at the next chunk and finishes the row `error` (interrupted); a second Ctrl-C exits at once. If the run row stayed `running` (a lost connection, or that second Ctrl-C), S0.3's next sync marks it `error` after an hour; a statement that never answers fails after 120 s. |
+| 2 | refused before any write | A usage error, the target guard, a version or file check, a source with no `data` or no usable identifier, a stale source on path C, a gzip check, a failed connection or the budget pre-check. Ctrl-C before the run row started also exits 2. Nothing was written, not even a run row. Read the message. |
+| 3 | `budget_stop` | The database passed 450 MB at a re-check or at the end of the run. Earlier chunks stay committed and the prune ran. **Stop and ask Bitey** before any re-run. |
 
 ## Path A: the dry-run
 
@@ -92,24 +92,32 @@ It never opens `AllPrices.json.gz`, writes no price row, does not prune, and rec
 
 ### Steps
 
-Run from a checkout of `main`, on Node 22, the same UTC day as the production deploy in the rollout order below. The URL is typed at a hidden prompt, so it never reaches shell history or any `.env*` file. The opt-in flag `ALLOW_PROD_INGEST` is set to 1 **inline** on the one path C command and is **never stored in any `.env*` file**; a copy in `.env` is ignored.
+Run from a checkout of `main`, on Node 22, the same UTC day as the production deploy in the rollout order below. The host and user come from the Supabase dashboard (Connect, session pooler); the password is typed at a hidden prompt into `PGPASSWORD`, which `psql`, `pg_dump` and the script's `pg` client all read from the environment, so it never appears in a URL, a process's arguments, shell history or any `.env*` file. `PGSSLMODE=verify-full` with the pinned root makes `psql` and `pg_dump` verify the server's certificate and host name, as the script does (S0.1d20); libpq's default (`prefer`) neither verifies nor insists on TLS. The opt-in flag `ALLOW_PROD_INGEST` is set to 1 **inline** on the one path C command and is **never stored in any `.env*` file**; a copy in `.env` is ignored.
 
 ```bash
 source ~/.nvm/nvm.sh && nvm use 22 >/dev/null
-read -rs 'PROD_DB_URL?Production session-pooler URL (host *.pooler.supabase.com, port 5432): '; echo
-export POSTGRES_SSL_ROOT_CERT="$(cat ~/Downloads/prod-ca-2021.crt)"   # Supabase's root CA, PEM
+read -r 'PGHOST?Session-pooler host (*.pooler.supabase.com): '
+read -r 'PGUSER?Database user (postgres.<project ref>): '
+read -rs 'PGPASSWORD?Database password: '; echo
+export PGHOST PGUSER PGPASSWORD PGPORT=5432 PGDATABASE=postgres
+export PGSSLMODE=verify-full PGSSLROOTCERT="$HOME/Downloads/prod-ca-2021.crt"   # Supabase's root CA, PEM
+export POSTGRES_SSL_ROOT_CERT="$(cat "$PGSSLROOTCERT")"
 # Read-only size check: expect 160000000 or less.
-PGOPTIONS='-c default_transaction_read_only=on' psql "$PROD_DB_URL" -Atc "SELECT pg_database_size(current_database())"
-# Dump (pg_dump must be at least the server's major version).
-pg_dump "$PROD_DB_URL" -Fc -f "mox-market-$(date -u +%Y%m%d).dump"
-# Path A the same day, so path C loads exactly what the dry-run reported.
+PGOPTIONS='-c default_transaction_read_only=on' psql -Atc "SELECT pg_database_size(current_database())"
+# Dump outside the repository (the repo is public; *.dump is gitignored only as a backstop).
+# pg_dump must be at least the server's major version.
+mkdir -p "$HOME/mox-backups"
+pg_dump -Fc -f "$HOME/mox-backups/mox-market-$(date -u +%Y%m%d).dump"
+# Path A the same day, so path C loads exactly what the dry-run reported. Go on only if it prints "warnings: none".
 npx tsx scripts/ingest-mtgjson-history.ts --dry-run
-# Path C: identifiers, then prices, in one run.
-POSTGRES_URL_NON_POOLING="$PROD_DB_URL" ALLOW_PROD_INGEST=1 npx tsx scripts/ingest-mtgjson-history.ts --production --source-dir .cache/mtgjson
-unset PROD_DB_URL POSTGRES_SSL_ROOT_CERT
+# Path C: identifiers, then prices, in one run. The URL names host, port and database and carries no password.
+POSTGRES_URL_NON_POOLING="postgresql://$PGUSER@$PGHOST:5432/postgres" ALLOW_PROD_INGEST=1 npx tsx scripts/ingest-mtgjson-history.ts --production --source-dir .cache/mtgjson
+unset PGHOST PGUSER PGPASSWORD PGPORT PGDATABASE PGSSLMODE PGSSLROOTCERT POSTGRES_SSL_ROOT_CERT
 ```
 
-Use the session-pooler string (port 5432), as for README "Production". Never the transaction pooler (6543).
+Use the session pooler (port 5432), as for README "Production". Never the transaction pooler (6543). The script refuses a URL without an explicit port and database, or with a `port`, `dbname`, `database`, `user` or `options` query parameter, so the target line is what it dials.
+
+**Stop unless path A printed `warnings: none`.** A warning there means the files are stale, dated differently from each other, or yield no rows; path C itself refuses a source whose AllPrices is more than one day older than the run date or whose Meta.json date differs, but any other warning is also a reason to stop and ask Bitey.
 
 Expect `target database: <pooler host>:5432/postgres (PRODUCTION)`, then the report with `write: status ok`. The first run writes ≈2.2M price rows; the measured footprint is below. After it, path C sets `synced_at = now()` on all 31 dates, so every printing's history line reads "just now" for up to 36 hours (critique C2-A.7, dismissed as acceptable).
 

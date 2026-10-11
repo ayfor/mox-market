@@ -2,14 +2,18 @@
 // AC-11), shared by the script and the tests. Every dependency is injected
 // (source, clock, database factory, Scryfall), so each path runs offline.
 //
-// Order: sources prepared → every meta version checked → every .gz verified
-// end to end → (write runs) connect, budget pre-check → run row `running` →
-// identifiers parsed and upserted → prices streamed, gated and upserted in
-// chunks, size re-checked every BUDGET_RECHECK_CHUNKS chunks → prune →
-// ANALYZE → run row `ok` or `budget_stop`. Anything that fails before the
-// run row is a refusal (IngestRefusedError, exit 2) and writes nothing, not
-// even a run row; a fault after it ends the row `error` and rejects (exit 1),
-// with earlier chunks committed. A dry-run never calls the database factory.
+// Order: sources prepared → every meta version checked, and each data file's
+// `data` object found right after its meta → source dates checked (a refusal
+// on path C, a warning otherwise) → every .gz verified end to end →
+// identifiers parsed into memory (none is a refusal) → (write runs) connect,
+// budget pre-check → run row `running` → identifiers upserted → prices
+// streamed, gated and upserted in chunks, size re-checked every
+// BUDGET_RECHECK_CHUNKS chunks → (no price row at all is an error) → prune →
+// ANALYZE → final size check → run row `ok` or `budget_stop`. Anything that
+// fails before the run row is a refusal (IngestRefusedError, exit 2) and
+// writes nothing, not even a run row; a fault or an interrupt after it ends
+// the row `error` and rejects (exit 1), with earlier chunks committed. A
+// dry-run never calls the database factory.
 import {
   BASIS_RESERVOIR_FACTOR,
   BasisReservoir,
@@ -60,6 +64,7 @@ import {
   IdentifierIndex,
   isCalendarDate,
   PriceTransform,
+  rowsEmitted,
   utcDateOf,
   type IdentifierRow,
   type IdentifierStats,
@@ -69,6 +74,22 @@ import {
 
 /** Exit codes (S0.2d14). */
 export const EXIT = { ok: 0, error: 1, refused: 2, budgetStop: 3 } as const;
+
+/** The operator interrupted a run (Ctrl-C or SIGTERM; ADV.4). */
+export class IngestInterruptedError extends Error {
+  constructor(reason: string) {
+    super(`interrupted by ${reason}`);
+    this.name = "IngestInterruptedError";
+  }
+}
+
+/** A write run whose sources produced nothing to store (ADV.1). */
+export class NothingToWriteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NothingToWriteError";
+  }
+}
 
 export interface IngestRequest {
   readonly target: IngestTarget;
@@ -91,6 +112,13 @@ export interface IngestDeps {
   readonly basis?: Omit<BasisDeps, "today" | "log">;
   /** Peak resident set size in bytes (default: process.resourceUsage). */
   readonly peakRssBytes?: () => number;
+  /**
+   * Aborted by the script's SIGINT/SIGTERM handler: the run stops at the next
+   * chunk or entry and its row is finished `error` (ADV.4).
+   */
+  readonly signal?: AbortSignal;
+  /** Called once the run row exists (the script's interrupt handler reads it). */
+  readonly onRunStarted?: (runId: number) => void;
 }
 
 export interface FileMeta {
@@ -151,8 +179,9 @@ function checkVersion(meta: MtgjsonMeta, file: string): void {
 }
 
 /** Wraps a pre-check failure as a refusal (exit 2) that names the cause. */
-function refusal(error: unknown): IngestRefusedError {
+function refusal(error: unknown): Error {
   if (error instanceof IngestRefusedError) return error;
+  if (error instanceof IngestInterruptedError) return error;
   return new IngestRefusedError(
     `${errorText(error)}; stopped before any database write`,
   );
@@ -187,17 +216,24 @@ export async function runBulkIngest(
     ? [META_FILE, ALL_IDENTIFIERS_FILE]
     : [META_FILE, ALL_IDENTIFIERS_FILE, ALL_PRICES_FILE];
   const metas: FileMeta[] = [];
+  const checkInterrupted = () => {
+    if (deps.signal?.aborted) {
+      const reason: unknown = deps.signal.reason;
+      throw new IngestInterruptedError(
+        typeof reason === "string" ? reason : "a signal",
+      );
+    }
+  };
   try {
     await source.prepare(files);
     for (const file of files) {
-      const meta = await readMeta(source.open(file), file);
+      // A data file must hold `data` right after `meta` (ADV.1), so a write
+      // run refuses a file with no data before it connects.
+      const meta = await readMeta(source.open(file), file, {
+        requireData: file !== META_FILE,
+      });
       checkVersion(meta, file);
       metas.push({ file, ...meta });
-    }
-    for (const file of files) {
-      if (file === META_FILE) continue;
-      log(`verifying ${file} (gzip CRC, end to end)`);
-      await source.verify(file);
     }
   } catch (error) {
     throw refusal(error);
@@ -207,8 +243,13 @@ export async function runBulkIngest(
       m.file === (identifiersOnly ? ALL_IDENTIFIERS_FILE : ALL_PRICES_FILE),
   )!;
   const metaJson = metas.find((m) => m.file === META_FILE)!;
+  // Source dates (ADV.2): a stale or mismatched source would end `ok` with
+  // finished_at = now, so getHistoryFreshness would call days-old prices
+  // fresh. Path C refuses it; paths A and B warn (the runbook proceeds to
+  // path C only after a path A that printed "warnings: none").
+  const dateProblems: string[] = [];
   if (metaJson.date !== dataMeta.date) {
-    warn(
+    dateProblems.push(
       `Meta.json is dated ${metaJson.date}, ${dataMeta.file} ${dataMeta.date}`,
     );
   }
@@ -218,9 +259,31 @@ export async function runBulkIngest(
     dataMeta.date < runDate &&
     Date.parse(runDate) - Date.parse(dataMeta.date) > 86_400_000
   ) {
-    warn(
+    dateProblems.push(
       `${ALL_PRICES_FILE} is dated ${dataMeta.date}, more than one day before runDate ${runDate}`,
     );
+  }
+  if (target.kind === "production") {
+    if (!isCalendarDate(dataMeta.date)) {
+      throw new IngestRefusedError(
+        `${dataMeta.file}: meta.date ${JSON.stringify(dataMeta.date)} is not a calendar date; path C needs a dated source. Stopped before any database write`,
+      );
+    }
+    if (dateProblems.length > 0) {
+      throw new IngestRefusedError(
+        `${dateProblems.join("; ")}. Path C loads only a current source: run path A again to download today's files. Stopped before any database write`,
+      );
+    }
+  }
+  for (const line of dateProblems) warn(line);
+  try {
+    for (const file of files) {
+      if (file === META_FILE) continue;
+      log(`verifying ${file} (gzip CRC, end to end)`);
+      await source.verify(file);
+    }
+  } catch (error) {
+    throw refusal(error);
   }
 
   const parseStats = emptyParseStats();
@@ -237,17 +300,29 @@ export async function runBulkIngest(
     : new PriceTransform(index, runDate, (series) => reservoir?.offer(series));
   const chunkStats: ChunkStats = { duplicateKeys: 0 };
 
-  const loadIdentifiers = async () => {
+  // Identifiers are read into memory before any connection (ADV.1): a parse
+  // fault is a refusal, and a file with no usable identifier (every entry
+  // missing `identifiers.scryfallId`, say) would map no price at all, so it
+  // is refused rather than run to an `ok` with 0 rows.
+  try {
     log(`reading ${ALL_IDENTIFIERS_FILE}`);
     for await (const raw of parseIdentifiers(
       source.open(ALL_IDENTIFIERS_FILE),
       parseStats,
       ALL_IDENTIFIERS_FILE,
     )) {
+      checkInterrupted();
       index.add(raw);
     }
     log(`  ${index.size} identifiers, ${index.printings} printings`);
-  };
+  } catch (error) {
+    throw refusal(error);
+  }
+  if (index.size === 0) {
+    throw new IngestRefusedError(
+      `${ALL_IDENTIFIERS_FILE}: identifiers not loaded (0 usable entries; ${index.stats.invalidIdentifiers} invalid). Stopped before any database write`,
+    );
+  }
 
   const report = (
     write: WriteSummary | null,
@@ -276,7 +351,6 @@ export async function runBulkIngest(
   // --- path A: no database client, ever (AC-6) -----------------------------
   if (target.kind === "dry-run") {
     try {
-      await loadIdentifiers();
       if (transform !== null) {
         log(`reading ${ALL_PRICES_FILE}`);
         for await (const entry of parsePrices(
@@ -284,11 +358,17 @@ export async function runBulkIngest(
           parseStats,
           ALL_PRICES_FILE,
         )) {
+          checkInterrupted();
           transform.rowsFor(entry);
         }
       }
     } catch (error) {
       throw refusal(error);
+    }
+    if (transform !== null && rowsEmitted(transform.stats) === 0) {
+      warn(
+        "no price rows emitted: a write run with these files would end error",
+      );
     }
     let basis: BasisResult | null = null;
     if (reservoir !== null && request.basisSample) {
@@ -298,6 +378,11 @@ export async function runBulkIngest(
         today: utcDateOf(deps.now()),
         log,
       });
+      if (basis.incomplete) {
+        warn(
+          `basis sample incomplete: ${basis.pairs.length} of ${basis.requested} pairs, no verdict`,
+        );
+      }
     }
     return { exitCode: EXIT.ok, report: report(null, basis) };
   }
@@ -333,16 +418,19 @@ export async function runBulkIngest(
       sourceDate: isCalendarDate(dataMeta.date) ? dataMeta.date : null,
       sourceVersion: dataMeta.version,
     });
+    deps.onRunStarted?.(runId);
 
     let chunks = 0;
     let identifierRowsWritten = 0;
     let priceRowsWritten = 0;
     let rowsPruned = 0;
     let budgetStop = false;
+    let warnedOverWarn = false;
 
     /** After every recheckChunks-th chunk: stop over 450 MB, warn over 400 MB. */
     const afterChunk = async () => {
       chunks += 1;
+      checkInterrupted();
       if (chunks % recheckChunks !== 0) return;
       const size = await databaseSizeBytes(db);
       if (size > DB_STOP_BYTES) {
@@ -351,6 +439,7 @@ export async function runBulkIngest(
           `database is ${mb(size)} after chunk ${chunks}, over ${mb(DB_STOP_BYTES)}: budget_stop`,
         );
       } else if (size > DB_WARN_BYTES) {
+        warnedOverWarn = true;
         warn(
           `database is ${mb(size)} after chunk ${chunks}, over ${mb(DB_WARN_BYTES)}`,
         );
@@ -358,7 +447,6 @@ export async function runBulkIngest(
     };
 
     try {
-      await loadIdentifiers();
       let batch: IdentifierRow[] = [];
       for (const row of index.rows()) {
         if (budgetStop) break;
@@ -388,6 +476,7 @@ export async function runBulkIngest(
           parseStats,
           ALL_PRICES_FILE,
         )) {
+          checkInterrupted();
           for (const row of transform.rowsFor(entry)) rows.push(row);
           while (!budgetStop && rows.length >= chunkRows) {
             await flush(chunkRows);
@@ -395,6 +484,14 @@ export async function runBulkIngest(
           if (budgetStop) break;
         }
         if (!budgetStop && rows.length > 0) await flush(rows.length);
+        // ADV.1: a source that emits nothing (AllPrices with an empty data
+        // object, or no UUID that maps) must not end `ok`, or F2 would read
+        // this run as a fresh success; nor may it prune.
+        if (!budgetStop && rowsEmitted(transform.stats) === 0) {
+          throw new NothingToWriteError(
+            `no price rows emitted (${transform.stats.priceEntries} price entries, ${transform.stats.unmappedUuids} unmapped); nothing pruned`,
+          );
+        }
       }
 
       if (transform !== null) {
@@ -402,6 +499,18 @@ export async function runBulkIngest(
       }
       await analyzeTables(db, { prices: transform !== null });
       const dbBytes = await databaseSizeBytes(db);
+      // The re-check runs every recheckChunks chunks, so up to that many
+      // trailing chunks were never checked: the final size is (SEC-3, ADV.12).
+      if (!budgetStop && dbBytes > DB_STOP_BYTES) {
+        budgetStop = true;
+        warn(
+          `database is ${mb(dbBytes)} at the end of the run, over ${mb(DB_STOP_BYTES)}: budget_stop`,
+        );
+      } else if (!budgetStop && !warnedOverWarn && dbBytes > DB_WARN_BYTES) {
+        warn(
+          `database is ${mb(dbBytes)} at the end of the run, over ${mb(DB_WARN_BYTES)}`,
+        );
+      }
       const status = budgetStop ? "budget_stop" : "ok";
       const rowsWritten = identifiersOnly
         ? identifierRowsWritten
@@ -444,7 +553,7 @@ export async function runBulkIngest(
       } catch (finishError) {
         log(
           sanitizeErrorMessage(
-            `the run row could not be finished (${errorText(finishError)}); it stays running until S0.3 marks it error`,
+            `the run row could not be finished, so it stays running until S0.3 marks it error. Cause: ${errorText(finishError)}`,
           ),
         );
       }

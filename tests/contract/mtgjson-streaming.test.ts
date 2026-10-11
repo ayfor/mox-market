@@ -1,9 +1,13 @@
 // T7 (AC-5; S0.2d4): a static scan of the MTGJson modules and the ingest
 // script. No whole-file reads or parses (JSON.parse, readFile, readFileSync,
 // Response .json/.text/.arrayBuffer, the sync zlib calls), and the only file
-// writer is source.ts's download(), fed the raw response body, so no
-// decompressed copy can be written. Comments are stripped with TypeScript's
-// scanner first, so prose that names a banned call does not count.
+// writer is source.ts's download(). fetch's body is not raw: it is decoded
+// when the server sets a Content-Encoding (ADV.3), so for a .gz file
+// download() refuses every encoding but identity, requires the gzip magic
+// bytes, and gunzips the .part into a null sink before the rename; no
+// decompressor writes to a file anywhere. Comments are stripped with
+// TypeScript's scanner first, so prose that names a banned call does not
+// count.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -104,7 +108,7 @@ describe("MTGJson streaming contract (T7, AC-5)", () => {
     },
   );
 
-  test("createWriteStream appears only in source.ts's download(), fed the raw response body", () => {
+  test("createWriteStream appears only in source.ts's download(), which refuses a decoded .gz body", () => {
     for (const file of scannedFiles()) {
       const text = readFileSync(file, "utf8");
       const uses = writeStreamUses(file, text);
@@ -121,6 +125,22 @@ describe("MTGJson streaming contract (T7, AC-5)", () => {
         );
         expect(download).not.toMatch(
           /createGunzip|createInflate|createUnzip|createBrotliDecompress/,
+        );
+        // ADV.3: a .gz body with any Content-Encoding is refused before the
+        // pipe, the magic bytes are checked as it streams, and the .part is
+        // verified (gunzip into a null sink) before it replaces the cache.
+        expect(download).toMatch(
+          /if \(gzip && encoding !== "identity" && encoding !== ""\) \{\s*throw new DownloadError/,
+        );
+        expect(download.indexOf("GZIP_MAGIC")).toBeGreaterThan(-1);
+        expect(download.indexOf("await verifyGzipFile(part)")).toBeGreaterThan(
+          download.indexOf("pipeline(body, counter, createWriteStream(part))"),
+        );
+        expect(download.indexOf("await rename(part, target)")).toBeGreaterThan(
+          download.indexOf("await verifyGzipFile(part)"),
+        );
+        expect(code).toMatch(
+          /const verifyGzipFile = \(file: string\): Promise<void> =>\s*pipeline\(createReadStream\(file\), createGunzip\(\), nullSink\(\)\)/,
         );
       } else {
         expect(uses, path.relative(ROOT, file)).toEqual([]);
