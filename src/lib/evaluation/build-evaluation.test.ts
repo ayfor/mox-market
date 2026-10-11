@@ -3,7 +3,9 @@
 // S2.4 adds T10 (AC-6, AC-7: the two misses compute nothing), T11 (AC-8: a
 // failure is never a miss) and T14's unit half (AC-9: a fuzzy hit). S2.3
 // adds T6 (AC-1, AC-3: the default selection), T7 (AC-9: an explicit
-// printing), T8 (AC-2: pagination) and T9 (AC-7, AC-8: never blended).
+// printing), T8 (AC-2: pagination) and T9 (AC-7, AC-8: never blended); its
+// adversarial review adds the finishes-list fallback (ADV-3) and the option
+// round trip (ADV-5).
 import {
   ESPER_PRINTS_PAGE_1,
   ESPER_PRINTS_PAGE_2,
@@ -49,6 +51,7 @@ import {
   defaultHistoryReader,
   type PriceHistoryReader,
 } from "./history-reader";
+import { parseResultParams } from "./result-params";
 import { signalTiles } from "./tiles";
 
 vi.mock("@/lib/recommendation/engine", async (importOriginal) => {
@@ -1082,5 +1085,146 @@ describe("history is never blended (T9, AC-7, AC-8)", () => {
     expect(result.recommendation.kind).not.toBe("insufficient_data");
     expect(result.recommendation.signals.fallbackNotice).toBe(true);
     expect(result.recommendation.signals.snapshotCount30d).toBe(30);
+  });
+});
+
+describe("the fallback follows the finishes list (ADV-3, AC-9)", () => {
+  const PLST = ESPER_SENTINEL_PRINTS.find((p) => p.id === PLST_ID)!;
+  const SLD = ESPER_SENTINEL_PRINTS.find((p) => p.id === SLD_2123_ID)!;
+  const SERIES = {
+    [historyKey(PLST_ID, "normal")]: dailyHistory(AS_OF, Array(30).fill(6450)),
+    [historyKey(PLST_ID, "foil")]: dailyHistory(AS_OF, Array(30).fill(5000)),
+  };
+  const withPrints = (prints: readonly ScryfallCard[]) => {
+    const reader = keyedHistoryReader(SERIES, NOW);
+    const { deps } = depsWith({
+      reader,
+      getAllPrintings: async () => [...prints],
+    });
+    return { deps, reader };
+  };
+
+  test("plst (normal only) with foil requested: normal applied, read for (plst, normal) only, the fallback notice", async () => {
+    expect(offeredFinishes(PLST)).toEqual(["normal"]);
+    const { deps, reader } = withPrints(ESPER_SENTINEL_PRINTS);
+    const result = ok(
+      await buildEvaluation(
+        { ...query(5500, "foil"), printing: PLST_ID },
+        deps,
+      ),
+    );
+    expect(result.printing.id).toBe(PLST_ID);
+    expect(result.requestedFinish).toBe("foil");
+    expect(result.appliedFinish).toBe("normal");
+    expect(result.selection.offeredFinishes).toEqual(["normal"]);
+    expect(reader.calls).toEqual([[PLST_ID, "normal", AS_OF]]);
+    expect(computeSpy.mock.calls[0][1].currentPriceCents).toBe(6450);
+    expect(result.recommendation.kind).not.toBe("insufficient_data");
+    expect(result.recommendation.signals.fallbackNotice).toBe(true);
+  });
+
+  test("a usd_foil on a printing whose finishes omit foil is not used: normal applied, never read as foil", async () => {
+    const foilPriced = {
+      ...PLST,
+      prices: { ...PLST.prices, usd_foil: "50.00" },
+    };
+    const prints = ESPER_SENTINEL_PRINTS.map((p) =>
+      p.id === PLST_ID ? foilPriced : p,
+    );
+    const { deps, reader } = withPrints(prints);
+    const result = ok(
+      await buildEvaluation(
+        { ...query(5500, "foil"), printing: PLST_ID },
+        deps,
+      ),
+    );
+    expect(result.appliedFinish).toBe("normal");
+    expect(reader.calls).toEqual([[PLST_ID, "normal", AS_OF]]);
+    expect(reader.calls.some(([, finish]) => finish === "foil")).toBe(false);
+    expect(computeSpy.mock.calls[0][1].currentPriceCents).toBe(6450);
+    expect(result.recommendation.signals.fallbackNotice).toBe(true);
+  });
+
+  test("a usd on a foil-only printing is not used: normal requested is insufficient_data", async () => {
+    const normalPriced = { ...SLD, prices: { ...SLD.prices, usd: "5.00" } };
+    const prints = ESPER_SENTINEL_PRINTS.map((p) =>
+      p.id === SLD_2123_ID ? normalPriced : p,
+    );
+    const { deps, reader } = withPrints(prints);
+    const result = ok(
+      await buildEvaluation({ ...query(500), printing: SLD_2123_ID }, deps),
+    );
+    expect(result.appliedFinish).toBe("normal");
+    expect(computeSpy.mock.calls[0][1].currentPriceCents).toBeNull();
+    expect(result.recommendation.kind).toBe("insufficient_data");
+    expect(reader.calls).toEqual([[SLD_2123_ID, "normal", AS_OF]]);
+  });
+
+  test("a printing offering both finishes keeps its foil price", async () => {
+    const { deps } = depsWith({});
+    const result = ok(
+      await buildEvaluation(
+        { ...query(7499, "foil"), printing: MH2_12_ID },
+        deps,
+      ),
+    );
+    expect(result.appliedFinish).toBe("foil");
+    expect(computeSpy.mock.calls[0][1].currentPriceCents).toBe(7647);
+  });
+});
+
+describe("every offered option round-trips through the URL to itself (ADV-5)", () => {
+  const MALFORMED = [
+    {
+      ...scryfallCard({
+        id: "cccccccc-0000-4000-8000-000000000001",
+        released_at: "2026-01-01",
+      }),
+      name: undefined,
+    } as unknown as ScryfallCard,
+    scryfallCard({
+      id: "CCCCCCCC-0000-4000-8000-000000000002",
+      released_at: "2026-01-01",
+    }),
+    scryfallCard({ id: "abc", released_at: "2026-01-01" }),
+  ];
+  const PRINTS = [...ESPER_SENTINEL_PRINTS, ...MALFORMED];
+
+  test("the three malformed entries are not offered", () => {
+    const ids = selectablePrintings(PRINTS).map((p) => p.id);
+    for (const bad of MALFORMED) expect(ids).not.toContain(bad.id);
+    expect(ids).toEqual(
+      selectablePrintings(ESPER_SENTINEL_PRINTS).map((p) => p.id),
+    );
+  });
+
+  test("each option's id parses as the printing param and evaluates that printing", async () => {
+    const { deps } = depsWith({ getAllPrintings: async () => [...PRINTS] });
+    const offered = ok(await buildEvaluation(query(7499), deps)).selection
+      .options;
+    expect(offered.length).toBe(7);
+    for (const option of offered) {
+      const parsed = parseResultParams("Esper%20Sentinel", {
+        price: "74.99",
+        finish: option.finishes[0],
+        printing: option.id,
+      });
+      expect(parsed.kind, option.id).toBe("ok");
+      if (parsed.kind !== "ok") continue;
+      expect(parsed.printing).toBe(option.id);
+      const result = ok(
+        await buildEvaluation(
+          {
+            card: parsed.card,
+            askingPriceCents: parsed.askingPriceCents,
+            finish: parsed.finish,
+            printing: parsed.printing,
+          },
+          deps,
+        ),
+      );
+      expect(result.printing.id, option.id).toBe(option.id);
+      expect(result.selection.printingId).toBe(option.id);
+    }
   });
 });

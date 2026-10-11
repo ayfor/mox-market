@@ -20,6 +20,7 @@ import { FALLBACK_NOTICE, fillTemplate } from "@/lib/recommendation/copy";
 import { FINISH_LABELS, UI_COPY } from "@/lib/recommendation/ui-copy";
 import { getCardImageUri } from "@/lib/scryfall";
 import { LookupMiss } from "./lookup-miss";
+import { StaleBannerReport } from "./result-slot";
 import { RetryButton } from "./retry-button";
 
 /** Scryfall's normal image size, 488 × 680: the card's aspect. */
@@ -124,6 +125,8 @@ function OkView({ evaluation }: { evaluation: OkEvaluation }) {
           {UI_COPY.staleBanner}
         </p>
       )}
+      {/* The skeleton of the next switch keeps this banner (S2.3 ADV-1). */}
+      <StaleBannerReport shown={evaluation.syncStale} />
       <div className="mm-result-grid">
         <CardArt printing={printing} />
         <div className="mm-result-main">

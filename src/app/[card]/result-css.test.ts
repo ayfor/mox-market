@@ -1,7 +1,8 @@
 // T12 (AC-2; C1.14 = A): each badge takes its verdict token and no literal
 // colour, result.css never reaches the site footer, and evaluate.css keeps
 // no verdict pill. S2.3's T15 (AC-12): the selector row's fixed geometry,
-// shared by the controls and the skeleton, and whole-string classes.
+// shared by the controls and the skeleton, and whole-string classes; and
+// the selector lists stay inside the row (ADV-4).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -196,6 +197,77 @@ describe("the selector row's geometry (T15, AC-12)", () => {
         );
       }
     }
+  });
+});
+
+describe("the selector lists stay inside the row (ADV-4)", () => {
+  /** The last base (no at-rule) value of a property for a selector in a stylesheet. */
+  const baseValue = (css: string, selector: string, property: string) =>
+    rulesFor(css, selector)
+      .filter((r) => r.atRules.length === 0)
+      .flatMap((r) => r.declarations)
+      .filter((d) => d.property === property)
+      .at(-1)?.value;
+
+  test("PrintingSelect's list is anchored to the row and spans both tracks", () => {
+    expect(baseValue(RESULT_CSS, ".mm-selector-row", "position")).toBe(
+      "relative",
+    );
+    expect(baseValue(SELECTOR_CSS, ".mm-selector", "position")).toBe(
+      "relative",
+    );
+    expect(baseValue(SELECTOR_CSS, ".mm-selector--printing", "position")).toBe(
+      "static",
+    );
+    // Equal specificity: the static rule must come after .mm-selector's.
+    const order = extractRules(SELECTOR_CSS).map((r) => r.selector);
+    expect(order.indexOf(".mm-selector--printing")).toBeGreaterThan(
+      order.indexOf(".mm-selector"),
+    );
+    expect(baseValue(SELECTOR_CSS, ".mm-selector-options", "position")).toBe(
+      "absolute",
+    );
+    expect(baseValue(SELECTOR_CSS, ".mm-selector-options", "left")).toBe("0");
+    expect(
+      baseValue(
+        SELECTOR_CSS,
+        ".mm-selector--printing .mm-selector-options",
+        "right",
+      ),
+    ).toBe("0");
+  });
+
+  test("FinishSelect's list is aligned to the row's right edge", () => {
+    const list = ".mm-selector--finish .mm-selector-options";
+    expect(baseValue(SELECTOR_CSS, list, "left")).toBe("auto");
+    expect(baseValue(SELECTOR_CSS, list, "right")).toBe("0");
+  });
+
+  test("a long option label wraps instead of running past the viewport", () => {
+    expect(baseValue(SELECTOR_CSS, ".mm-selector-option", "white-space")).toBe(
+      "normal",
+    );
+    expect(
+      baseValue(SELECTOR_CSS, ".mm-selector-option", "overflow-wrap"),
+    ).toBe("anywhere");
+    for (const css of [RESULT_CSS, SELECTOR_CSS]) {
+      for (const rule of extractRules(css).filter((r) =>
+        /mm-selector-option\b(?!s)/.test(r.selector),
+      )) {
+        for (const { property, value } of rule.declarations) {
+          if (property === "white-space") expect(value).not.toBe("nowrap");
+        }
+      }
+    }
+  });
+
+  test("the selects carry the modifier classes the rules target", () => {
+    expect(read("src/components/printing-select.tsx")).toMatch(
+      /className="mm-selector mm-selector--printing"/,
+    );
+    expect(read("src/components/finish-select.tsx")).toMatch(
+      /className="mm-selector mm-selector--finish"/,
+    );
   });
 });
 

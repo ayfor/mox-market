@@ -8,6 +8,7 @@ import {
   offeredFinishes,
   selectablePrintings,
   selectDefaultPrinting,
+  withOfferedPrices,
 } from "@/lib/printings";
 import { computeRecommendation } from "@/lib/recommendation/engine";
 import { InvalidRecommendationInputError } from "@/lib/recommendation/errors";
@@ -231,8 +232,10 @@ async function evaluate(
     return { status: "error" };
   }
   const now = deps.now();
+  // A price counts only for a finish the printing offers, so the C1.21
+  // fallback follows the finishes FinishSelect shows (AC-9, ADV-3).
   const snapshot = await loadMarketSnapshot({
-    printing,
+    printing: withOfferedPrices(printing),
     requestedFinish: query.finish,
     reader: deps.reader,
     now,

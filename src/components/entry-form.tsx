@@ -80,6 +80,7 @@ export function EntryForm({
     price: initialPrice,
     error: initialError,
   });
+  const [seenSwitches, setSeenSwitches] = useState(navigation.switches);
   const lastHref = useRef<string | null>(null);
   const id = useId();
   const cardId = `${id}-card`;
@@ -112,6 +113,19 @@ export function EntryForm({
       card: cardClean ? initialCard : baseline.card,
       price: priceClean ? initialPrice : baseline.price,
     });
+  }
+
+  // A selector switch evaluates the URL's card and price (AC-5), so the
+  // fields show them again: an unsubmitted edit is dropped rather than shown
+  // beside a result it did not produce (S2.3 ADV-6, S2.3d13; Josh can
+  // overturn). Edits typed after the switch survive it as before (ADV-8).
+  if (seenSwitches !== navigation.switches) {
+    setSeenSwitches(navigation.switches);
+    setCard(initialCard);
+    setPrice(initialPrice);
+    setError(initialError);
+    setCardError(false);
+    setBaseline({ card: initialCard, price: initialPrice });
   }
 
   // Never builds an href during render, so no typed text can throw here (ADV-2).

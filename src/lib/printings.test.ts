@@ -1,7 +1,8 @@
 // T3 (AC-10; F2 §Default printing; C1.26, C1.46 = A): selectDefaultPrinting
 // applies F2's predicate verbatim, and scryfallPriceCents converts once.
 // S2.3 adds T2 (offeredFinishes, AC-4) and T3 (selectablePrintings, AC-1,
-// AC-2).
+// AC-2), and its adversarial review adds withOfferedPrices (ADV-3) and the
+// offered-option fields (ADV-5).
 import type { ScryfallCard } from "@/types/scryfall";
 import { describe, expect, test } from "vitest";
 import {
@@ -24,6 +25,7 @@ import {
   scryfallPriceCents,
   selectablePrintings,
   selectDefaultPrinting,
+  withOfferedPrices,
 } from "./printings";
 
 const prices = (usd: string | null, usd_foil: string | null) => ({
@@ -399,5 +401,106 @@ describe("selectablePrintings on the Esper Sentinel fixture (T3, AC-1, AC-2)", (
       MH2_12_ID,
     );
     expect(selectablePrintings(ESPER_SENTINEL_PRINTS)[0].id).toBe(SLD_2123_ID);
+  });
+});
+
+describe("an offered option evaluates to itself (ADV-5)", () => {
+  const EXPECTED = selectablePrintings(ESPER_SENTINEL_PRINTS).map((p) => p.id);
+
+  test("an entry without a string name is left out", () => {
+    const nameless = {
+      ...scryfallCard({
+        id: "cccccccc-0000-4000-8000-000000000001",
+        released_at: "2026-01-01",
+      }),
+      name: undefined,
+    } as unknown as ScryfallCard;
+    const numbered = {
+      ...scryfallCard({
+        id: "cccccccc-0000-4000-8000-000000000002",
+        released_at: "2026-01-01",
+      }),
+      name: 7,
+    } as unknown as ScryfallCard;
+    expect(
+      selectablePrintings([...ESPER_SENTINEL_PRINTS, nameless, numbered]).map(
+        (p) => p.id,
+      ),
+    ).toEqual(EXPECTED);
+  });
+
+  test.each([
+    ["upper-case", "CCCCCCCC-0000-4000-8000-000000000003"],
+    ["mixed-case", "cccccccc-0000-4000-8000-00000000000A"],
+    ["not a UUID", "abc"],
+    ["no dashes", "cccccccc000040008000000000000004"],
+    ["braced", "{cccccccc-0000-4000-8000-000000000005}"],
+    ["empty", ""],
+  ])("an entry whose id is %s is left out", (_name, id) => {
+    const odd = scryfallCard({ id, released_at: "2026-01-01" });
+    expect(
+      selectablePrintings([...ESPER_SENTINEL_PRINTS, odd]).map((p) => p.id),
+    ).toEqual(EXPECTED);
+  });
+});
+
+describe("withOfferedPrices (ADV-3, AC-9)", () => {
+  test("a price for a finish the printing does not offer is dropped", () => {
+    const normalOnly = scryfallCard({
+      finishes: ["nonfoil"],
+      prices: prices("64.50", "50.00"),
+    });
+    expect(withOfferedPrices(normalOnly).prices).toEqual(prices("64.50", null));
+    const foilOnly = scryfallCard({
+      finishes: ["foil"],
+      prices: prices("5.00", "41.00"),
+    });
+    expect(withOfferedPrices(foilOnly).prices).toEqual(prices(null, "41.00"));
+  });
+
+  test("both finishes offered: the prices are kept as they are", () => {
+    const both = scryfallCard({ prices: prices("59.17", "76.47") });
+    expect(withOfferedPrices(both).prices).toEqual(prices("59.17", "76.47"));
+    expect(priceCentsFor(withOfferedPrices(both), "foil")).toBe(7647);
+  });
+
+  test("etched only, or no usable finishes: no normal or foil price", () => {
+    expect(
+      withOfferedPrices(etchedOnlyPrinting({ prices: prices("3.00", "4.00") }))
+        .prices,
+    ).toMatchObject({ usd: null, usd_foil: null });
+    const broken = {
+      ...scryfallCard({ prices: prices("3.00", "4.00") }),
+      finishes: "nonfoil",
+    } as unknown as ScryfallCard;
+    expect(withOfferedPrices(broken).prices).toMatchObject({
+      usd: null,
+      usd_foil: null,
+    });
+  });
+
+  test("malformed prices never throw: nothing is priced", () => {
+    for (const bad of [null, undefined, "12.00", 12]) {
+      const printing = {
+        ...scryfallCard(),
+        prices: bad,
+      } as unknown as ScryfallCard;
+      const view = withOfferedPrices(printing);
+      expect(priceCentsFor(view, "normal")).toBeNull();
+      expect(priceCentsFor(view, "foil")).toBeNull();
+    }
+  });
+
+  test("never mutates its input; every other field is kept", () => {
+    const input = scryfallCard({
+      id: PLST_ID,
+      finishes: ["nonfoil"],
+      prices: prices("64.50", "50.00"),
+    });
+    const before = structuredClone(input);
+    const view = withOfferedPrices(input);
+    expect(input).toEqual(before);
+    expect(view).not.toBe(input);
+    expect({ ...view, prices: input.prices }).toEqual(input);
   });
 });

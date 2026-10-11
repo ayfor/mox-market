@@ -1,6 +1,7 @@
 // F2 §Default printing (S2.1d7; C1.26, C1.46 = A): which printing the result
 // page evaluates when the user names only a card. Pure: no fetch, no clock.
 import type { ShownFinish } from "@/lib/recommendation/ui-copy";
+import { isScryfallId } from "@/lib/scryfall-id";
 import type { ScryfallCard } from "@/types/scryfall";
 
 /** Set types never picked by default (C1.46 = A adds box). */
@@ -114,10 +115,46 @@ export function offeredFinishes(
   return offered;
 }
 
-/** The fields an option needs to be labelled and sorted, as strings. */
-function isLabellable(printing: ScryfallCard): boolean {
+/**
+ * The printing with a price only for the finishes it offers (S2.3 ADV-3,
+ * AC-9): a `usd` or `usd_foil` Scryfall lists for a finish missing from
+ * `finishes` is dropped, so the C1.21 fallback follows the finishes list
+ * that FinishSelect shows. Foil requested on a printing that offers only
+ * normal is priced and read as normal; normal requested on a foil-only
+ * printing has no price (insufficient_data). Never mutates its input.
+ */
+export function withOfferedPrices<
+  T extends Pick<ScryfallCard, "prices" | "finishes">,
+>(printing: T): T {
+  const offered = offeredFinishes(printing);
+  const prices: Partial<ScryfallCard["prices"]> =
+    printing.prices !== null && typeof printing.prices === "object"
+      ? printing.prices
+      : {};
+  return {
+    ...printing,
+    prices: {
+      ...prices,
+      [PRICE_FIELD.normal]: offered.includes("normal")
+        ? (prices[PRICE_FIELD.normal] ?? null)
+        : null,
+      [PRICE_FIELD.foil]: offered.includes("foil")
+        ? (prices[PRICE_FIELD.foil] ?? null)
+        : null,
+    },
+  };
+}
+
+/**
+ * The fields an option needs, so choosing it evaluates that printing (S2.3
+ * ADV-5): a lower-case Scryfall id, which survives the `printing` URL param
+ * unchanged, a name (the card header), and the label and sort fields as
+ * strings.
+ */
+function isOfferable(printing: ScryfallCard): boolean {
   return (
-    typeof printing.id === "string" &&
+    isScryfallId(printing.id) &&
+    typeof printing.name === "string" &&
     typeof printing.set === "string" &&
     typeof printing.set_name === "string" &&
     typeof printing.collector_number === "string" &&
@@ -178,7 +215,8 @@ function compareOptions(a: ScryfallCard, b: ScryfallCard): number {
 /**
  * The printings PrintingSelect offers (S2.3d3; AC-1, AC-2, AC-4): every
  * paper printing (`digital === false`) that offers normal or foil and carries
- * the fields its option shows, the first of any repeated id, newest
+ * the fields its option shows and its evaluation needs (a lower-case
+ * Scryfall id and a name, ADV-5), the first of any repeated id, newest
  * released_at first, then collector number, then id, so Scryfall's order
  * never matters. Promo, box, memorabilia, token and minigame printings stay:
  * C1.26 and C1.46's exclusions shape only the default. Never mutates its
@@ -191,7 +229,7 @@ export function selectablePrintings(
   const selectable: ScryfallCard[] = [];
   for (const printing of printings) {
     if (printing === null || typeof printing !== "object") continue;
-    if (printing.digital !== false || !isLabellable(printing)) continue;
+    if (printing.digital !== false || !isOfferable(printing)) continue;
     if (offeredFinishes(printing).length === 0) continue;
     if (seen.has(printing.id)) continue;
     seen.add(printing.id);

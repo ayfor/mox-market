@@ -7,8 +7,8 @@
 // selectionHref keeps the URL's price and the path segment as they are. A
 // switch writes no submit marker: S2.4's marker means a form submit. S5.1
 // adds the switch's logRecommendation call to commitSelection (C2-B.4).
-// When the selectors mount after a switch, focus returns to the control
-// that changed.
+// When the selectors mount on the page a switch pushed, focus returns to the
+// control that changed.
 import type { ShownFinish } from "@/lib/recommendation/ui-copy";
 import {
   nextSelection,
@@ -54,12 +54,19 @@ export function SelectionControls({
   const finishButton = useRef<HTMLButtonElement>(null);
   const { takeFocus } = navigation;
 
-  // A switch unmounted the control just used; this mount takes the request.
+  // A switch unmounted the control just used; this mount takes the request,
+  // and focuses the control only on the page that switch pushed (ADV-2): a
+  // Back or Forward to another selection takes no focus.
+  const shownHref = selectionHref(searchParams, {
+    printing: printingId,
+    finish,
+  });
   useEffect(() => {
-    const target = takeFocus();
-    if (target === "printing") printingButton.current?.focus();
-    else if (target === "finish") finishButton.current?.focus();
-  }, [takeFocus]);
+    const request = takeFocus();
+    if (request === null || request.href !== shownHref) return;
+    if (request.target === "printing") printingButton.current?.focus();
+    else finishButton.current?.focus();
+  }, [takeFocus, shownHref]);
 
   /** The single change handler (C2-B.4). */
   const commitSelection = (change: SelectionChange, control: FocusTarget) => {

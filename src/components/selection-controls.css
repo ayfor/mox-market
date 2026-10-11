@@ -82,11 +82,29 @@
   outline: none;
 }
 
+/* The lists stay inside the selector row, so the page shell's
+   overflow-x: hidden never clips one (S2.3 ADV-4). PrintingSelect's list
+   is anchored to the row (position: relative in result.css) and spans both
+   tracks; FinishSelect's is aligned to the row's right edge. A long label
+   wraps inside the list instead of running past the viewport, so its set
+   code and collector number stay visible. */
+.mm-selector--printing {
+  position: static;
+}
+.mm-selector--printing .mm-selector-options {
+  right: 0;
+}
+.mm-selector--finish .mm-selector-options {
+  left: auto;
+  right: 0;
+}
+
 .mm-selector-option {
   padding: 8px 10px;
   border-radius: var(--mox-radius-sm);
   font: var(--ts-body);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: var(--fg-primary);
   cursor: pointer;
 }

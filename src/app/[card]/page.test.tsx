@@ -13,14 +13,21 @@ import {
   ESPER_PRINTS_URI,
   ESPER_SENTINEL_PRINTS,
   MH2_12_ID,
+  PLST_ID,
   scryfallCard,
 } from "@/lib/__fixtures__/esper-sentinel-prints";
+import {
+  historyKey,
+  keyedHistoryReader,
+} from "@/lib/__fixtures__/keyed-history";
 import {
   defaultEvaluationDeps,
   type EvaluationDeps,
   type EvaluationQuery,
 } from "@/lib/evaluation/build-evaluation";
-import { UI_COPY } from "@/lib/recommendation/ui-copy";
+import { FALLBACK_NOTICE, fillTemplate } from "@/lib/recommendation/copy";
+import { dailyHistory } from "@/lib/recommendation/fixtures";
+import { FINISH_LABELS, UI_COPY } from "@/lib/recommendation/ui-copy";
 import { resultHref } from "@/lib/result-href";
 import { fireEvent, render, screen } from "@testing-library/react";
 import {
@@ -32,9 +39,8 @@ import {
 } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import ResultPage, { metadata } from "./page";
-import { PanelSkeleton } from "./panel-skeleton";
 import { ResultPanel } from "./result-panel";
-import { ResultSlot } from "./result-slot";
+import { ResultSlot, SlotSkeleton } from "./result-slot";
 
 const NOT_FOUND = "NEXT_HTTP_ERROR_FALLBACK;404";
 const router = vi.hoisted(() => ({
@@ -154,7 +160,7 @@ describe("a valid query (T17, AC-8)", () => {
     expect(form).toBeDefined();
     expect(form!.key).toBeNull();
   });
-  test("the panel sits in a Suspense keyed by paramsKey with the skeleton as fallback, inside ResultSlot", async () => {
+  test("the panel sits in a Suspense keyed by paramsKey with the slot's skeleton as fallback, inside ResultSlot", async () => {
     const tree = await page("Esper%20Sentinel", {
       price: "$74.99",
       finish: "foil",
@@ -167,7 +173,8 @@ describe("a valid query (T17, AC-8)", () => {
     ).find((e) => e.type === Suspense)!;
     expect(suspense.key).toBe("Esper Sentinel|7499|foil|");
     const fallback = (suspense.props as { fallback: ReactElement }).fallback;
-    expect(fallback.type).toBe(PanelSkeleton);
+    // SlotSkeleton: PanelSkeleton with the banner the last panel showed (S2.3 ADV-1).
+    expect(fallback.type).toBe(SlotSkeleton);
     const panel = elementsIn(
       (suspense.props as { children: ReactNode }).children,
     ).find((e) => e.type === ResultPanel)!;
@@ -235,9 +242,10 @@ const scryfall404 = (type?: string) =>
 async function renderSettled(
   card: string,
   search: Record<string, string>,
+  overrides: Partial<EvaluationDeps> = {},
 ): Promise<ReturnType<typeof vi.fn>> {
   const log = vi.fn();
-  const deps: EvaluationDeps = { ...defaultEvaluationDeps, log };
+  const deps: EvaluationDeps = { ...defaultEvaluationDeps, ...overrides, log };
   render(await resolvePanels(await page(card, search), deps));
   return log;
 }
@@ -555,6 +563,46 @@ describe("the printing param on the page (T14, AC-2, AC-4, AC-9, AC-10)", () => 
       "scryfall_failed",
       expect.anything(),
     );
+  });
+
+  test("foil on a printing that offers only normal (plst): FinishSelect shows Foil with the one option Normal, and the panel is normal pricing with the fallback notice (ADV-3, AC-9)", async () => {
+    esperFetch();
+    const now = new Date("2026-10-10T12:00:00.000Z");
+    const reader = keyedHistoryReader(
+      {
+        [historyKey(PLST_ID, "normal")]: dailyHistory(
+          "2026-10-10",
+          Array(30).fill(6450),
+        ),
+      },
+      now,
+    );
+    searchParams.current = `price=55&finish=foil&printing=${PLST_ID}`;
+    await renderSettled(
+      "Esper%20Sentinel",
+      { price: "55", finish: "foil", printing: PLST_ID },
+      { reader, now: () => now },
+    );
+    expect(document.querySelector(".mm-card-set")).toHaveTextContent(
+      "The List (PLST) · #MH2-12",
+    );
+    const finish = selectorButton(UI_COPY.finishLabel)!;
+    expect(finish).toHaveTextContent("Foil");
+    finish.focus();
+    fireEvent.keyDown(finish, { key: "ArrowDown" });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Normal",
+    ]);
+    expect(document.querySelector(".mm-rec-panel")).toHaveAttribute(
+      "data-kind",
+      "buy",
+    );
+    expect(
+      screen.getByText(
+        fillTemplate(FALLBACK_NOTICE, { finish: FINISH_LABELS.foil }),
+      ),
+    ).toBeInTheDocument();
+    expect(reader.calls).toEqual([[PLST_ID, "normal", "2026-10-10"]]);
   });
 
   test("a default render shows mh2 #12 and Normal in the selectors", async () => {

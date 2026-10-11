@@ -18,9 +18,8 @@ import {
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { PanelSkeleton } from "./panel-skeleton";
 import { ResultPanel } from "./result-panel";
-import { ResultSlot } from "./result-slot";
+import { ResultSlot, SlotSkeleton } from "./result-slot";
 import "./result.css";
 
 export const metadata: Metadata = {
@@ -65,7 +64,7 @@ export default async function ResultPage({
             />
             {parsed.kind === "ok" && (
               <ResultSlot>
-                <Suspense key={parsed.paramsKey} fallback={<PanelSkeleton />}>
+                <Suspense key={parsed.paramsKey} fallback={<SlotSkeleton />}>
                   <ResultPanel
                     query={{
                       card: parsed.card,

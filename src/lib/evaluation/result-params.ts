@@ -6,6 +6,7 @@ import {
   MIN_ASKING_PRICE_CENTS,
 } from "@/lib/recommendation/limits";
 import type { ShownFinish } from "@/lib/recommendation/ui-copy";
+import { SCRYFALL_ID } from "@/lib/scryfall-id";
 import { CARD_PARAM_MAX_CHARS } from "./consts";
 
 /** `$` and every whitespace character, stripped before parsing. */
@@ -105,9 +106,12 @@ export type ResultParams =
 
 const SHOWN_FINISHES: readonly string[] = ["normal", "foil"];
 
-/** A Scryfall card id: a UUID, any case (S2.3d2, C1.52). */
-const SCRYFALL_ID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * A Scryfall card id in any case (S2.3d2, C1.52): the shared lower-case
+ * pattern (ADV-5), case-insensitive, so a hand-typed upper-case id is
+ * lower-cased rather than rejected.
+ */
+const SCRYFALL_ID_ANY_CASE = new RegExp(SCRYFALL_ID.source, "i");
 
 /**
  * The `printing` param (S2.3d2, AC-9): absent or exactly empty is null (the
@@ -120,7 +124,7 @@ function parsePrinting(
   const { value: raw, repeated } = single(value);
   if (repeated) return { valid: false };
   if (raw === undefined || raw === "") return { valid: true, printing: null };
-  return SCRYFALL_ID.test(raw)
+  return SCRYFALL_ID_ANY_CASE.test(raw)
     ? { valid: true, printing: raw.toLowerCase() }
     : { valid: false };
 }

@@ -2,8 +2,10 @@
 // A commit pushes one query-only href inside the shared transition (the slot
 // shows the skeleton at once), keeps the URL's price, never re-defaults the
 // other control, writes no submit marker, and returns focus to the control
-// that changed when the selectors remount. Any other navigation or a refresh
-// clears that request.
+// that changed when the selectors remount on the switch's page. Any other
+// navigation or a refresh clears that request; a switch that lands on the
+// error panel focuses Retry, and selectors on another page take no focus
+// (ADV-2). A switch resets the form's unsubmitted edits (ADV-6).
 import { PanelSkeleton } from "@/app/[card]/panel-skeleton";
 import { ResultSlot } from "@/app/[card]/result-slot";
 import { RetryButton } from "@/app/[card]/retry-button";
@@ -19,7 +21,10 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { EntryForm } from "./entry-form";
-import { ResultNavigationProvider } from "./result-navigation";
+import {
+  ResultNavigationProvider,
+  useResultNavigation,
+} from "./result-navigation";
 import {
   SelectionControls,
   type SelectionControlsProps,
@@ -85,25 +90,44 @@ function pendingNavigation() {
   return { promise, settle: () => act(async () => settle()) };
 }
 
+/**
+ * A settled panel without selectors or Retry (a lookup miss or the invalid
+ * view stands in), with a probe that refreshes inside the shared transition.
+ */
+function NoControlsPanel() {
+  const { refresh } = useResultNavigation();
+  return (
+    <div role="note">
+      <button type="button" onClick={() => refresh()}>
+        probe refresh
+      </button>
+    </div>
+  );
+}
+
 /** page.tsx's shape: the form, then the slot with the keyed Suspense. */
 function Page({
   paramsKey,
   controls,
   error = false,
+  panel = error ? "error" : "controls",
 }: {
   paramsKey: string;
   controls: SelectionControlsProps;
   error?: boolean;
+  panel?: "controls" | "error" | "none";
 }) {
   return (
     <ResultNavigationProvider>
       <EntryForm initialCard="Esper Sentinel" initialPrice="74.99" />
       <ResultSlot>
         <Suspense key={paramsKey} fallback={<PanelSkeleton />}>
-          {error ? (
+          {panel === "error" ? (
             <div role="alert">
               <RetryButton />
             </div>
+          ) : panel === "none" ? (
+            <NoControlsPanel />
           ) : (
             <SelectionControls {...controls} />
           )}
@@ -281,20 +305,85 @@ describe("the shared transition and focus (T12, AC-5, AC-12)", () => {
     expect(document.activeElement).toBe(document.body);
   });
 
-  test("a form-initiated navigation clears the request, so a later mount takes no focus", async () => {
+  test("a switch that lands on the error panel focuses Retry and spends the request: a later Back or Forward takes no focus (ADV-2)", async () => {
     const toError = pendingNavigation();
+    router.push.mockImplementationOnce(() => toError.promise);
+    const { rerender } = render(
+      <Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} />,
+    );
+    await choose(finishButton(), "Foil");
+    url.search = `price=74.99&finish=foil&printing=${MH2_12_ID}`;
+    rerender(<Page paramsKey="b" controls={shown(MH2_12_ID, "foil")} error />);
+    await toError.settle();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Retry" }),
+    );
+    // Forward to the switch's own selection, then Back to the one before.
+    rerender(<Page paramsKey="b2" controls={shown(MH2_12_ID, "foil")} />);
+    expect(document.activeElement).not.toBe(printingButton());
+    expect(document.activeElement).not.toBe(finishButton());
+    url.search = "price=74.99";
+    rerender(<Page paramsKey="a2" controls={shown(MH2_12_ID, "normal")} />);
+    expect(document.activeElement).not.toBe(printingButton());
+    expect(document.activeElement).not.toBe(finishButton());
+  });
+
+  test("Retry takes no focus on an error panel no switch led to", async () => {
+    render(<Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} error />);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  test("selectors focus only on the page the switch pushed: a Back to another selection takes no focus and spends the request (ADV-2)", async () => {
+    const toPanel = pendingNavigation();
+    router.push.mockImplementationOnce(() => toPanel.promise);
+    const { rerender } = render(
+      <Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} />,
+    );
+    await choose(finishButton(), "Foil");
+    // The switch lands on a panel with no selectors and no Retry.
+    rerender(
+      <Page paramsKey="b" controls={shown(MH2_12_ID, "foil")} panel="none" />,
+    );
+    await toPanel.settle();
+    expect(document.activeElement).toBe(document.body);
+    // Back (popstate, outside the shared transition) to mh2 #12 / Normal.
+    rerender(<Page paramsKey="a2" controls={shown(MH2_12_ID, "normal")} />);
+    expect(document.activeElement).toBe(document.body);
+    // Forward to the switch's page: the request is already spent.
+    rerender(<Page paramsKey="b2" controls={shown(MH2_12_ID, "foil")} />);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  test("a request no panel took focuses the selectors that show the switch's selection (control for the two tests below)", async () => {
+    const toPanel = pendingNavigation();
+    router.push.mockImplementationOnce(() => toPanel.promise);
+    const { rerender } = render(
+      <Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} />,
+    );
+    await choose(finishButton(), "Foil");
+    rerender(
+      <Page paramsKey="b" controls={shown(MH2_12_ID, "foil")} panel="none" />,
+    );
+    await toPanel.settle();
+    rerender(<Page paramsKey="b2" controls={shown(MH2_12_ID, "foil")} />);
+    expect(document.activeElement).toBe(finishButton());
+  });
+
+  test("a form-initiated navigation clears the request, so a later mount takes no focus", async () => {
+    const toPanel = pendingNavigation();
     const toResult = pendingNavigation();
     router.push
-      .mockImplementationOnce(() => toError.promise)
+      .mockImplementationOnce(() => toPanel.promise)
       .mockImplementationOnce(() => toResult.promise);
     const { rerender, container } = render(
       <Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} />,
     );
     await choose(finishButton(), "Foil");
-    // The switch lands on an error panel: no selectors take the request.
-    rerender(<Page paramsKey="b" controls={shown(MH2_12_ID, "foil")} error />);
-    await toError.settle();
-    expect(screen.getByRole("alert")).toBeInTheDocument();
+    rerender(
+      <Page paramsKey="b" controls={shown(MH2_12_ID, "foil")} panel="none" />,
+    );
+    await toPanel.settle();
     fireEvent.change(screen.getByRole("textbox", { name: "Your price" }), {
       target: { value: "70" },
     });
@@ -302,39 +391,29 @@ describe("the shared transition and focus (T12, AC-5, AC-12)", () => {
       fireEvent.submit(container.querySelector("form")!);
     });
     expect(router.push).toHaveBeenLastCalledWith("/Esper%20Sentinel?price=70");
-    rerender(<Page paramsKey="c" controls={shown(MH2_12_ID, "normal")} />);
+    // Selectors showing the switch's selection, which would take a live request.
+    rerender(<Page paramsKey="c" controls={shown(MH2_12_ID, "foil")} />);
     await toResult.settle();
     expect(printingButton()).toBeInTheDocument();
     expect(document.activeElement).not.toBe(finishButton());
     expect(document.activeElement).not.toBe(printingButton());
   });
 
-  test("without the form's navigation the same path does take focus (control for the test above)", async () => {
-    const toError = pendingNavigation();
-    router.push.mockImplementationOnce(() => toError.promise);
-    const { rerender } = render(
-      <Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} />,
-    );
-    await choose(finishButton(), "Foil");
-    rerender(<Page paramsKey="b" controls={shown(MH2_12_ID, "foil")} error />);
-    await toError.settle();
-    rerender(<Page paramsKey="c" controls={shown(MH2_12_ID, "foil")} />);
-    expect(document.activeElement).toBe(finishButton());
-  });
-
   test("a refresh clears the request too", async () => {
-    const toError = pendingNavigation();
+    const toPanel = pendingNavigation();
     const refreshed = pendingNavigation();
-    router.push.mockImplementationOnce(() => toError.promise);
+    router.push.mockImplementationOnce(() => toPanel.promise);
     router.refresh.mockImplementationOnce(() => refreshed.promise);
     const { rerender } = render(
       <Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} />,
     );
     await choose(printingButton(), "The List (PLST) · #MH2-12");
-    rerender(<Page paramsKey="b" controls={shown(PLST_ID, "normal")} error />);
-    await toError.settle();
+    rerender(
+      <Page paramsKey="b" controls={shown(PLST_ID, "normal")} panel="none" />,
+    );
+    await toPanel.settle();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      fireEvent.click(screen.getByRole("button", { name: "probe refresh" }));
     });
     expect(router.refresh).toHaveBeenCalledOnce();
     rerender(<Page paramsKey="b2" controls={shown(PLST_ID, "normal")} />);
@@ -342,5 +421,45 @@ describe("the shared transition and focus (T12, AC-5, AC-12)", () => {
     expect(printingButton()).toBeInTheDocument();
     expect(document.activeElement).not.toBe(printingButton());
     expect(document.activeElement).not.toBe(finishButton());
+  });
+});
+
+describe("unsubmitted form edits on a switch (ADV-6, S2.3d13)", () => {
+  const priceField = () => screen.getByRole("textbox", { name: "Your price" });
+  const cardField = () => screen.getByRole("combobox", { name: "Card" });
+
+  test("a price typed but not submitted: the switch pushes the URL's price and the field shows it again", async () => {
+    const nav = pendingNavigation();
+    router.push.mockImplementation(() => nav.promise);
+    const { rerender } = render(
+      <Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} />,
+    );
+    fireEvent.change(priceField(), { target: { value: "70" } });
+    fireEvent.change(cardField(), { target: { value: "Esper Charm" } });
+    await choose(finishButton(), "Foil");
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      `?price=74.99&finish=foil&printing=${MH2_12_ID}`,
+      KEEP_SCROLL,
+    );
+    expect(priceField()).toHaveValue("74.99");
+    expect(cardField()).toHaveValue("Esper Sentinel");
+    url.search = `price=74.99&finish=foil&printing=${MH2_12_ID}`;
+    rerender(<Page paramsKey="b" controls={shown(MH2_12_ID, "foil")} />);
+    await nav.settle();
+    expect(priceField()).toHaveValue("74.99");
+    expect(cardField()).toHaveValue("Esper Sentinel");
+  });
+
+  test("an edit typed while the switch loads survives the landing (S2.4 ADV-8)", async () => {
+    const nav = pendingNavigation();
+    router.push.mockImplementation(() => nav.promise);
+    const { rerender } = render(
+      <Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} />,
+    );
+    await choose(finishButton(), "Foil");
+    fireEvent.change(priceField(), { target: { value: "80" } });
+    rerender(<Page paramsKey="b" controls={shown(MH2_12_ID, "foil")} />);
+    await nav.settle();
+    expect(priceField()).toHaveValue("80");
   });
 });
