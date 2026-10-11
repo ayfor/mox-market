@@ -298,9 +298,11 @@ function sourceStrings(file: string, source: string): Found[] {
  * entry names the module, the export key path, the exact string and exactly
  * the phrases it holds, so any other string, a changed string or a new phrase
  * still fails. The source pass, which has no key paths, matches the module
- * and the exact string. Empty at S1.3. S2.4 adds the landing tagline ("Should
- * you buy it?") when it moves the landing copy to
- * src/lib/copy/entry-points.ts. Josh can overturn (reword the tagline).
+ * and the exact string. Empty at S1.3. S2.4 (S2.4d5, S2.4d12) adds the
+ * question the landing page's ruby band asks, "Should you buy it?": a
+ * question to the user, not a prediction. One string, not its three display
+ * lines, because a literal that is exactly a phrase ("Should") fails
+ * copy-lock's T8 (S2.4 Deviation 1). Josh can overturn (reword the tagline).
  */
 interface LintAllowance {
   readonly module: string;
@@ -308,7 +310,14 @@ interface LintAllowance {
   readonly text: string;
   readonly phrases: readonly string[];
 }
-const LINT_ALLOWLIST: readonly LintAllowance[] = [];
+const LINT_ALLOWLIST: readonly LintAllowance[] = [
+  {
+    module: "copy/entry-points.ts",
+    path: "LANDING_COPY.question",
+    text: "Should you buy it?",
+    phrases: ["should"],
+  },
+];
 
 const allowedBy =
   (list: readonly LintAllowance[], module: string, source: boolean) =>
@@ -456,6 +465,18 @@ describe("no copy module holds a forbidden phrase (T6)", () => {
     expect(
       findingsIn(source, allowedBy(list, "copy/entry-points.ts", true)),
     ).toEqual(['copy/entry-points.ts:2: "should"']);
+  });
+
+  test("the allowlist holds exactly the landing question (S2.4d5, T15)", () => {
+    expect(LINT_ALLOWLIST).toEqual([
+      {
+        module: "copy/entry-points.ts",
+        path: "LANDING_COPY.question",
+        text: "Should you buy it?",
+        phrases: ["should"],
+      },
+    ]);
+    expect(Object.keys(COPY_MODULES)).toContain("copy/entry-points.ts");
   });
 
   test("every allowance matches a live export exactly, with exactly its phrases (ADV-4)", () => {

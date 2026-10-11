@@ -13,6 +13,7 @@ import { signalTiles } from "@/lib/evaluation/tiles";
 import { FALLBACK_NOTICE, fillTemplate } from "@/lib/recommendation/copy";
 import { FINISH_LABELS, UI_COPY } from "@/lib/recommendation/ui-copy";
 import { getCardImageUri } from "@/lib/scryfall";
+import { LookupMiss } from "./lookup-miss";
 import { RetryButton } from "./retry-button";
 
 /** Scryfall's normal image size, 488 × 680: the card's aspect. */
@@ -167,7 +168,10 @@ function OkView({ evaluation }: { evaluation: OkEvaluation }) {
   );
 }
 
-/** One evaluation's panel: the result, the error panel, or a message. */
+/**
+ * One evaluation's panel: the result, the error panel, a lookup miss
+ * (S2.4d9), or the validation message.
+ */
 export function ResultView({ evaluation }: { evaluation: Evaluation }) {
   switch (evaluation.status) {
     case "ok":
@@ -183,16 +187,9 @@ export function ResultView({ evaluation }: { evaluation: Evaluation }) {
           <RetryButton />
         </div>
       );
+    case "ambiguous":
     case "not_found":
-      return (
-        <div
-          className="mm-result mm-result-message"
-          data-status="not_found"
-          role="status"
-        >
-          <p className="mm-result-message-text">{UI_COPY.cardNotFound}</p>
-        </div>
-      );
+      return <LookupMiss status={evaluation.status} />;
     case "invalid":
       return (
         <div

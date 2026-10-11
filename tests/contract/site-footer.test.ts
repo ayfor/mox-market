@@ -62,7 +62,8 @@ describe("the false per-page footers are gone (T11)", () => {
     expect(SRC_FILES).toEqual(
       expect.arrayContaining([
         "src/app/evaluate/evaluate-client.tsx",
-        "src/app/sample/decision-analysis.tsx",
+        "src/app/landing-form.tsx",
+        "src/lib/copy/entry-points.ts",
         "src/app/evaluate/evaluate.css",
         "src/app/globals.css",
         "src/components/site-footer.tsx",
@@ -178,7 +179,7 @@ describe("footer styles live with the component, and nothing else reaches it (T1
         "src/app/tokens.css",
         "src/app/landing.css",
         "src/app/evaluate/evaluate.css",
-        "src/app/sample/styles.css",
+        "src/app/[card]/result.css",
         "src/components/nav-bar.css",
       ]),
     );
@@ -217,12 +218,12 @@ describe("footer styles live with the component, and nothing else reaches it (T1
     ],
     ["src/app/landing.css", "body > * { visibility: hidden }", /can match/],
     [
-      "src/app/sample/styles.css",
+      "src/app/[card]/result.css",
       ":last-of-type { display: none }",
       /can match/,
     ],
-    ["src/app/sample/styles.css", ".mm-app ~ * { display: none }", /can match/],
-    ["src/app/sample/styles.css", "main + * { display: none }", /can match/],
+    ["src/app/[card]/result.css", ".mm-app ~ * { display: none }", /can match/],
+    ["src/app/[card]/result.css", "main + * { display: none }", /can match/],
     ["src/app/globals.css", "body * { opacity: 0 }", /can match/],
     [
       "src/app/globals.css",
@@ -857,7 +858,6 @@ describe("footer CSS keeps the text visible and legible (T13)", () => {
       "src/app/[card]/result.css .mm-app::before",
       "src/app/evaluate/evaluate.css .mm-app::before",
       "src/app/landing.css .landing-page::before",
-      "src/app/sample/styles.css .mm-app::before",
     ]);
     for (const overlay of overlays) {
       expect(Number(overlay.z)).toBe(0);

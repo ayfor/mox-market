@@ -95,7 +95,7 @@ describe("featureOf", () => {
     ["src/lib/copy/legal.test.ts", "F2 · Live Evaluation"],
     ["src/components/site-footer.test.tsx", "F2 · Live Evaluation"],
     ["src/app/layout.test.tsx", "F2 · Live Evaluation"],
-    ["src/app/sample/page.test.tsx", "F2 · Live Evaluation"],
+    ["src/app/sample/route.test.ts", "F2 · Live Evaluation"],
     ["tests/contract/site-footer.test.ts", "F2 · Live Evaluation"],
     ["tests/helpers/attribution-spec.test.ts", "F2 · Live Evaluation"],
     ["src/lib/recommendation/params.test.ts", "F1 · Recommendation Engine"],
@@ -150,6 +150,17 @@ describe("featureOf", () => {
     ["src/app/api/cards/autocomplete/route.test.ts", "F2 · Live Evaluation"],
     ["src/components/card-combobox.test.tsx", "F2 · Live Evaluation"],
     ["src/components/entry-form.test.tsx", "F2 · Live Evaluation"],
+    // S2.4d14 (T21): this story's tests map to F2.
+    ["src/lib/result-href.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/entry-submit.test.ts", "F2 · Live Evaluation"],
+    ["src/app/landing-form.test.tsx", "F2 · Live Evaluation"],
+    ["src/app/page.test.tsx", "F2 · Live Evaluation"],
+    ["src/components/nav-bar.test.tsx", "F2 · Live Evaluation"],
+    ["src/app/evaluate/evaluate-client.test.tsx", "F2 · Live Evaluation"],
+    ["src/app/[card]/lookup-miss.test.tsx", "F2 · Live Evaluation"],
+    ["src/lib/evaluation/lookup-miss.test.ts", "F2 · Live Evaluation"],
+    ["src/lib/copy/entry-points.test.ts", "F2 · Live Evaluation"],
+    ["src/types/scryfall.test-d.ts", "F2 · Live Evaluation"],
   ])("%s → %s", (file, feature) => {
     expect(featureOf(file)).toBe(feature);
   });

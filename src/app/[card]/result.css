@@ -44,6 +44,12 @@
   margin-top: 32px;
 }
 
+/* The form and the slot share one Headless UI Field (S2.4d9); the wrapper
+   adds no box, so the layout is unchanged. */
+.mm-result-field {
+  display: contents;
+}
+
 /* ─────────── RESULT LAYOUT ─────────── */
 
 .mm-result {

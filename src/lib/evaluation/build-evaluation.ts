@@ -20,6 +20,7 @@ import {
   loadMarketSnapshot,
   type EvaluationLog,
 } from "./load-market-snapshot";
+import { classifyLookupError } from "./lookup-miss";
 
 /** A validated query from parseResultParams. */
 export interface EvaluationQuery {
@@ -31,7 +32,8 @@ export interface EvaluationQuery {
 /** Everything buildEvaluation reaches outside itself. */
 export interface EvaluationDeps {
   readonly scryfall: {
-    getCardByName(name: string, fuzzy: boolean): Promise<ScryfallCard | null>;
+    /** Throws on every miss and failure (S2.4d6); never resolves null. */
+    getCardByName(name: string, fuzzy: boolean): Promise<ScryfallCard>;
     getAllPrintings(card: ScryfallCard): Promise<ScryfallCard[]>;
   };
   readonly reader: PriceHistoryReader;
@@ -72,7 +74,9 @@ export type Evaluation =
     }
   /** Scryfall failed or timed out: the error panel, nothing partial (AC-4). */
   | { readonly status: "error" }
-  /** No card for the name (S2.4 splits ambiguous from unknown). */
+  /** Scryfall's 404 with type "ambiguous": nothing computed (S2.4 AC-6). */
+  | { readonly status: "ambiguous" }
+  /** Scryfall's 404 without that type: nothing computed (S2.4 AC-7). */
   | { readonly status: "not_found" }
   /** The engine rejected the input: the validation string (F2 Fields). */
   | { readonly status: "invalid" };
@@ -146,11 +150,27 @@ async function evaluate(
   query: EvaluationQuery,
   deps: EvaluationDeps,
 ): Promise<Evaluation> {
-  let named: ScryfallCard | null;
-  let printings: ScryfallCard[];
+  // The named lookup alone decides a miss (S2.4d8): Scryfall's 404 is an
+  // answer, so it is not logged and nothing else is called; every other
+  // throw is a failure and the error panel (AC-8).
+  let named: ScryfallCard;
   try {
     named = await deps.scryfall.getCardByName(query.card, true);
-    if (named === null) return { status: "not_found" };
+  } catch (error) {
+    const miss = classifyLookupError(error);
+    if (miss !== "unavailable") return { status: miss };
+    deps.log("scryfall_failed", error);
+    return { status: "error" };
+  }
+  if (named === null || typeof named !== "object") {
+    deps.log("scryfall_malformed", new TypeError("unusable lookup result"));
+    return { status: "error" };
+  }
+
+  // A prints failure of any kind, a 404 included, is the error panel: the
+  // name resolved, so it is never reported as not found.
+  let printings: ScryfallCard[];
+  try {
     printings = printingsOf(await deps.scryfall.getAllPrintings(named));
   } catch (error) {
     deps.log("scryfall_failed", error);

@@ -11,6 +11,10 @@
 // typed text is always the first option, and Enter on it, or Enter with no
 // option shown, keeps the text and submits the form. Enter on a suggestion
 // the user moved to fills it in, as before.
+//
+// After an ambiguous miss the form sets suggestOnFocus (S2.4 ADV-7): focusing
+// the field searches for the text already in it and opens the list, so "Pick
+// from the suggestions" has suggestions to pick from without a keystroke.
 import {
   AUTOCOMPLETE_DEBOUNCE_MS,
   AUTOCOMPLETE_MIN_CHARS,
@@ -32,6 +36,8 @@ export interface CardComboboxProps {
   /** The form rejected the card: aria-invalid, pointing at the message. */
   readonly invalid?: boolean;
   readonly errorMessageId?: string;
+  /** Search for the current text on focus and open the list (ADV-7). */
+  readonly suggestOnFocus?: boolean;
 }
 
 /** The route's names, or [] for anything that is not a string array. */
@@ -49,6 +55,7 @@ export function CardCombobox({
   autoFocus = false,
   invalid = false,
   errorMessageId,
+  suggestOnFocus = false,
 }: CardComboboxProps) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -98,6 +105,8 @@ export function CardCombobox({
   return (
     <Combobox
       value={value}
+      // Opens the list on focus; the search below fills it.
+      immediate={suggestOnFocus}
       onChange={(picked: string | null) => {
         if (picked === null) return;
         cancel();
@@ -121,6 +130,9 @@ export function CardCombobox({
             onChange={(event) => {
               onChange(event.target.value);
               search(event.target.value);
+            }}
+            onFocus={() => {
+              if (suggestOnFocus && suggestions.length === 0) search(value);
             }}
             onKeyDown={(event) => {
               // Runs before Headless UI's handler, which then closes the list

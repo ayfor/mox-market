@@ -1,11 +1,51 @@
+// The landing page (S2.4d4, S2.4d5): a server component, so it keeps its
+// metadata; the form is the client LandingForm, which navigates to the
+// result route (C1.06 = A). Every visible string comes from LANDING_COPY
+// (C1.54). No title of its own: the root layout's title.default is the
+// landing title, with one home.
+import { LANDING_COPY } from "@/lib/copy/entry-points";
 import type { Metadata } from "next";
+import { Fragment } from "react";
+import { LandingForm } from "./landing-form";
 import "./landing.css";
 
 export const metadata: Metadata = {
-  title: { absolute: "Mox Market — Should you buy it?" },
-  description:
-    "Enter a card and a price. We'll tell you. Single-card price evaluation against the 30-day market.",
+  description: LANDING_COPY.description,
 };
+
+/** The ruby band's designed line breaks, as words per line: "Should / you buy / it?". */
+const QUESTION_LINE_WORDS: readonly number[] = [1, 2, 1];
+
+/**
+ * `text` split into lines of `counts` words each; words past the counts join
+ * the last line, and a line with no words is dropped, so a reworded question
+ * still renders whole.
+ */
+function wordLines(text: string, counts: readonly number[]): string[] {
+  const words = text.split(" ").filter((word) => word !== "");
+  const lines: string[] = [];
+  let at = 0;
+  for (const count of counts) {
+    lines.push(words.slice(at, at + count).join(" "));
+    at += count;
+  }
+  if (at < words.length && lines.length > 0) {
+    lines[lines.length - 1] = [lines[lines.length - 1], ...words.slice(at)]
+      .filter((part) => part !== "")
+      .join(" ");
+  }
+  return lines.filter((line) => line !== "");
+}
+
+/** A designed multi-line heading: its lines with a <br /> between each. */
+function Lines({ lines }: { lines: readonly string[] }) {
+  return lines.map((line, index) => (
+    <Fragment key={line}>
+      {index > 0 && <br />}
+      {line}
+    </Fragment>
+  ));
+}
 
 export default function LandingPage() {
   return (
@@ -35,10 +75,10 @@ export default function LandingPage() {
           />
 
           <h1 className="landing-wordmark mox" id="landing-brand">
-            Mox
+            {LANDING_COPY.wordmarkTop}
           </h1>
           <p className="landing-wordmark market" aria-hidden="true">
-            Market
+            {LANDING_COPY.wordmarkBottom}
           </p>
 
           <div className="landing-dots-vert" aria-hidden="true">
@@ -47,7 +87,7 @@ export default function LandingPage() {
             <span className="dot" />
           </div>
 
-          <p className="landing-tagline">Market moves at instant speed.</p>
+          <p className="landing-tagline">{LANDING_COPY.tagline}</p>
 
           <div className="landing-dots-horiz" aria-hidden="true">
             <span className="dot" />
@@ -75,11 +115,9 @@ export default function LandingPage() {
           <div className="landing-ruby-band">
             <span className="landing-ruby-band-line" aria-hidden="true" />
             <h2 className="landing-ruby-question">
-              Should
-              <br />
-              you buy
-              <br />
-              it?
+              <Lines
+                lines={wordLines(LANDING_COPY.question, QUESTION_LINE_WORDS)}
+              />
             </h2>
             <span className="landing-ruby-band-dot" aria-hidden="true" />
           </div>
@@ -90,39 +128,10 @@ export default function LandingPage() {
             </span>
 
             <p className="landing-prompt" id="landing-prompt-heading">
-              Enter a
-              <br />
-              Card and
-              <br />
-              a Price.
-              <br />
-              We&rsquo;ll Tell
-              <br />
-              You.
+              <Lines lines={LANDING_COPY.prompt} />
             </p>
 
-            <form className="landing-form" action="/sample" method="get">
-              <input
-                className="landing-form-input"
-                type="text"
-                name="card"
-                placeholder="Card name..."
-                aria-label="Card name"
-                autoComplete="off"
-              />
-              <input
-                className="landing-form-input price"
-                type="text"
-                name="price"
-                placeholder="$ Price"
-                aria-label="Price"
-                inputMode="decimal"
-                autoComplete="off"
-              />
-              <button className="landing-form-submit" type="submit">
-                Evaluate
-              </button>
-            </form>
+            <LandingForm />
           </div>
         </section>
       </div>

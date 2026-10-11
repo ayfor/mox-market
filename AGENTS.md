@@ -112,7 +112,7 @@ Before setting `In Review`: build and tests green locally, and lint green once S
 
 Every C1 ruling is decided. The full table is in `docs/critiques/C1-2026-10-04-phase1-designs.md` and `docs/llm/WORKLOG.md`. The ones that shape code most:
 
-- **C1.06 = A:** results render at `/[card]?price=&finish=` as an async server component. `/` and `/evaluate` submit there (story S2.4), and `/sample` retires and redirects to the demo link.
+- **C1.06 = A:** results render at `/[card]?price=&finish=` as an async server component. `/` and `/evaluate` submit there, and `/sample` is retired: since S2.4 (2026-10-10) it is a 307 to the demo link, with no demo code left.
 - **C1.04 = A:** Phase 1 builds the MTGJson price-history pipeline (Design F0, stories S0.1–S0.3) before S2.1.
 - **C1.01 = A:** Prisma Migrate (see Hard limits).
 - **C1.08 = A:** the printing selector is its own story, S2.3. Etched stays hidden in Phase 1.
@@ -122,7 +122,7 @@ Every C1 ruling is decided. The full table is in `docs/critiques/C1-2026-10-04-p
 
 Josh's gate comments (2026-10-05) settled the last questions:
 
-- **`/sample`:** `/evaluate` is the entry form. `/sample` stays available for UI development until `/[card]` serves specific cards (S2.1); S2.4 retires it after that.
+- **`/sample`:** `/evaluate` is the entry form. `/sample` stayed available for UI development until `/[card]` served specific cards (S2.1); S2.4 retired it (2026-10-10), and it now only redirects to the demo link.
 - **Printings:** a printing is identified by its Scryfall card ID, `printing=<scryfall card id>`.
 - **Cron writes:** Vercel Cron only calls with GET, so a cron route may write on GET only when it fails closed on `CRON_SECRET`: 500 when unset, 401 on a missing or wrong `Authorization: Bearer` header, compared in constant time. Today that is only `/api/prices/sync-mtgjson` (S0.3). Every other GET handler and every page render still writes nothing.
 
@@ -130,7 +130,7 @@ Josh's gate comments (2026-10-05) settled the last questions:
 
 - App code on `main` is still PR #2 (2026-06-19); PR #3 added only this harness. The app has the landing page, `/evaluate` (a client component with hard-coded demo values whose submit 404s), the `/sample` static demo, and V1 API routes for watchlist price snapshots. There are no tests, no `.nvmrc` and no CI test step.
 - The Prisma schema has `TrackedCard` and `PriceSnapshot`: wide rows written by the V1 cron for watchlisted cards only. Arbitrary evaluated cards have no price history.
-- The landing form still posts to `/sample`.
+- *Update 2026-10-10 (S2.4):* both entry forms (`/` and `/evaluate`) now submit to `/[card]?price=&finish=`, and `/sample` is a 307 to the demo link `/Esper%20Sentinel?price=74.99`; its static demo is deleted. The bullets above and below about `/evaluate` and `/sample` describe 2026-10-04.
 - The attribution footer (ruling R6) is not on the site; it is a V2 ship-blocker. The per-page footers on `/evaluate` and `/sample` make false claims (CardKingdom, CardMarket, "every 4 hours").
 - **Production deploys are paused.** The Vercel project's Ignored Build Step skips every production build, so merges to `main` do not deploy and the live site serves the March 2026 V1 build. Production resumes only after S2.1, S2.2 and S2.4 are on `main` and Josh signs off; F0's bulk history load runs the same day (ruling C2-B.2 = A). Preview deploys build normally.
 - **Keep-awake:** the Supabase free project pauses after 7 idle days, and a paused store fails every Vercel deployment. Until S0.3's cron runs in production, Josh runs a read-only query on a 5-day calendar reminder (ruling C2-A.2 = A). If PR checks fail with "Resource provisioning failed", the database has paused: stop and tell Josh.

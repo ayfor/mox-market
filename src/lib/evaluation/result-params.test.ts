@@ -136,6 +136,18 @@ describe("parseResultParams (T2)", () => {
     expect(parseCardParam(".")).toBeNull();
   });
 
+  test("a lone surrogate is rejected; a valid pair passes (S2.4 ADV-2)", () => {
+    expect(parseCardParam("Esper\uD800")).toBeNull();
+    expect(parseCardParam("\uDC00Sentinel")).toBeNull();
+    expect(parseCardParam("Esper \uDE00\uD83D")).toBeNull();
+    expect(parseCardParam("Esper 😀")).toBe("Esper \u{1F600}");
+    // A segment that would decode to a surrogate is malformed UTF-8 to
+    // decodeURIComponent, so the route never sees one either.
+    expect(parseResultParams("Esper%ED%A0%80", { price: "1" })).toEqual({
+      kind: "not_found",
+    });
+  });
+
   test("the card is trimmed", () => {
     expect(
       ok(parseResultParams(enc("  Esper Sentinel "), { price: "1" })).card,

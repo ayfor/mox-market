@@ -1,22 +1,36 @@
 "use client";
 
-// The entry form (S2.1d5, S2.1d16; AC-9): card search and asking price.
-// Empty fields disable submit with the helper; a card that fails the
-// server's guard or an invalid price shows its message inline and never
-// navigates (ADV-6). A valid submit pushes the result route inside the shared
-// transition, so the result slot shows the skeleton at once (AC-8); a newer
-// submit while one is pending navigates again, and the latest wins (ADV-8).
-// /evaluate uses it today; S2.4 adds the landing form.
+// The entry form (S2.1d5, S2.1d16; AC-9): card search and asking price, on
+// /evaluate and above every result or lookup miss. Empty fields disable
+// submit with the helper; a card that fails the server's guard or an invalid
+// price shows its message inline and never navigates (ADV-6). A valid submit
+// sets the one-shot marker, then pushes resultHref(card, price) inside the
+// shared transition, so the result slot shows the skeleton at once (AC-8); a
+// newer submit while one is pending navigates again, and the latest wins
+// (ADV-8), and the superseded submit's marker is removed (S2.4 ADV-5). The
+// validator and the marker are shared with the landing form (S2.4d3). Under
+// the result page's ResultField it tells the slot when the card field no
+// longer holds the URL's card (a miss message hides, S2.4 ADV-4), and after
+// an ambiguous miss the card field offers suggestions on focus (S2.4 ADV-7).
 import { FORM_LABELS } from "@/lib/copy/result-labels";
 import {
-  normalisePrice,
-  parseCardParam,
-  parsePriceCents,
-} from "@/lib/evaluation/result-params";
+  checkEntry,
+  clearSubmitMarker,
+  isEntryEmpty,
+  markSubmit,
+} from "@/lib/entry-submit";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
-import { useId, useRef, useState, type FormEvent, type SVGProps } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type SVGProps,
+} from "react";
 import { CardCombobox } from "./card-combobox";
 import "./entry-form.css";
+import { useResultField } from "./result-field";
 import { useResultNavigation } from "./result-navigation";
 
 export interface EntryFormProps {
@@ -39,11 +53,6 @@ const ArrowRightIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-/** The result route for a card and a typed price; finish defaults to normal. */
-function resultHref(card: string, price: string): string {
-  return `/${encodeURIComponent(card.trim())}?price=${encodeURIComponent(normalisePrice(price))}`;
-}
-
 interface FieldValues {
   readonly card: string;
   readonly price: string;
@@ -56,6 +65,7 @@ export function EntryForm({
   autoFocus = false,
 }: EntryFormProps) {
   const navigation = useResultNavigation();
+  const { setCardStale, miss } = useResultField();
   const [card, setCard] = useState(initialCard);
   const [price, setPrice] = useState(initialPrice);
   const [error, setError] = useState(initialError);
@@ -104,25 +114,39 @@ export function EntryForm({
     });
   }
 
-  const empty = card.trim() === "" || price.trim() === "";
+  // Never builds an href during render, so no typed text can throw here (ADV-2).
+  const empty = isEntryEmpty(card, price);
+
+  // A miss message is about the URL's card: stale once the field holds
+  // another name, or once the form shows its own card error (ADV-4).
+  const cardStale = card !== initialCard || cardError;
+  useEffect(() => {
+    setCardStale(cardStale);
+  }, [cardStale, setCardStale]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (empty) return;
-    if (parseCardParam(card) === null) {
+    const entry = checkEntry(card, price);
+    if (entry.status === "empty") return;
+    if (entry.status === "bad_card") {
       setCardError(true);
       return;
     }
-    if (parsePriceCents(price) === null) {
+    if (entry.status === "bad_price") {
       setError(true);
       return;
     }
-    const href = resultHref(card, price);
+    const href = entry.href;
     // The same query again while it loads changes nothing; a different one
-    // supersedes it.
-    if (navigation.isPending && href === lastHref.current) return;
+    // supersedes it, and the superseded push never lands, so its marker goes
+    // (ADV-5). A storage failure there never blocks this push.
+    const superseded = navigation.isPending ? lastHref.current : null;
+    if (superseded === href) return;
+    if (superseded !== null) clearSubmitMarker(superseded);
     lastHref.current = href;
     setBaseline({ card, price });
+    // The marker first, so S5.1 finds it on the page the push lands on.
+    markSubmit(href);
     navigation.navigate(href);
   };
 
@@ -143,6 +167,7 @@ export function EntryForm({
             autoFocus={autoFocus}
             invalid={cardError}
             errorMessageId={cardErrorId}
+            suggestOnFocus={miss === "ambiguous"}
           />
         </div>
         <div className="mm-field mm-field--price">

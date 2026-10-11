@@ -1,5 +1,5 @@
 /* Mox Market — canonical navbar.
-   Shared across /sample, /evaluate, and any future pages.
+   Shared across /evaluate, the result route, and any future pages.
    Per the design grammar (`software--mox-market-design-language.md`):
    solid Ruby CTA on the right (action), glass-tinted Ruby active tab
    in the center (state indicator). */
@@ -14,9 +14,15 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.mm-nav > .mm-brand     { justify-self: start; }
-.mm-nav > .mm-nav-links { justify-self: center; }
-.mm-nav > .mm-nav-cta   { justify-self: end; }
+.mm-nav > .mm-brand {
+  justify-self: start;
+}
+.mm-nav > .mm-nav-links {
+  justify-self: center;
+}
+.mm-nav > .mm-nav-cta {
+  justify-self: end;
+}
 
 .mm-brand {
   display: flex;
@@ -26,7 +32,9 @@
   text-decoration: none;
   color: inherit;
 }
-.mm-brand img { display: block; }
+.mm-brand img {
+  display: block;
+}
 .mm-brand-text {
   font: 700 17px/1 var(--font-sans);
   letter-spacing: -0.02em;
@@ -56,9 +64,26 @@
   border-radius: 5px;
   border: 0;
   background: transparent;
-  transition: color 120ms ease, background 120ms ease;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
 }
-.mm-nav-link:hover { color: var(--fg-primary); }
+.mm-nav-link:hover {
+  color: var(--fg-primary);
+}
+
+/* Disabled "soon" tabs (C1.45 = B): muted, no hover change, not clickable. */
+.mm-nav-link--soon,
+.mm-nav-link--soon:hover {
+  color: rgba(254, 255, 254, 0.35);
+  cursor: default;
+  gap: 6px;
+}
+.mm-nav-soon {
+  font: 500 10px/1 var(--font-sans);
+  letter-spacing: 0.02em;
+  color: rgba(254, 255, 254, 0.35);
+}
 
 /* Active tab — Ruby-tinted glass (state indicator) */
 .mm-nav-link.on,
@@ -87,8 +112,13 @@
     border-color 120ms ease,
     transform 120ms ease;
 }
-.mm-nav-cta:hover  { background: #b8003c; border-color: #b8003c; }
-.mm-nav-cta:active { transform: translateY(1px); }
+.mm-nav-cta:hover {
+  background: #b8003c;
+  border-color: #b8003c;
+}
+.mm-nav-cta:active {
+  transform: translateY(1px);
+}
 
 .mm-nav-cta-ico {
   display: inline-flex;
@@ -98,4 +128,8 @@
   height: 14px;
   color: rgba(255, 255, 255, 0.9);
 }
-.mm-nav-cta-ico svg { width: 14px; height: 14px; display: block; }
+.mm-nav-cta-ico svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
