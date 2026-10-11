@@ -11,7 +11,7 @@ import {
 } from "@/lib/__fixtures__/esper-sentinel-prints";
 import type { EvaluationDeps } from "@/lib/evaluation/build-evaluation";
 import {
-  defaultHistoryReader,
+  emptyHistoryReader,
   type PriceHistoryReader,
 } from "@/lib/evaluation/history-reader";
 import { parseResultParams } from "@/lib/evaluation/result-params";
@@ -214,7 +214,8 @@ describe("every lookup failure resolves to the error panel (T13, AC-8)", () => {
         query: { card: "jace", askingPriceCents: 500, finish: "normal" },
         deps: {
           scryfall: { getCardByName, getAllPrintings },
-          reader: defaultHistoryReader,
+          // S0.1d9: the empty reader; the default now reaches Postgres.
+          reader: emptyHistoryReader,
           now: () => NOW,
           log,
         },
@@ -265,7 +266,7 @@ describe("the demo link serves a panel, whatever the market says (T18, AC-13; C1
     ["a market well above the ask", market("90.00")],
     ["a market at the ask", market("74.99")],
     ["a market well below the ask", market("60.00")],
-    ["no history (the empty reader, today's demo)", "empty"],
+    ["no history (the empty reader, the demo until S0.2's ingest)", "empty"],
   ];
 
   test("the demo query is Esper Sentinel at 7499 cents, normal", () => {
@@ -290,7 +291,7 @@ describe("the demo link serves a panel, whatever the market says (T18, AC-13; C1
         getAllPrintings: async () =>
           scenario === "empty" ? [...ESPER_SENTINEL_PRINTS] : scenario.prints,
       },
-      reader: scenario === "empty" ? defaultHistoryReader : scenario.reader,
+      reader: scenario === "empty" ? emptyHistoryReader : scenario.reader,
       now: () => NOW,
       log: vi.fn(),
     };

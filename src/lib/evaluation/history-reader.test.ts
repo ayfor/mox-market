@@ -1,6 +1,7 @@
 // T5 (AC-13; S2.1d2 pivot): the empty reader returns no rows and null
-// freshness, and it is the default until S0.1 repoints it (S0.1 flips the
-// last assertion to its reader in its PR).
+// freshness. S0.1 (T8, S0.1d9) repointed the default at F0's reader, so the
+// last assertion now names it; the empty reader stays for tests.
+import { prismaHistoryReader } from "@/lib/price-history";
 import { describe, expect, test } from "vitest";
 import { defaultHistoryReader, emptyHistoryReader } from "./history-reader";
 
@@ -47,7 +48,8 @@ describe("emptyHistoryReader (T5)", () => {
     expect(Object.isFrozen(emptyHistoryReader)).toBe(true);
   });
 
-  test("defaultHistoryReader is emptyHistoryReader until S0.1", () => {
-    expect(defaultHistoryReader).toBe(emptyHistoryReader);
+  test("defaultHistoryReader is F0's prismaHistoryReader, not the empty one (S0.1 T8)", () => {
+    expect(defaultHistoryReader).toBe(prismaHistoryReader);
+    expect(defaultHistoryReader).not.toBe(emptyHistoryReader);
   });
 });

@@ -15,7 +15,8 @@ const url =
   process.env["DATABASE_URL"];
 
 // One object feeds both the guard and Prisma, so a shadowDatabaseUrl added here
-// later (S0.1 drift checks) is checked too (ADV.2).
+// later is checked too (ADV.2). S0.1 needed none: its drift check diffs a
+// deployed scratch database against the schema (S0.1d4).
 const datasource: { url?: string; shadowDatabaseUrl?: string } = { url };
 
 // AC-13: refuse commands that reach a Supabase host unless ALLOW_PROD_MIGRATE=1.

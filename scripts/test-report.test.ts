@@ -166,6 +166,15 @@ describe("featureOf", () => {
     ["src/components/printing-select.test.tsx", "F2 · Live Evaluation"],
     ["src/components/finish-select.test.tsx", "F2 · Live Evaluation"],
     ["src/components/selection-controls.test.tsx", "F2 · Live Evaluation"],
+    // S0.1d18 (T16): this story's test files map to F0, ahead of F1's
+    // prisma/ and tests/helpers/ patterns; its scratch-db unit test is F1's.
+    ["prisma/price-history-migration.test.ts", "F0 · Price History"],
+    ["prisma/price-history-migration.int.test.ts", "F0 · Price History"],
+    ["src/lib/price-history.test.ts", "F0 · Price History"],
+    ["src/lib/price-history.int.test.ts", "F0 · Price History"],
+    ["src/lib/price-history.test-d.ts", "F0 · Price History"],
+    ["tests/helpers/price-history-guard.int.test.ts", "F0 · Price History"],
+    ["tests/helpers/scratch-db.test.ts", "F1 · Recommendation Engine"],
   ])("%s → %s", (file, feature) => {
     expect(featureOf(file)).toBe(feature);
   });
@@ -194,6 +203,25 @@ describe("featureOf", () => {
       "src/components/printing-select.test.tsx",
       "src/components/finish-select.test.tsx",
       "src/components/selection-controls.test.tsx",
+    ]) {
+      expect(report).toContain(file);
+    }
+  });
+
+  test("the committed docs/test-report.md lists S0.1's test files and has no Unmapped row (S0.1 T16)", () => {
+    const report = readFileSync(
+      path.join(__dirname, "..", "docs", "test-report.md"),
+      "utf8",
+    );
+    expect(report).not.toMatch(/\|\s*Unmapped\s*\|/);
+    for (const file of [
+      "prisma/price-history-migration.test.ts",
+      "prisma/price-history-migration.int.test.ts",
+      "src/lib/price-history.test.ts",
+      "src/lib/price-history.int.test.ts",
+      "src/lib/price-history.test-d.ts",
+      "tests/helpers/price-history-guard.int.test.ts",
+      "tests/helpers/scratch-db.test.ts",
     ]) {
       expect(report).toContain(file);
     }

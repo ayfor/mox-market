@@ -35,3 +35,73 @@ model PriceSnapshot {
   @@index([cardId, timestamp])
   @@map("price_snapshots")
 }
+
+// F0 Price History Pipeline (S0.1, 0001_price_history). Addressed by
+// (scryfall_id, finish); never merged across printings or finishes. The
+// migration hand-adds CHECK (price_cents > 0) and price_history's autovacuum
+// settings, which this schema cannot express.
+
+enum CardFinish {
+  normal
+  foil
+  etched
+
+  @@map("card_finish")
+}
+
+enum PriceSyncTrigger {
+  cron
+  bulk
+  identifiers
+
+  @@map("price_sync_trigger")
+}
+
+enum PriceSyncStatus {
+  running
+  ok
+  source_stale
+  budget_stop
+  error
+
+  @@map("price_sync_status")
+}
+
+model PriceHistory {
+  scryfallId String     @map("scryfall_id") @db.Uuid
+  finish     CardFinish
+  date       DateTime   @db.Date
+  priceCents Int        @map("price_cents")
+  syncedAt   DateTime   @default(now()) @map("synced_at") @db.Timestamptz(3)
+
+  @@id([scryfallId, finish, date])
+  @@map("price_history")
+}
+
+model MtgjsonIdentifier {
+  mtgjsonUuid String   @id @map("mtgjson_uuid") @db.Uuid
+  scryfallId  String   @map("scryfall_id") @db.Uuid
+  side        String?
+  edhrecRank  Int?     @map("edhrec_rank")
+  loadedAt    DateTime @default(now()) @map("loaded_at") @db.Timestamptz(3)
+
+  @@map("mtgjson_identifiers")
+}
+
+model PriceSyncRun {
+  id            Int              @id @default(autoincrement())
+  trigger       PriceSyncTrigger
+  status        PriceSyncStatus
+  startedAt     DateTime         @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt    DateTime?        @map("finished_at") @db.Timestamptz(3)
+  sourceDate    DateTime?        @map("source_date") @db.Date
+  sourceVersion String?          @map("source_version")
+  rowsWritten   Int              @default(0) @map("rows_written")
+  rowsPruned    Int              @default(0) @map("rows_pruned")
+  unmappedUuids Int              @default(0) @map("unmapped_uuids")
+  dbBytes       BigInt?          @map("db_bytes")
+  error         String?
+
+  @@index([status, finishedAt])
+  @@map("price_sync_runs")
+}

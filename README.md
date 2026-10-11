@@ -48,7 +48,7 @@ docker compose up -d --wait db
 npx prisma migrate deploy
 ```
 
-This starts Postgres 16 and applies every migration in `prisma/migrations/` (today `0000_baseline`: the V1 `tracked_cards` and `price_snapshots` tables). There is no seed step yet.
+This starts Postgres 16 and applies every migration in `prisma/migrations/`: `0000_baseline` (the V1 `tracked_cards` and `price_snapshots` tables) and `0001_price_history` (F0's `price_history`, `mtgjson_identifiers` and `price_sync_runs` tables and their enums). There is no seed step yet, so the price-history tables stay empty and every card reads `insufficient_data` until S0.2's ingest.
 
 ### Run
 
@@ -84,19 +84,28 @@ npx prisma migrate deploy
 
 Agents and CI only ever migrate a local database. `prisma.config.ts` runs a guard (`prisma/migrate-guard.ts`) that refuses every Prisma command that can connect when any host it would reach is `*.supabase.co` or `*.pooler.supabase.com`, unless `ALLOW_PROD_MIGRATE=1` is set. It checks the URL's hostname, any `?host=` parameter (which overrides the hostname), every `--url` value and, for commands that use one, the shadow database URL; a URL with `hostaddr=`, an empty host, or a `?host=` naming anything but `localhost`, `127.0.0.1` or a socket directory is refused outright, flag or not (put a remote host in the URL itself). The flag is set **inline** for one command and **never stored in any `.env*` file**; a copy in `.env` is ignored. The living ER diagram is `docs/architecture/erd.md`.
 
-### Production (Josh only, once, after the S1.1 merge)
+### Production (Josh only, after the S0.1 merge, before production deploys resume)
 
-Production's schema was created before Prisma Migrate owned it, so it is baselined once, before S0.1 applies `0001_price_history`. Run from Josh's laptop; the URL is typed at a hidden prompt, so it never reaches shell history or any `.env*` file:
+Production's schema was created before Prisma Migrate owned it, so it is baselined once (S1.1's `0000_baseline`), and then `0001_price_history` is applied. `0001` is additive: it creates F0's three tables and their enums and leaves V1's tables untouched, so it needs no `pg_dump`. Josh runs the four steps below in order, after the S0.1 merge and before production deploys resume. Run from Josh's laptop; the URL is typed at a hidden prompt, so it never reaches shell history or any `.env*` file, and `ALLOW_PROD_MIGRATE=1` is set inline on each command:
 
 ```bash
 read -rs 'PROD_DB_URL?Production session-pooler URL (host *.pooler.supabase.com, port 5432): '; echo
-POSTGRES_URL_NON_POOLING="$PROD_DB_URL" ALLOW_PROD_MIGRATE=1 npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma
+git show 9a2837b:prisma/schema.prisma > "${TMPDIR:-/tmp}/schema-0000.prisma"   # the baseline-era schema (S1.1 merge)
+# (a) Read-only: production against the baseline-era schema.
+POSTGRES_URL_NON_POOLING="$PROD_DB_URL" ALLOW_PROD_MIGRATE=1 npx prisma migrate diff --from-config-datasource --to-schema "${TMPDIR:-/tmp}/schema-0000.prisma"
 # expect "No difference detected." Any difference: stop, resolve nothing, ask Bitey.
+# (b) Record the baseline as applied (no DDL).
 POSTGRES_URL_NON_POOLING="$PROD_DB_URL" ALLOW_PROD_MIGRATE=1 npx prisma migrate resolve --applied 0000_baseline
+# (c) Apply 0001_price_history (additive).
+POSTGRES_URL_NON_POOLING="$PROD_DB_URL" ALLOW_PROD_MIGRATE=1 npx prisma migrate deploy
+# (d) Confirm: both migrations applied, and production matches the schema.
+POSTGRES_URL_NON_POOLING="$PROD_DB_URL" ALLOW_PROD_MIGRATE=1 npx prisma migrate status
+POSTGRES_URL_NON_POOLING="$PROD_DB_URL" ALLOW_PROD_MIGRATE=1 npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma
+# expect "No difference detected."
 unset PROD_DB_URL
 ```
 
-Use the session-pooler string (port 5432). Never use the transaction pooler (6543), and use the direct `db.<ref>.supabase.co` host only on an IPv6 network. `resolve` runs no DDL: it creates `_prisma_migrations` and records one row. To undo it, delete that row (`DELETE FROM _prisma_migrations WHERE migration_name = '0000_baseline'`).
+Step (a) compares against the baseline-era schema because `prisma/schema.prisma` now also holds F0's tables, which production lacks until step (c). Use the session-pooler string (port 5432). Never use the transaction pooler (6543), and use the direct `db.<ref>.supabase.co` host only on an IPv6 network. `resolve` runs no DDL: it creates `_prisma_migrations` and records one row. To undo it before step (c), delete that row (`DELETE FROM _prisma_migrations WHERE migration_name = '0000_baseline'`). Until step (c) runs, preview deployments, which share the production database, show "Price history temporarily unavailable" on every result.
 
 ## Stack
 
