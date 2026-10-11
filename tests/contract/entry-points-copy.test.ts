@@ -23,6 +23,12 @@ const STORY_TSX = [
   // ADV-4, ADV-7: the field wrapper moved out of lookup-miss.tsx.
   "src/components/result-field.tsx",
   "src/components/card-combobox.tsx",
+  // S2.3 (T16; C1.54): the selectors and the skeleton they share a row with.
+  "src/components/printing-select.tsx",
+  "src/components/finish-select.tsx",
+  "src/components/selection-controls.tsx",
+  "src/components/select-chevron.tsx",
+  "src/app/[card]/panel-skeleton.tsx",
 ];
 
 /** Attributes a user reads or hears. */

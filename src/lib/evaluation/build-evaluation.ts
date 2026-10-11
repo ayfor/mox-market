@@ -4,7 +4,12 @@ import "server-only";
 // printings, market snapshot and the engine, with Scryfall, the history
 // reader, the clock and the log injectable. Never throws: every failure is a
 // status the page renders (F2 Fields: never a 500).
-import { selectDefaultPrinting } from "@/lib/printings";
+import {
+  offeredFinishes,
+  selectablePrintings,
+  selectDefaultPrinting,
+  withOfferedPrices,
+} from "@/lib/printings";
 import { computeRecommendation } from "@/lib/recommendation/engine";
 import { InvalidRecommendationInputError } from "@/lib/recommendation/errors";
 import type { Finish, Recommendation } from "@/lib/recommendation/types";
@@ -27,6 +32,11 @@ export interface EvaluationQuery {
   readonly card: string;
   readonly askingPriceCents: number;
   readonly finish: ShownFinish;
+  /**
+   * The URL's printing, a lower-case Scryfall id (S2.3d2); null or absent is
+   * the default printing. An id PrintingSelect does not offer is ignored.
+   */
+  readonly printing?: string | null;
 }
 
 /** Everything buildEvaluation reaches outside itself. */
@@ -60,10 +70,31 @@ export type EvaluatedPrinting = Pick<
   | "card_faces"
 >;
 
+/** One PrintingSelect option: what its label shows and the finishes it offers. */
+export interface PrintingOption {
+  readonly id: string;
+  readonly set: string;
+  readonly set_name: string;
+  readonly collector_number: string;
+  /** offeredFinishes of the printing: normal before foil, never etched. */
+  readonly finishes: readonly ShownFinish[];
+}
+
+/** What the selectors show for an ok evaluation (S2.3d4). */
+export interface EvaluationSelection {
+  /** selectablePrintings of the one print list, in its order. */
+  readonly options: readonly PrintingOption[];
+  /** The evaluated printing's id; not among the options only for the named-card fallback. */
+  readonly printingId: string;
+  /** The evaluated printing's offered finishes (FinishSelect's options). */
+  readonly offeredFinishes: readonly ShownFinish[];
+}
+
 export type Evaluation =
   | {
       readonly status: "ok";
       readonly printing: EvaluatedPrinting;
+      readonly selection: EvaluationSelection;
       readonly requestedFinish: ShownFinish;
       readonly appliedFinish: Finish;
       readonly recommendation: Recommendation;
@@ -129,6 +160,17 @@ function pickPrinting(
   );
 }
 
+/** A selectable printing as a PrintingSelect option. */
+function toOption(printing: ScryfallCard): PrintingOption {
+  return {
+    id: printing.id,
+    set: printing.set,
+    set_name: printing.set_name,
+    collector_number: printing.collector_number,
+    finishes: offeredFinishes(printing),
+  };
+}
+
 /**
  * Lookup, printings, snapshot and recommendation for one query. Never
  * throws: Scryfall's JSON is unvalidated (request() casts it), so the whole
@@ -177,14 +219,23 @@ async function evaluate(
     return { status: "error" };
   }
 
-  const printing = pickPrinting(printings, query.finish, named);
+  // One print list serves the default and the selector (S2.3d4, AC-3). A
+  // URL printing is evaluated only when PrintingSelect offers it, so an
+  // unknown, digital or etched-only id reaches neither Scryfall nor the
+  // reader (AC-9); otherwise the default is picked as before.
+  const selectable = selectablePrintings(printings);
+  const printing =
+    selectable.find((option) => option.id === query.printing) ??
+    pickPrinting(printings, query.finish, named);
   if (!isEvaluablePrinting(printing)) {
     deps.log("scryfall_malformed", new TypeError("unusable card object"));
     return { status: "error" };
   }
   const now = deps.now();
+  // A price counts only for a finish the printing offers, so the C1.21
+  // fallback follows the finishes FinishSelect shows (AC-9, ADV-3).
   const snapshot = await loadMarketSnapshot({
-    printing,
+    printing: withOfferedPrices(printing),
     requestedFinish: query.finish,
     reader: deps.reader,
     now,
@@ -212,6 +263,11 @@ async function evaluate(
   return {
     status: "ok",
     printing,
+    selection: {
+      options: selectable.map(toOption),
+      printingId: printing.id,
+      offeredFinishes: offeredFinishes(printing),
+    },
     requestedFinish: query.finish,
     appliedFinish: snapshot.market.appliedFinish,
     recommendation,

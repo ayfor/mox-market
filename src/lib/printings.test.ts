@@ -1,16 +1,31 @@
 // T3 (AC-10; F2 §Default printing; C1.26, C1.46 = A): selectDefaultPrinting
 // applies F2's predicate verbatim, and scryfallPriceCents converts once.
+// S2.3 adds T2 (offeredFinishes, AC-4) and T3 (selectablePrintings, AC-1,
+// AC-2), and its adversarial review adds withOfferedPrices (ADV-3) and the
+// offered-option fields (ADV-5).
 import type { ScryfallCard } from "@/types/scryfall";
 import { describe, expect, test } from "vitest";
 import {
   ESPER_SENTINEL_PRINTS,
+  etchedOnlyPrinting,
+  H2R_4_ID,
+  J21_ID,
   MH2_12_ID,
+  MH2_328_ID,
+  PLST_ID,
+  PMH2_12S_ID,
   scryfallCard,
+  SLD_2123_ID,
+  WC21_ID,
 } from "./__fixtures__/esper-sentinel-prints";
 import {
+  compareCollectorNumbers,
+  offeredFinishes,
   priceCentsFor,
   scryfallPriceCents,
+  selectablePrintings,
   selectDefaultPrinting,
+  withOfferedPrices,
 } from "./printings";
 
 const prices = (usd: string | null, usd_foil: string | null) => ({
@@ -193,5 +208,299 @@ describe("scryfallPriceCents (T3)", () => {
     ["0.004"],
   ])("%j → null", (price) => {
     expect(scryfallPriceCents(price)).toBeNull();
+  });
+});
+
+// --- S2.3: offeredFinishes and selectablePrintings ---------------------------
+describe("offeredFinishes (T2, AC-4)", () => {
+  test.each<[string, unknown, string[]]>([
+    [
+      "nonfoil, foil, etched",
+      ["nonfoil", "foil", "etched"],
+      ["normal", "foil"],
+    ],
+    ["foil, nonfoil (normal first)", ["foil", "nonfoil"], ["normal", "foil"]],
+    ["foil", ["foil"], ["foil"]],
+    ["nonfoil", ["nonfoil"], ["normal"]],
+    ["etched", ["etched"], []],
+    ["empty", [], []],
+    ["missing", undefined, []],
+    ["not an array", "nonfoil,foil", []],
+    ["an object", { 0: "foil", length: 1 }, []],
+    ["non-string entries", [1, null, { foil: true }, ["foil"]], []],
+    ["glossy (not a shown finish)", ["glossy"], []],
+  ])("%s → %j", (_name, finishes, expected) => {
+    const offered = offeredFinishes({
+      finishes: finishes as ScryfallCard["finishes"],
+    });
+    expect(offered).toEqual(expected);
+    expect(offered).not.toContain("etched");
+  });
+});
+
+describe("compareCollectorNumbers (T3, AC-2)", () => {
+  test("numeric-aware without ICU: 4 < 12 < 12s < 12★ < 328, 9 < 10", () => {
+    const sorted = ["328", "12★", "12s", "12", "4", "10", "9"].sort(
+      compareCollectorNumbers,
+    );
+    expect(sorted).toEqual(["4", "9", "10", "12", "12s", "12★", "328"]);
+  });
+
+  test("numbers sort before text-led numbers; leading zeros compare as the number", () => {
+    expect(["MH2-12", "2", "★1"].sort(compareCollectorNumbers)).toEqual([
+      "2",
+      "MH2-12",
+      "★1",
+    ]);
+    expect(compareCollectorNumbers("012", "12")).not.toBe(0);
+    expect(compareCollectorNumbers("012", "13")).toBeLessThan(0);
+    expect(compareCollectorNumbers("12", "12")).toBe(0);
+  });
+
+  test("very long digit runs compare by value, not by Number precision", () => {
+    expect(
+      compareCollectorNumbers("90071992547409931", "90071992547409930"),
+    ).toBeGreaterThan(0);
+  });
+});
+
+describe("selectablePrintings on the Esper Sentinel fixture (T3, AC-1, AC-2)", () => {
+  const EXPECTED_ORDER = [
+    SLD_2123_ID, // 2025-03-03
+    PLST_ID, // 2022-03-01
+    WC21_ID, // 2021-12-01
+    H2R_4_ID, // 2021-06-18 #4
+    MH2_12_ID, // 2021-06-18 #12
+    PMH2_12S_ID, // 2021-06-18 #12s
+    MH2_328_ID, // 2021-06-18 #328
+  ];
+
+  test("exactly the seven paper printings, promo, box and memorabilia included; j21 (digital) absent", () => {
+    const ids = selectablePrintings(ESPER_SENTINEL_PRINTS).map((p) => p.id);
+    expect(ids).toEqual(EXPECTED_ORDER);
+    expect(ids).not.toContain(J21_ID);
+    expect(new Set(ids).size).toBe(7);
+  });
+
+  test("mh2 #12 and mh2 #328 are separate entries on the same released_at", () => {
+    const options = selectablePrintings(ESPER_SENTINEL_PRINTS);
+    const mh2 = options.filter((p) => p.set === "mh2");
+    expect(mh2.map((p) => p.collector_number)).toEqual(["12", "328"]);
+    expect(new Set(mh2.map((p) => p.released_at)).size).toBe(1);
+  });
+
+  test("an etched-only printing and one with digital undefined are absent", () => {
+    const undefinedDigital = scryfallCard({
+      id: "aaaaaaaa-0000-4000-8000-000000000001",
+      digital: undefined as unknown as boolean,
+    });
+    const ids = selectablePrintings([
+      ...ESPER_SENTINEL_PRINTS,
+      etchedOnlyPrinting(),
+      undefinedDigital,
+    ]).map((p) => p.id);
+    expect(ids).toEqual(EXPECTED_ORDER);
+  });
+
+  test("a printing with nonfoil, foil and etched is listed", () => {
+    const triple = scryfallCard({
+      id: "aaaaaaaa-0000-4000-8000-000000000002",
+      released_at: "2026-01-01",
+      finishes: ["nonfoil", "foil", "etched"],
+    });
+    expect(selectablePrintings([triple])[0]?.id).toBe(triple.id);
+  });
+
+  test("ties: released_at newest first, then collector number, then id", () => {
+    const at = (id: string, released_at: string, collector_number: string) =>
+      scryfallCard({ id, released_at, collector_number });
+    const list = [
+      at("b0000000-0000-4000-8000-000000000000", "2020-01-01", "12"),
+      at("a0000000-0000-4000-8000-000000000000", "2020-01-01", "12"),
+      at("c0000000-0000-4000-8000-000000000000", "2020-01-01", "9"),
+      at("d0000000-0000-4000-8000-000000000000", "2021-01-01", "100"),
+      at("e0000000-0000-4000-8000-000000000000", "2020-01-01", "12★"),
+    ];
+    expect(selectablePrintings(list).map((p) => p.id[0])).toEqual([
+      "d",
+      "c",
+      "a",
+      "b",
+      "e",
+    ]);
+  });
+
+  test("an id repeated across pages appears once, the first kept", () => {
+    const first = ESPER_SENTINEL_PRINTS.find((p) => p.id === MH2_12_ID)!;
+    const repeat = { ...first, set_name: "A later copy" };
+    const options = selectablePrintings([
+      ...ESPER_SENTINEL_PRINTS,
+      repeat,
+    ]).filter((p) => p.id === MH2_12_ID);
+    expect(options).toHaveLength(1);
+    expect(options[0]).toBe(first);
+  });
+
+  test.each(["id", "set", "set_name", "collector_number", "released_at"])(
+    "an entry without a string %s is left out",
+    (field) => {
+      const broken = {
+        ...scryfallCard({ id: "aaaaaaaa-0000-4000-8000-000000000003" }),
+        [field]: 12,
+      } as unknown as ScryfallCard;
+      const missing = {
+        ...scryfallCard({ id: "aaaaaaaa-0000-4000-8000-000000000004" }),
+        [field]: undefined,
+      } as unknown as ScryfallCard;
+      const ids = selectablePrintings([
+        ...ESPER_SENTINEL_PRINTS,
+        broken,
+        missing,
+      ]).map((p) => p.id);
+      expect(ids).toEqual(EXPECTED_ORDER);
+    },
+  );
+
+  test("null and non-object entries are skipped, never thrown on", () => {
+    const list = [
+      null,
+      "x",
+      ...ESPER_SENTINEL_PRINTS,
+    ] as unknown as ScryfallCard[];
+    expect(selectablePrintings(list).map((p) => p.id)).toEqual(EXPECTED_ORDER);
+  });
+
+  test("the input array is not mutated", () => {
+    const input = [...ESPER_SENTINEL_PRINTS];
+    const before = [...input];
+    selectablePrintings(input);
+    expect(input).toEqual(before);
+    expect(input.map((p) => p.id)).toEqual(before.map((p) => p.id));
+  });
+
+  test("50 seeded shuffles of the input give the same output", () => {
+    let seed = 20261010;
+    const random = () => {
+      // A 32-bit LCG: deterministic, no Math.random.
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 2 ** 32;
+    };
+    const expected = selectablePrintings(ESPER_SENTINEL_PRINTS);
+    for (let run = 0; run < 50; run += 1) {
+      const shuffled = [...ESPER_SENTINEL_PRINTS];
+      for (let i = shuffled.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      expect(selectablePrintings(shuffled)).toEqual(expected);
+    }
+  });
+
+  test("selectDefaultPrinting is unchanged: the default is still mh2 #12, not the newest option", () => {
+    expect(selectDefaultPrinting(ESPER_SENTINEL_PRINTS, "normal")?.id).toBe(
+      MH2_12_ID,
+    );
+    expect(selectablePrintings(ESPER_SENTINEL_PRINTS)[0].id).toBe(SLD_2123_ID);
+  });
+});
+
+describe("an offered option evaluates to itself (ADV-5)", () => {
+  const EXPECTED = selectablePrintings(ESPER_SENTINEL_PRINTS).map((p) => p.id);
+
+  test("an entry without a string name is left out", () => {
+    const nameless = {
+      ...scryfallCard({
+        id: "cccccccc-0000-4000-8000-000000000001",
+        released_at: "2026-01-01",
+      }),
+      name: undefined,
+    } as unknown as ScryfallCard;
+    const numbered = {
+      ...scryfallCard({
+        id: "cccccccc-0000-4000-8000-000000000002",
+        released_at: "2026-01-01",
+      }),
+      name: 7,
+    } as unknown as ScryfallCard;
+    expect(
+      selectablePrintings([...ESPER_SENTINEL_PRINTS, nameless, numbered]).map(
+        (p) => p.id,
+      ),
+    ).toEqual(EXPECTED);
+  });
+
+  test.each([
+    ["upper-case", "CCCCCCCC-0000-4000-8000-000000000003"],
+    ["mixed-case", "cccccccc-0000-4000-8000-00000000000A"],
+    ["not a UUID", "abc"],
+    ["no dashes", "cccccccc000040008000000000000004"],
+    ["braced", "{cccccccc-0000-4000-8000-000000000005}"],
+    ["empty", ""],
+  ])("an entry whose id is %s is left out", (_name, id) => {
+    const odd = scryfallCard({ id, released_at: "2026-01-01" });
+    expect(
+      selectablePrintings([...ESPER_SENTINEL_PRINTS, odd]).map((p) => p.id),
+    ).toEqual(EXPECTED);
+  });
+});
+
+describe("withOfferedPrices (ADV-3, AC-9)", () => {
+  test("a price for a finish the printing does not offer is dropped", () => {
+    const normalOnly = scryfallCard({
+      finishes: ["nonfoil"],
+      prices: prices("64.50", "50.00"),
+    });
+    expect(withOfferedPrices(normalOnly).prices).toEqual(prices("64.50", null));
+    const foilOnly = scryfallCard({
+      finishes: ["foil"],
+      prices: prices("5.00", "41.00"),
+    });
+    expect(withOfferedPrices(foilOnly).prices).toEqual(prices(null, "41.00"));
+  });
+
+  test("both finishes offered: the prices are kept as they are", () => {
+    const both = scryfallCard({ prices: prices("59.17", "76.47") });
+    expect(withOfferedPrices(both).prices).toEqual(prices("59.17", "76.47"));
+    expect(priceCentsFor(withOfferedPrices(both), "foil")).toBe(7647);
+  });
+
+  test("etched only, or no usable finishes: no normal or foil price", () => {
+    expect(
+      withOfferedPrices(etchedOnlyPrinting({ prices: prices("3.00", "4.00") }))
+        .prices,
+    ).toMatchObject({ usd: null, usd_foil: null });
+    const broken = {
+      ...scryfallCard({ prices: prices("3.00", "4.00") }),
+      finishes: "nonfoil",
+    } as unknown as ScryfallCard;
+    expect(withOfferedPrices(broken).prices).toMatchObject({
+      usd: null,
+      usd_foil: null,
+    });
+  });
+
+  test("malformed prices never throw: nothing is priced", () => {
+    for (const bad of [null, undefined, "12.00", 12]) {
+      const printing = {
+        ...scryfallCard(),
+        prices: bad,
+      } as unknown as ScryfallCard;
+      const view = withOfferedPrices(printing);
+      expect(priceCentsFor(view, "normal")).toBeNull();
+      expect(priceCentsFor(view, "foil")).toBeNull();
+    }
+  });
+
+  test("never mutates its input; every other field is kept", () => {
+    const input = scryfallCard({
+      id: PLST_ID,
+      finishes: ["nonfoil"],
+      prices: prices("64.50", "50.00"),
+    });
+    const before = structuredClone(input);
+    const view = withOfferedPrices(input);
+    expect(input).toEqual(before);
+    expect(view).not.toBe(input);
+    expect({ ...view, prices: input.prices }).toEqual(input);
   });
 });

@@ -101,11 +101,22 @@
   color: var(--fg-secondary);
 }
 
-/* Reserved for S2.3's PrintingSelect and FinishSelect. */
+/* S2.3's PrintingSelect and FinishSelect (S2.3d7): two tracks, the
+   printing's wider, at one fixed height that the controls (label above a
+   40 px button) and the skeleton's two slots both fill, so a switch shifts
+   nothing. Above the panel, so an open list paints over it. */
 .mm-selector-row {
-  display: flex;
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 200px);
   gap: 12px;
-  min-height: 40px;
+  height: 60px;
+  max-width: 640px;
+}
+.mm-selector {
+  height: 100%;
+  min-width: 0;
 }
 
 /* ─────────── RECOMMENDATION PANEL ─────────── */
@@ -307,8 +318,8 @@
   width: 70%;
 }
 .mm-skeleton-selector {
-  width: 220px;
-  height: 40px;
+  width: 100%;
+  height: 100%;
 }
 .mm-skeleton-badge {
   width: 88px;
@@ -353,5 +364,9 @@
   }
   .mm-rec-tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mm-selector-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 128px);
+    max-width: none;
   }
 }

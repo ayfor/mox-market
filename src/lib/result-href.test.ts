@@ -213,18 +213,25 @@ describe("one builder (T7, AC-3)", () => {
       !f.includes("/__fixtures__/"),
   );
 
-  test("no non-test source but result-href.ts holds ?price= in a literal", () => {
+  // S2.3 (AC-5, C2-B.7) adds the second builder: selectionHref, the
+  // query-only switch href, which never rebuilds the path.
+  test("no non-test source but the two href builders holds ?price= in a literal", () => {
     expect(SOURCES).toEqual(
       expect.arrayContaining([
         "src/lib/result-href.ts",
+        "src/lib/selection-href.ts",
         "src/components/entry-form.tsx",
+        "src/components/selection-controls.tsx",
         "src/app/landing-form.tsx",
       ]),
     );
     const holders = SOURCES.filter((f) =>
       literalTexts(f, read(f)).some((t) => t.includes("?price=")),
     );
-    expect(holders).toEqual(["src/lib/result-href.ts"]);
+    expect(holders).toEqual([
+      "src/lib/result-href.ts",
+      "src/lib/selection-href.ts",
+    ]);
   });
 
   const FORMS = [

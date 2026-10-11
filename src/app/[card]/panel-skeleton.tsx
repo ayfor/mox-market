@@ -1,13 +1,23 @@
 // The pending state (F2 §UI loading state, AC-8; S2.1d10): a badge
-// placeholder, four tile placeholders and the two selector slots S2.3 fills,
-// laid out like the result so the swap causes no layout shift. No hooks, so
-// the server page uses it as the Suspense fallback and ResultSlot (client)
-// shows it while a navigation is pending.
+// placeholder, four tile placeholders and the two selector slots, laid out
+// like the result so the swap causes no layout shift. Each slot fills its
+// track of the fixed-height .mm-selector-row, as PrintingSelect and
+// FinishSelect do (S2.3d7, AC-12). With `staleBanner` it keeps the stale
+// banner the last panel showed, the same element and text, so its height
+// matches at every width (S2.3 ADV-1); the copy is aria-hidden, since the
+// panel already announced it. No hooks: ResultSlot and SlotSkeleton (client)
+// decide `staleBanner`.
 import { LOADING_LABEL } from "@/lib/copy/result-labels";
+import { UI_COPY } from "@/lib/recommendation/ui-copy";
 
 const TILE_SLOTS = ["delta", "trend", "range", "volatility"] as const;
 
-export function PanelSkeleton() {
+export function PanelSkeleton({
+  staleBanner = false,
+}: {
+  /** Reserve the stale banner above the grid, as the ok panel shows it. */
+  readonly staleBanner?: boolean;
+}) {
   return (
     <div
       className="mm-result mm-skeleton"
@@ -15,6 +25,15 @@ export function PanelSkeleton() {
       aria-busy="true"
       aria-label={LOADING_LABEL}
     >
+      {staleBanner && (
+        <p
+          className="mm-stale-banner"
+          aria-hidden="true"
+          data-skeleton-part="banner"
+        >
+          {UI_COPY.staleBanner}
+        </p>
+      )}
       <div className="mm-result-grid">
         <div
           className="mm-card-art mm-skeleton-block"
