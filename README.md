@@ -41,6 +41,7 @@ cp .env.example .env
 | `POSTGRES_URL_NON_POOLING` | Prisma CLI and migrations (`prisma.config.ts`), integration tests |
 | `CRON_SECRET` | the price-sync cron route (from S0.3) |
 | `POSTGRES_SSL_ROOT_CERT` | the app at runtime, for a remote (Supabase) host only: the root certificate, PEM, that the database's certificate must chain to (`src/lib/prisma-pool.ts`). Set in Vercel by Josh (Production step (e)); leave it out of `.env*` locally, where `localhost` uses no TLS |
+| `ALLOW_PROD_INGEST` | the MTGJson ingest script, path C only (`docs/runbooks/mtgjson-ingest.md`): set to 1 **inline** by Josh on the one production command, never stored in any `.env*` file (a copy there is ignored) |
 
 ### Database
 
@@ -49,7 +50,7 @@ docker compose up -d --wait db
 npx prisma migrate deploy
 ```
 
-This starts Postgres 16 and applies every migration in `prisma/migrations/`: `0000_baseline` (the V1 `tracked_cards` and `price_snapshots` tables) and `0001_price_history` (F0's `price_history`, `mtgjson_identifiers` and `price_sync_runs` tables and their enums). There is no seed step yet, so the price-history tables stay empty and every card reads `insufficient_data` until S0.2's ingest.
+This starts Postgres 16 and applies every migration in `prisma/migrations/`: `0000_baseline` (the V1 `tracked_cards` and `price_snapshots` tables) and `0001_price_history` (F0's `price_history`, `mtgjson_identifiers` and `price_sync_runs` tables and their enums). The price-history tables start empty, so every card reads `insufficient_data` until you load them with the MTGJson ingest's path B (see "MTGJson price history" below).
 
 ### Run
 
@@ -116,7 +117,18 @@ Step (a) compares against the baseline-era schema because `prisma/schema.prisma`
 
 **If step (c) fails:** stop. Because `0001` is one transaction, none of its objects is left behind; Prisma marks the migration failed, and a second deploy refuses with P3009. With the same inline prefix, run `migrate status` to confirm, then `migrate resolve --rolled-back 0001_price_history`, find the cause with Bitey, and only then re-run step (c). Prisma may print "current transaction is aborted" instead of the first error. Never use `migrate resolve --applied 0001_price_history` unless all three tables, their enums, the CHECK, both autovacuum settings and row level security are present.
 
-**(e) Runtime read path, before production deploys resume.** Steps (a) to (d) go through the Prisma CLI, which encrypts but does not verify the server certificate. The app's runtime client (`src/lib/prisma-pool.ts`) always verifies a remote host's certificate and host name, and Supabase signs its certificates with its own root CA, which Node does not trust by default. So: download that root certificate from the Supabase dashboard (Database settings, SSL configuration), set its PEM text as `POSTGRES_SSL_ROOT_CERT` in Vercel for Production and Preview, redeploy a preview, and open `/Esper%20Sentinel?price=74.99` there. Expect "No price history yet for this printing." (the tables stay empty until S0.2's ingest), not "Price history temporarily unavailable", and no `history_read_failed` or `freshness_read_failed` line in the function logs. A failure line ends with its codes: `TlsConnectionError` means the certificate is missing or wrong, `TableDoesNotExist 42P01` means step (c) has not reached that database.
+**(e) Runtime read path, before production deploys resume.** Steps (a) to (d) go through the Prisma CLI, which encrypts but does not verify the server certificate. The app's runtime client (`src/lib/prisma-pool.ts`) always verifies a remote host's certificate and host name, and Supabase signs its certificates with its own root CA, which Node does not trust by default. So: download that root certificate from the Supabase dashboard (Database settings, SSL configuration), set its PEM text as `POSTGRES_SSL_ROOT_CERT` in Vercel for Production and Preview, redeploy a preview, and open `/Esper%20Sentinel?price=74.99` there. Expect "No price history yet for this printing." (the tables stay empty until Josh's path C ingest, `docs/runbooks/mtgjson-ingest.md`), not "Price history temporarily unavailable", and no `history_read_failed` or `freshness_read_failed` line in the function logs. A failure line ends with its codes: `TlsConnectionError` means the certificate is missing or wrong, `TableDoesNotExist 42P01` means step (c) has not reached that database.
+
+## MTGJson price history
+
+F0's history (`price_history`, `mtgjson_identifiers`, `price_sync_runs`) is loaded from MTGJson v5 by `scripts/ingest-mtgjson-history.ts`: paper TCGplayer retail USD only, the last 31 UTC dates, gated, in integer cents (`docs/architecture/data-provenance.md`). The full procedure, including production, is the runbook: [`docs/runbooks/mtgjson-ingest.md`](docs/runbooks/mtgjson-ingest.md).
+
+```bash
+npx tsx scripts/ingest-mtgjson-history.ts --dry-run                         # path A: download into .cache/mtgjson, report, no database
+npx tsx scripts/ingest-mtgjson-history.ts --source-dir .cache/mtgjson       # path B: load your local database (localhost only)
+```
+
+Path B writes to `POSTGRES_URL_NON_POOLING` and refuses any host but `localhost` or `127.0.0.1`. It takes about four minutes and ≈285 MB of database space. Path C (production) is Josh's alone.
 
 ## Stack
 

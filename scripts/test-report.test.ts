@@ -70,6 +70,31 @@ const render = (report: Report, exitCode = 0) =>
     exitCode,
   });
 
+/** S0.2's test files (S0.2d26, T20). */
+const S02_TEST_FILES = [
+  "src/lib/mtgjson/consts.test.ts",
+  "src/lib/mtgjson/transform.test.ts",
+  "src/lib/mtgjson/pipeline.test.ts",
+  "src/lib/mtgjson/parse.test.ts",
+  "src/lib/mtgjson/ingest.test.ts",
+  "src/lib/mtgjson/report.test.ts",
+  "src/lib/mtgjson/target.test.ts",
+  "src/lib/mtgjson/source.test.ts",
+  "src/lib/mtgjson/basis.test.ts",
+  "src/lib/mtgjson/db.test.ts",
+  "src/lib/mtgjson/store.int.test.ts",
+  "src/lib/mtgjson/ingest.int.test.ts",
+  "scripts/ingest-mtgjson-history.test.ts",
+  "scripts/ingest-mtgjson-history.int.test.ts",
+  "tests/contract/mtgjson-streaming.test.ts",
+  "tests/contract/mtgjson-runbook.test.ts",
+  // The adversarial fix round's new files (ADV.4, ADV.7, ADV.13, ADV.15).
+  "src/lib/mtgjson/cli.test.ts",
+  "src/lib/mtgjson/store.test.ts",
+  "src/lib/mtgjson/db.int.test.ts",
+  "tests/contract/mtgjson-env-order.test.ts",
+] as const;
+
 describe("featureOf", () => {
   test.each([
     ["src/lib/price-history/reader.test.ts", "F0 · Price History"],
@@ -175,6 +200,10 @@ describe("featureOf", () => {
     ["src/lib/price-history.test-d.ts", "F0 · Price History"],
     ["tests/helpers/price-history-guard.int.test.ts", "F0 · Price History"],
     ["tests/helpers/scratch-db.test.ts", "F1 · Recommendation Engine"],
+    // S0.2d26 (T20): every S0.2 test file maps to F0 through /mtgjson/i,
+    // ahead of F1's scripts/ and tests/contract/ patterns.
+    ...S02_TEST_FILES.map((file) => [file, "F0 · Price History"] as const),
+    ["tests/contract/dependencies.test.ts", "F1 · Recommendation Engine"],
   ])("%s → %s", (file, feature) => {
     expect(featureOf(file)).toBe(feature);
   });
@@ -224,6 +253,17 @@ describe("featureOf", () => {
       "tests/helpers/scratch-db.test.ts",
     ]) {
       expect(report).toContain(file);
+    }
+  });
+
+  test("the committed docs/test-report.md lists S0.2's test files under F0 and has no Unmapped row (S0.2 T20)", () => {
+    const report = readFileSync(
+      path.join(__dirname, "..", "docs", "test-report.md"),
+      "utf8",
+    );
+    expect(report).not.toMatch(/\|\s*Unmapped\s*\|/);
+    for (const file of S02_TEST_FILES) {
+      expect(report, file).toContain(`| \`${file}\` | F0 · Price History |`);
     }
   });
 

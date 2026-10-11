@@ -45,3 +45,11 @@ next-env.d.ts
 
 # claude code
 .claude/
+
+# MTGJson downloads (S0.2d4): Meta.json and the .gz files, never committed.
+# Unanchored, so a cache made from any subdirectory is ignored too (ADV.5).
+.cache/
+
+# Database dumps (ADV.10): the repo is public. The runbook writes pg_dump
+# output to ~/mox-backups; this is the backstop.
+*.dump

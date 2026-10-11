@@ -27,3 +27,35 @@ describe("V1 residue", () => {
     expect(pkg.dependencies).toHaveProperty("@headlessui/react");
   });
 });
+
+// T19 (S0.2d3; AC-5): stream-json and stream-chain are runtime
+// dependencies (S0.3's sync route parses AllPricesToday), tsx runs the
+// ingest script, gzip is node:zlib, and nothing else decompresses.
+describe("S0.2 dependencies (T19)", () => {
+  test("stream-json ^3 and stream-chain ^4 are dependencies", () => {
+    expect(pkg.dependencies["stream-json"]).toMatch(/^\^3\./);
+    expect(pkg.dependencies["stream-chain"]).toMatch(/^\^4\./);
+    expect(pkg.devDependencies).not.toHaveProperty("stream-json");
+  });
+
+  test("tsx is a devDependency", () => {
+    expect(pkg.devDependencies.tsx).toMatch(/^\^4\./);
+    expect(pkg.dependencies).not.toHaveProperty("tsx");
+  });
+
+  test.each([
+    "@types/stream-json",
+    "xz",
+    "lzma-native",
+    "lzma",
+    "node-xz",
+    "pako",
+    "fflate",
+    "zlib",
+    "gunzip-maybe",
+    "unzipper",
+    "decompress",
+  ])("%s is absent", (name) => {
+    expect(all).not.toHaveProperty(name);
+  });
+});
