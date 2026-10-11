@@ -39,7 +39,7 @@ cp .env.example .env
 |----------|---------|
 | `POSTGRES_PRISMA_URL` | the app at runtime (`src/lib/prisma.ts`, the only name it reads) |
 | `POSTGRES_URL_NON_POOLING` | Prisma CLI and migrations (`prisma.config.ts`), integration tests |
-| `CRON_SECRET` | the daily sync route `/api/prices/sync-mtgjson` (S0.3), which fails closed: 500 while it is unset, blank or `replace-me`, 401 on a missing or wrong `Authorization: Bearer` header. Josh sets it in Vercel for **Production only** |
+| `CRON_SECRET` | the daily sync route `/api/prices/sync-mtgjson` (S0.3), which fails closed: 500 while it is unset, blank, `replace-me`, padded, not printable ASCII or under 32 characters, 401 on a missing or wrong `Authorization: Bearer` header. Josh sets it in Vercel for **Production only** |
 | `POSTGRES_SSL_ROOT_CERT` | the app at runtime, for a remote (Supabase) host only: the root certificate, PEM, that the database's certificate must chain to (`src/lib/prisma-pool.ts`). Set in Vercel by Josh (Production step (e)); leave it out of `.env*` locally, where `localhost` uses no TLS |
 | `ALLOW_PROD_INGEST` | the MTGJson ingest script, path C only (`docs/runbooks/mtgjson-ingest.md`): set to 1 **inline** by Josh on the one production command, never stored in any `.env*` file (a copy there is ignored) |
 
@@ -136,15 +136,18 @@ After the bulk load, one Vercel cron keeps the history current: `vercel.json` ca
 
 The route is the one GET handler allowed to write (Standards' narrow cron exception), so it fails closed on `CRON_SECRET` before anything else runs:
 
-- `CRON_SECRET` unset, blank or the `.env.example` placeholder: **500**, with no database query and no download.
+- `CRON_SECRET` unset, blank, the `.env.example` placeholder, or not a usable secret (surrounding whitespace such as a pasted newline, a character outside printable ASCII, or fewer than 32 characters): **500**, with no database query and no download. The function log names which.
 - A missing or wrong `Authorization: Bearer <CRON_SECRET>` header: **401**, likewise. The header is compared in constant time.
+- Outside Vercel Production (`VERCEL_ENV` is not `production`), a `POSTGRES_PRISMA_URL` that can reach any host but `localhost` or `127.0.0.1` (its hostname, a `host=` parameter, or any `hostaddr=`): **500** before the database client loads, so a local run with a pulled production URL never writes production rows. Vercel exposes `VERCEL_ENV` to functions (the project's "Automatically expose System Environment Variables" is on; read-only check, 2026-10-11).
 - Every method but GET answers 405.
 
 Vercel Cron sends the header itself once the variable is set. `CRON_SECRET` goes in Vercel **Production only**, never Preview or Development, because previews share the production database: a preview carrying the secret would let unreviewed preview code write production rows.
 
-To trigger it locally (your local database only; it downloads ≈5.5 MB from MTGJson):
+To trigger it locally (your local database only; it downloads ≈5.5 MB from MTGJson), first run AGENTS.md's two host checks: the first must print only `localhost` or `127.0.0.1`, the second nothing.
 
 ```bash
+{ env; cat .env* 2>/dev/null; } | grep -oE 'postgres(ql)?://[^[:space:]"]+' | sed -E 's#^[^@]*@##; s#[:/?].*##' | sort -u
+{ env; cat .env* 2>/dev/null; } | grep -oE 'postgres(ql)?://[^[:space:]"]+' | grep -oiE '[?&]host(addr)?=[^&#]*' | sort -u
 export CRON_SECRET="$(openssl rand -hex 32)"   # never the placeholder, never a production value
 npm run build
 npm run start & sleep 5                         # POSTGRES_PRISMA_URL must point at localhost
@@ -159,7 +162,7 @@ Never call the route on a deployed URL: production runs it from the cron alone.
 The canonical order is the runbook's [production rollout order](docs/runbooks/mtgjson-ingest.md#production-rollout-order); path C's own commands live there and nowhere else. In short, before production deploys resume:
 
 0. Before the first production deploy: README "Production" steps (a) to (d), then step (e), `POSTGRES_SSL_ROOT_CERT` in Vercel with the preview smoke check. The sync writes through the same verified-TLS client, so these come first.
-1. Set `CRON_SECRET` in Vercel **Production only**, before production deploys resume. Until then the route answers 500 and writes nothing, previews included.
+1. Set `CRON_SECRET` in Vercel **Production only**, before production deploys resume. Until then the route answers 500 and writes nothing, previews included. Use at least 32 printable ASCII characters (`openssl rand -hex 32` gives 64) with no trailing newline: paste it into the dashboard, or pipe it with `printf '%s'`, never `echo`. A padded, non-ASCII or short value answers 500 every day.
 2. Resume production deploys after S0.3 is merged and Josh signs off, and confirm a production deployment containing `/api/prices/sync-mtgjson` is live.
 3. The same UTC day: path C, identifiers then prices, with the runbook's preconditions.
 4. The next day: confirm a cron `ok` run whose `rows_written` is within 10% of the dry-run's rows/day. Then the keep-awake reminder can stop.

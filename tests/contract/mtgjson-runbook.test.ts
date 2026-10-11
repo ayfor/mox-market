@@ -122,6 +122,12 @@ describe("the production rollout order (T18, AC-13, with both pivots)", () => {
     );
   });
 
+  test("path C starts outside the cron's hour, 16:30 to 18:00 UTC (S0.3 ADV.5)", () => {
+    expect(rollout).toMatch(
+      /Start path C outside 16:30 to 18:00 UTC, so it never runs alongside the 17:00 UTC cron/,
+    );
+  });
+
   test("one sentence after the steps names the snapshot route's Firewall rule, removed after a production deployment without it is live (S0.3 T18)", () => {
     const after = rollout.slice(rollout.indexOf(steps[3]) + steps[3].length);
     const sentence = after.split("\n").find((l) => l.includes("Firewall rule"));

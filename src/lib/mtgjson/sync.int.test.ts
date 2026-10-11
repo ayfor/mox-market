@@ -5,8 +5,14 @@
 // the real @/lib/prisma (POSTGRES_PRISMA_URL stubbed to the scratch database),
 // stubbing only global fetch (fixture bytes, identity encoding, exact
 // Content-Length) and Date, so the guard, the lazy import, the http source,
-// the Prisma adapter and the store run as in production. Unreachable server:
-// fails when CI=true, skips with a warning otherwise.
+// the Prisma adapter and the store run as in production. Every route case
+// runs with TMPDIR pointed at a fresh directory, so the per-run download
+// directory is seen holding Meta.json mid-run and gone afterwards (ADV.10).
+// Unreachable server: fails when CI=true, skips with a warning otherwise.
+import { existsSync } from "node:fs";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import pg from "pg";
 import {
   afterAll,
@@ -30,6 +36,7 @@ import {
 import {
   BEFORE_WINDOW,
   fixtureFiles,
+  manyCards,
   META,
   S,
   STANDARD_CARDS,
@@ -50,6 +57,7 @@ import {
   type QueryResultLike,
 } from "./store";
 import { runDailySync, type SyncDeps } from "./sync";
+import { SYNC_TEMP_PREFIX } from "./sync-handler";
 
 const server = await probeScratchServer();
 
@@ -92,6 +100,10 @@ describe.skipIf(!server.reachable)(
     let seedDb: Db;
     let served: Files = fixtureFiles();
     const fetched: string[] = [];
+    let tmpRoot: string;
+    let originalTmpdir: string | undefined;
+    /** What the run's directory held when AllPricesToday was requested. */
+    let duringRun: string[][] = [];
     type Route = typeof import("@/app/api/prices/sync-mtgjson/route");
     let route: Route;
     let sharedDb: Db;
@@ -113,6 +125,14 @@ describe.skipIf(!server.reachable)(
       const name = url.startsWith(MTGJSON_BASE_URL)
         ? (url.slice(MTGJSON_BASE_URL.length) as MtgjsonFileName)
         : null;
+      if (name === "AllPricesToday.json.gz") {
+        const dirs = (await readdir(tmpRoot)).filter((d) =>
+          d.startsWith(SYNC_TEMP_PREFIX),
+        );
+        duringRun = await Promise.all(
+          dirs.map(async (d) => (await readdir(path.join(tmpRoot, d))).sort()),
+        );
+      }
       const bytes = name === null ? undefined : served[name];
       if (bytes === undefined) {
         return new Response("not found", { status: 404 });
@@ -197,6 +217,10 @@ describe.skipIf(!server.reachable)(
     });
 
     beforeEach(async () => {
+      tmpRoot = await mkdtemp(path.join(os.tmpdir(), "mox-sync-int-tmp-"));
+      originalTmpdir = process.env.TMPDIR;
+      process.env.TMPDIR = tmpRoot;
+      duringRun = [];
       served = fixtureFiles();
       fetched.length = 0;
       fetchStub.mockClear();
@@ -218,10 +242,16 @@ describe.skipIf(!server.reachable)(
       );
     });
 
-    afterEach(() => {
+    afterEach(async () => {
       vi.useRealTimers();
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
+      if (originalTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = originalTmpdir;
+      // ADV.10: no run leaves its download directory behind, files included.
+      const left = await readdir(tmpRoot);
+      await rm(tmpRoot, { recursive: true, force: true });
+      expect(left).toEqual([]);
     });
 
     test("T13 (AC-3): GET through the real route → 200, the gated rows stored, the prune, one cron ok row equal to the body", async () => {
@@ -272,10 +302,18 @@ describe.skipIf(!server.reachable)(
           `${MTGJSON_BASE_URL}AllPricesToday.json.gz`,
         ]),
       );
+      // ADV.10: the run's directory held the downloaded Meta.json mid-run,
+      // under os.tmpdir(); afterEach asserts it is gone.
+      expect(duringRun).toHaveLength(1);
+      expect(duringRun[0]).toContain("Meta.json");
+      expect(existsSync(tmpRoot)).toBe(true);
     });
 
     test("T14 (AC-5): a second run writes 0 rows and moves no synced_at; one changed price updates only that row", async () => {
       expect((await get()).status).toBe(200);
+      expect(duringRun).toHaveLength(1);
+      expect(duringRun[0]).toContain("Meta.json");
+      expect(await readdir(tmpRoot)).toEqual([]);
       const first = await rows();
 
       const again = JSON.parse(await (await get()).text());
@@ -425,6 +463,84 @@ describe.skipIf(!server.reachable)(
           rowsPruned: 0,
         });
         expect(String(run.error)).toContain("injected fault on chunk 2");
+      });
+
+      test("ADV.1: AllPricesToday with no calendar date through the route → 500, error, nothing pruned, no price row", async () => {
+        served = fixtureFiles(STANDARD_CARDS, {
+          pricesMeta: { date: null, version: META.version },
+        });
+        const res = await get();
+        expect(res.status).toBe(500);
+        const body = await res.json();
+        expect(body.status).toBe("error");
+        expect(body.error).toMatch(
+          /AllPricesToday\.json\.gz has no calendar date/,
+        );
+        expect((await rows()).map((r) => r.date)).toEqual([
+          BEFORE_WINDOW,
+          WINDOW_START,
+        ]);
+        expect(await runs()).toEqual([
+          expect.objectContaining({
+            status: "error",
+            sourceDate: RUN_DATE,
+            rowsWritten: 0,
+            rowsPruned: 0,
+          }),
+        ]);
+      });
+
+      test("ADV.5: three overlapping syncs (one row per chunk) all end ok, write the 7 rows once between them, and leave one ok row each", async () => {
+        const results = await Promise.all([
+          sync(fixtureFiles(), { chunkRows: 1 }),
+          sync(fixtureFiles(), { chunkRows: 1 }),
+          sync(fixtureFiles(), { chunkRows: 1 }),
+        ]);
+        expect(results.map((r) => r.status)).toEqual(["ok", "ok", "ok"]);
+        expect(results.map((r) => r.error)).toEqual([null, null, null]);
+        expect(results.reduce((sum, r) => sum + r.rowsWritten, 0)).toBe(
+          TODAY_ROWS.length,
+        );
+        expect(
+          (await rows(`date = '${RUN_DATE}'`)).map(withoutSyncedAt),
+        ).toEqual(TODAY_ROWS);
+        const all = await runs();
+        expect(all).toHaveLength(3);
+        for (const run of all) {
+          expect(run).toMatchObject({ trigger: "cron", status: "ok" });
+        }
+        expect(new Set(all.map((r) => r.id))).toEqual(
+          new Set(results.map((r) => r.runId)),
+        );
+      });
+
+      test("ADV.5: two overlapping syncs of 2,000 cards (50 rows per chunk) both end ok with no deadlock, 2,000 rows stored once", async () => {
+        const cards = manyCards(2000, 31);
+        await upsertIdentifierChunk(
+          seedDb,
+          cards.map((c) => ({
+            mtgjsonUuid: c.uuid,
+            scryfallId: c.scryfallId as string,
+            side: null,
+            edhrecRank: 10,
+          })),
+        );
+        const files = fixtureFiles(cards);
+        const results = await Promise.all([
+          sync(files, { chunkRows: 50 }),
+          sync(files, { chunkRows: 50 }),
+        ]);
+        expect(results.map((r) => r.status)).toEqual(["ok", "ok"]);
+        for (const r of results) expect(r.error ?? "").not.toMatch(/deadlock/);
+        expect(results[0].rowsWritten + results[1].rowsWritten).toBe(2000);
+        const [{ count }] = (
+          await seed.query(
+            `SELECT count(*)::int AS count FROM price_history WHERE date = $1`,
+            [RUN_DATE],
+          )
+        ).rows as { count: number }[];
+        expect(count).toBe(2000);
+        expect((await runs()).map((r) => r.status)).toEqual(["ok", "ok"]);
       });
 
       test("AC-9: a running row two hours old (any trigger) is marked error by the next run; a 30-minute-old one is untouched; the new run never marks itself", async () => {

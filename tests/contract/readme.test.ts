@@ -334,6 +334,32 @@ describe("README Daily price sync (S0.3 T18)", () => {
     expect(row).toMatch(/\*\*Production only\*\*/);
   });
 
+  // S0.3 ADV.3 and ADV.7: the format rule, the non-local refusal and the
+  // host checks before a local trigger.
+  test("states the secret's format rule and the non-local database refusal", () => {
+    expect(sync).toMatch(
+      /surrounding whitespace[^\n]*printable ASCII[^\n]*fewer than 32 characters\): \*\*500\*\*/,
+    );
+    expect(sync).toMatch(
+      /Outside Vercel Production \(`VERCEL_ENV` is not `production`\)[^\n]*`localhost` or `127\.0\.0\.1`[^\n]*\*\*500\*\* before the database client loads/,
+    );
+    const step1 = rollout.split("\n").find((l) => l.startsWith("1. "));
+    expect(step1).toMatch(/at least 32 printable ASCII characters/);
+    expect(step1).toMatch(
+      /no trailing newline[^\n]*`printf '%s'`, never `echo`/,
+    );
+  });
+
+  test("runs AGENTS.md's two host checks before the local trigger", () => {
+    const block = sync.slice(sync.indexOf("```bash"));
+    const hostCheck = block.indexOf("sed -E 's#^[^@]*@##; s#[:/?].*##'");
+    const hostParam = block.indexOf("grep -oiE '[?&]host(addr)?=[^&#]*'");
+    expect(hostCheck).toBeGreaterThan(-1);
+    expect(hostParam).toBeGreaterThan(-1);
+    expect(hostCheck).toBeLessThan(block.indexOf("npm run start"));
+    expect(hostParam).toBeLessThan(block.indexOf("npm run start"));
+  });
+
   test("never tells anyone to call the route on a deployed URL", () => {
     expect(sync).toMatch(/Never call the route on a deployed URL/);
     const curl = sync.split("\n").filter((l) => l.startsWith("curl "));

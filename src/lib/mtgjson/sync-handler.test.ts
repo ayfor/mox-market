@@ -1,10 +1,12 @@
 // T3 (AC-1, AC-3, AC-9; S0.3d6, S0.3d8, S0.3d16): createSyncHandler with an
 // injected database, source and clock, behind the no-database barrier. Status
 // to HTTP, the JSON body (dbBytes a number), Cache-Control, one log line per
-// run, sanitized errors with the secret redacted, and the per-run download
-// directory removed on every outcome.
+// run, sanitized errors with the secret redacted, the per-run download
+// directory removed on every outcome (with files in it, ADV.10), one fixed
+// line per refusal (ADV.9), the non-local database refusal outside Vercel
+// Production (ADV.7) and a 500 for an outcome the row may not show (ADV.4).
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi, type Mock } from "vitest";
@@ -14,12 +16,23 @@ import { createFixtureSource, type MtgjsonSource } from "./source";
 import type { SyncDeps, SyncResult } from "./sync";
 import {
   createSyncHandler,
+  databaseAllowed,
+  NON_LOCAL_DATABASE_BODY,
   redactSecret,
+  REFUSED_NON_LOCAL_LINE,
+  REFUSED_SECRET_LINES,
+  REFUSED_UNAUTHORIZED_LINE,
+  SECRET_NOT_CONFIGURED_BODY,
   SYNC_TEMP_PREFIX,
+  UNAUTHORIZED_BODY,
   type SyncHandlerDeps,
 } from "./sync-handler";
 
 const SECRET = "c0ffee-sync-secret-for-tests-only-0123456789abcdef";
+const LOCAL_ENV = {
+  POSTGRES_PRISMA_URL:
+    "postgresql://postgres:postgres@localhost:5432/mox_market",
+};
 const NOW = new Date("2026-10-05T17:00:00.000Z");
 const authorized = () =>
   new Request("http://localhost/api/prices/sync-mtgjson", {
@@ -51,6 +64,7 @@ function handlerWith(
   const sources: string[] = [];
   const handler = createSyncHandler({
     secret: () => SECRET,
+    env: () => LOCAL_ENV,
     loadDb: async () => db,
     createSource: (dir: string): MtgjsonSource => {
       sources.push(dir);
@@ -270,6 +284,46 @@ describe("the per-run download directory (T3, S0.3d6)", () => {
     },
   );
 
+  test("the default directory is created under os.tmpdir() and removed with the files the run wrote into it (ADV.10)", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "mox-handler-tmp-"));
+    vi.stubEnv("TMPDIR", tmp);
+    try {
+      expect(os.tmpdir()).toBe(tmp);
+      const held: string[][] = [];
+      const db = new FakeDb({ identifiers: STANDARD_IDENTIFIERS });
+      const handler = createSyncHandler({
+        secret: () => SECRET,
+        env: () => LOCAL_ENV,
+        loadDb: async () => db,
+        createSource: (dir) => {
+          const source = createFixtureSource(fixtureFiles());
+          return {
+            ...source,
+            async prepare(names) {
+              // What the http source leaves behind: the files and a .part.
+              for (const name of names) {
+                await writeFile(path.join(dir, name), "downloaded");
+                await writeFile(path.join(dir, `${name}.part`), "partial");
+              }
+              held.push((await readdir(dir)).sort());
+              return source.prepare(names);
+            },
+          };
+        },
+        now: () => NOW,
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      });
+      const res = await handler(authorized());
+      expect(res.status).toBe(200);
+      expect(held[0]).toEqual(["Meta.json", "Meta.json.part"]);
+      expect(held[1]).toContain("AllPricesToday.json.gz");
+      expect(await readdir(tmp)).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   test("is removed after a thrown fault, which answers 500 with no run row", async () => {
     const { handler, temp, log } = handlerWith(undefined, {
       runSync: async () => {
@@ -341,12 +395,14 @@ describe("the guard runs first (T3, AC-1)", () => {
       const loadDb = vi.fn(async () => new FakeDb());
       const createSource = vi.fn();
       const temp = tempTracker();
+      const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
       const handler = createSyncHandler({
         secret: () => secret,
+        env: () => LOCAL_ENV,
         loadDb,
         createSource,
         makeTempDir: temp.makeTempDir,
-        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        log,
       });
       const headers: Record<string, string> =
         header === null ? {} : { Authorization: header };
@@ -360,8 +416,194 @@ describe("the guard runs first (T3, AC-1)", () => {
       expect(temp.made).toEqual([]);
       const text = await res.text();
       expect(text).not.toContain(SECRET);
+      // ADV.9: exactly one fixed line, at error for 500 and warn for 401.
+      if (status === 500) {
+        expect(JSON.parse(text)).toEqual(SECRET_NOT_CONFIGURED_BODY);
+        expect(log.error).toHaveBeenCalledTimes(1);
+        expect(log.warn).not.toHaveBeenCalled();
+      } else {
+        expect(JSON.parse(text)).toEqual(UNAUTHORIZED_BODY);
+        expect(log.warn).toHaveBeenCalledTimes(1);
+        expect(log.warn.mock.calls[0]).toEqual([REFUSED_UNAUTHORIZED_LINE]);
+        expect(log.error).not.toHaveBeenCalled();
+      }
+      expect(log.info).not.toHaveBeenCalled();
+      for (const line of linesOf(log)) {
+        expect(line).not.toContain(SECRET);
+        if (header !== null) expect(line).not.toContain(header);
+      }
     },
   );
+
+  test.each([
+    ["unset", undefined, "unset"],
+    ["the placeholder", "replace-me", "placeholder"],
+    ["padded", `${SECRET}\n`, "whitespace"],
+    ["non-ASCII", `${SECRET}é`, "charset"],
+    ["short", "short-secret", "short"],
+  ] as const)(
+    "CRON_SECRET %s → the %s line, exactly, and nothing else (ADV.9)",
+    async (_label, secret, problem) => {
+      const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const loadDb = vi.fn(async () => new FakeDb());
+      const handler = createSyncHandler({
+        secret: () => secret,
+        env: () => LOCAL_ENV,
+        loadDb,
+        log,
+      });
+      for (const header of [`Bearer ${SECRET}x`, `Bearer ${SECRET}`]) {
+        log.error.mockClear();
+        const res = await handler(
+          new Request("http://localhost/api/prices/sync-mtgjson", {
+            headers: { Authorization: header },
+          }),
+        );
+        expect(res.status).toBe(500);
+        expect(log.error.mock.calls).toEqual([[REFUSED_SECRET_LINES[problem]]]);
+        expect(String(log.error.mock.calls[0][0])).not.toContain(SECRET);
+      }
+      expect(log.warn).not.toHaveBeenCalled();
+      expect(log.info).not.toHaveBeenCalled();
+      expect(loadDb).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("a non-local database outside Vercel Production (T3, ADV.7)", () => {
+  const REMOTE = "postgresql://u:pw-XYZZY@db.example.invalid:5432/postgres";
+  const refused = [
+    ["a remote host", REMOTE],
+    [
+      "localhost with ?host=",
+      "postgresql://u:p@localhost:5432/x?host=db.example.invalid",
+    ],
+    [
+      "localhost with ?hostaddr=",
+      "postgresql://u:p@localhost:5432/x?hostaddr=10.0.0.5",
+    ],
+    ["an IPv4-mapped IPv6 loopback", "postgresql://u:p@[::ffff:7f00:1]:5432/x"],
+    ["::1 (not on the local list)", "postgresql://u:p@[::1]:5432/x"],
+    ["a socket directory", "postgresql://u:p@localhost:5432/x?host=/tmp"],
+    [
+      "a remote host listed after localhost",
+      "postgresql://u:p@localhost,db.example.invalid:5432/x",
+    ],
+    ["a URL that does not parse", "not a url"],
+  ] as const;
+
+  test.each(
+    [undefined, "preview", "development"].flatMap((vercelEnv) =>
+      refused.map(([label, url]) => [vercelEnv, label, url] as const),
+    ),
+  )(
+    "VERCEL_ENV %s, %s → 500 before the client, the source or the directory",
+    async (vercelEnv, _label, url) => {
+      const loadDb = vi.fn(async () => new FakeDb());
+      const createSource = vi.fn();
+      const makeTempDir = vi.fn(async () => "/nonexistent");
+      const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const handler = createSyncHandler({
+        secret: () => SECRET,
+        env: () => ({ VERCEL_ENV: vercelEnv, POSTGRES_PRISMA_URL: url }),
+        loadDb,
+        createSource,
+        makeTempDir,
+        log,
+      });
+      const res = await handler(authorized());
+      expect(res.status).toBe(500);
+      const text = await res.text();
+      expect(JSON.parse(text)).toEqual(NON_LOCAL_DATABASE_BODY);
+      expect(loadDb).not.toHaveBeenCalled();
+      expect(createSource).not.toHaveBeenCalled();
+      expect(makeTempDir).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(log.error.mock.calls).toEqual([[REFUSED_NON_LOCAL_LINE]]);
+      for (const line of [text, ...linesOf(log)]) {
+        expect(line).not.toContain("pw-XYZZY");
+        expect(line).not.toContain(SECRET);
+      }
+    },
+  );
+
+  test.each([
+    ["VERCEL_ENV production with a remote host", "production", REMOTE],
+    [
+      "VERCEL_ENV unset with localhost",
+      undefined,
+      "postgresql://postgres:postgres@localhost:5432/x",
+    ],
+    [
+      "VERCEL_ENV unset with 127.0.0.1",
+      undefined,
+      "postgresql://postgres:postgres@127.0.0.1:55432/x",
+    ],
+    [
+      "VERCEL_ENV development with a localhost host parameter",
+      "development",
+      "postgresql://u:p@localhost:5432/x?host=localhost",
+    ],
+    [
+      "POSTGRES_PRISMA_URL unset (the client's own load error answers)",
+      undefined,
+      undefined,
+    ],
+  ] as const)("%s → the run proceeds", async (_label, vercelEnv, url) => {
+    const { handler, db } = handlerWith(undefined, {
+      env: () => ({ VERCEL_ENV: vercelEnv, POSTGRES_PRISMA_URL: url }),
+    });
+    const res = await handler(authorized());
+    expect(res.status).toBe(200);
+    expect(db.matching(/unnest/)).toHaveLength(1);
+  });
+
+  test("databaseAllowed reads only VERCEL_ENV and POSTGRES_PRISMA_URL", () => {
+    expect(databaseAllowed({})).toBe(true);
+    expect(databaseAllowed({ POSTGRES_PRISMA_URL: "  " })).toBe(true);
+    expect(
+      databaseAllowed({
+        VERCEL_ENV: "Production",
+        POSTGRES_PRISMA_URL: REMOTE,
+      }),
+    ).toBe(false);
+    expect(
+      databaseAllowed({
+        DATABASE_URL: REMOTE,
+        POSTGRES_URL_NON_POOLING: REMOTE,
+        POSTGRES_PRISMA_URL: "postgresql://u:p@LOCALHOST:5432/x",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("an outcome the row may not show (T3, ADV.4)", () => {
+  test("a run whose final update failed after the prune → 500, logged at error, the body keeps its status and the error", async () => {
+    const { handler, db, log } = handlerWith({
+      identifiers: STANDARD_IDENTIFIERS,
+      failOn: {
+        match: /"rows_written" = \$3::int4/,
+        nth: 1,
+        error: new Error("connection reset"),
+      },
+    });
+    const res = await handler(authorized());
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body).toMatchObject({ status: "ok", runId: 1, rowsWritten: 7 });
+    expect(body.error).toMatch(
+      /outcome ok not recorded[\s\S]*connection reset/,
+    );
+    // Never rewritten as error: one finish statement, status ok.
+    const finishes = db.matching(/"rows_written" = \$3::int4/);
+    expect(finishes).toHaveLength(1);
+    expect(finishes[0].values[1]).toBe("ok");
+    expect(db.matching(/^DELETE/)).toHaveLength(1);
+    expect(log.info).not.toHaveBeenCalled();
+    // The sync's own line plus the handler's summary line.
+    expect(log.error).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("redactSecret", () => {

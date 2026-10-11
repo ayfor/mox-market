@@ -134,6 +134,8 @@ Step 0, after the S0.1 merge: README "Production" (a) to (d), which are S1.1's b
 
 Josh removes the Vercel Firewall rule on `/api/prices/snapshot` (V1's writer, deleted by S0.3) only after a production deployment without it is live (step 2); until then the live V1 build still serves that route, and the rule keeps it unreachable.
 
+Start path C outside 16:30 to 18:00 UTC, so it never runs alongside the 17:00 UTC cron: both upsert `price_history`, and a row-lock wait or deadlock between them could end the cron run `error` (S0.3 ADV.5).
+
 ```sql
 SELECT trigger, status, started_at, finished_at, rows_written, unmapped_uuids, db_bytes
 FROM price_sync_runs ORDER BY id DESC LIMIT 5;

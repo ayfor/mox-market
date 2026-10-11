@@ -223,7 +223,7 @@ async function main(): Promise<number> {
           priceHistory: size,
         }),
       );
-      if (result.status !== "ok") failed = true;
+      if (result.status !== "ok" || result.error !== null) failed = true;
     }
   } finally {
     await client.$disconnect();

@@ -39,11 +39,27 @@ export const STALE_RUN_MS = 3_600_000;
 /**
  * The daily sync's own deadline (S0.3d15): 30 s under the route's
  * maxDuration of 300 s. Checked between parsed entries and between chunks,
- * so a hung source or database ends the run `error` ("deadline exceeded")
- * with committed chunks kept and no prune, instead of a kill that leaves the
- * row `running` until the next run marks it.
+ * and every database statement and download races the time left (ADV.2), so
+ * a hung source, connection or query ends the run `error` ("deadline
+ * exceeded") instead of a kill that leaves the row `running` until the next
+ * run marks it.
  */
 export const SYNC_DEADLINE_MS = 270_000;
+
+/**
+ * How long the run row's final UPDATE may take, on its own clock (ADV.2): the
+ * outcome is still recorded when the deadline fires, and the run ends by
+ * SYNC_DEADLINE_MS + this, still under maxDuration.
+ */
+export const SYNC_FINISH_GRACE_MS = 10_000;
+
+/**
+ * The most rows one daily sync may write (S0.3d25): 3 × the 73,323 rows a
+ * real AllPricesToday emitted (S0.3 E1, 2026-10-10), rounded. A file that
+ * would emit more is refused before any write: a mis-served or reshaped file
+ * must not fill the 500 MB quota on a passing size pre-check.
+ */
+export const SYNC_MAX_ROWS = 220_000;
 
 /** F0's "re-checks size every 50 chunks" (identifier and price chunks both count). */
 export const BUDGET_RECHECK_CHUNKS = 50;

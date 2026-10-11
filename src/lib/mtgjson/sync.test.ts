@@ -11,8 +11,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+  allPricesJson,
   allPricesTodayJson,
   gz,
+  manyCards,
   META,
   metaJson,
   S,
@@ -30,6 +32,8 @@ import {
   HISTORY_WINDOW_DAYS,
   META_FILE,
   STALE_RUN_MS,
+  SYNC_DEADLINE_MS,
+  SYNC_MAX_ROWS,
   type MtgjsonFileName,
 } from "./consts";
 import {
@@ -44,16 +48,19 @@ import {
   SET_RUN_SOURCE_SQL,
   STALE_RUN_MESSAGE,
   UPSERT_PRICES_SQL,
+  type Db,
+  type QueryResultLike,
 } from "./store";
 import {
   IDENTIFIERS_NOT_LOADED,
   NO_RETAIL_PRICES,
   NO_ROWS_EMITTED,
   runDailySync,
+  TOO_MANY_ROWS,
   UNSUPPORTED_VERSION,
   type SyncDeps,
 } from "./sync";
-import type { PriceRow } from "./transform";
+import type { IdentifierRow, PriceRow } from "./transform";
 
 const NOW = new Date("2026-10-05T17:00:00.000Z");
 const RUN_DATE = "2026-10-05";
@@ -156,6 +163,36 @@ function finished(db: FakeDb) {
     ];
   return { id, status, rowsWritten, rowsPruned, unmappedUuids, dbBytes, error };
 }
+
+/** Every finishRun statement's status, in order. */
+const finishStatuses = (db: FakeDb) =>
+  db.matching(/"rows_written" = \$3::int4/).map((s) => s.values[1]);
+
+/**
+ * A FakeDb whose nth statement matching `match` is recorded and then never
+ * settles (a hung connect or query), every other statement answered as usual.
+ */
+function hangingOn(base: FakeDb, match: RegExp, nth = 1): Db {
+  let seen = 0;
+  return {
+    query(text, values): Promise<QueryResultLike> {
+      if (match.test(text) && ++seen === nth) {
+        void base.query(text, values);
+        return new Promise(() => undefined);
+      }
+      return base.query(text, values);
+    },
+  };
+}
+
+/** The identifier rows for manyCards(). */
+const identifiersFor = (cards: readonly CardFixture[]): IdentifierRow[] =>
+  cards.map((c) => ({
+    mtgjsonUuid: c.uuid,
+    scryfallId: c.scryfallId as string,
+    side: null,
+    edhrecRank: 10,
+  }));
 
 /** A label per statement, for order assertions. */
 function labels(db: FakeDb): string[] {
@@ -301,6 +338,56 @@ describe("source dates (T5, AC-4)", () => {
     expect(db.matching(/unnest/)).toHaveLength(0);
     expect(db.matching(/^DELETE/)).toHaveLength(1);
     expect(db.matching(/mtgjson_identifiers/)).toHaveLength(0);
+  });
+
+  test("AllPricesToday dated 2026-10-06 (newer than a 2026-10-05 Meta.json) → source_stale, no upsert, prune", async () => {
+    const source = spiedSource(
+      files({ todayMeta: { date: "2026-10-06", version: META.version } }),
+    );
+    const { db, result } = await run({ source });
+    expect(result.status).toBe("source_stale");
+    expect(result.error).toBeNull();
+    expect(db.matching(/unnest/)).toHaveLength(0);
+    expect(db.matching(/^DELETE/)).toHaveLength(1);
+    expect(finishStatuses(db)).toEqual(["source_stale"]);
+  });
+
+  // ADV.1: a malformed AllPricesToday date is a format change, refused like
+  // Meta.json's, never a quiet "not published yet" that prunes every day.
+  test.each([
+    ["missing", { version: META.version }],
+    ["null", { date: null, version: META.version }],
+    ["empty", { date: "", version: META.version }],
+    ["a timestamp", { date: "2026-10-05T14:00:00Z", version: META.version }],
+    ["not a calendar date", { date: "2026-02-30", version: META.version }],
+    ["a number", { date: 20261005, version: META.version }],
+  ])(
+    "AllPricesToday date %s under a valid Meta.json → error 'no calendar date', no prune, no identifier load",
+    async (_label, todayMeta) => {
+      const source = spiedSource(files({ todayMeta }));
+      const { db, result } = await run({ source });
+      expect(result.status).toBe("error");
+      expect(result.error).toMatch(
+        /AllPricesToday\.json\.gz has no calendar date[\s\S]*nothing written/,
+      );
+      expect(result.sourceDate).toBe(RUN_DATE);
+      expect(db.matching(/^DELETE/)).toHaveLength(0);
+      expect(db.matching(/mtgjson_identifiers/)).toHaveLength(0);
+      expect(db.matching(/unnest/)).toHaveLength(0);
+      expect(finished(db)).toMatchObject({
+        status: "error",
+        rowsWritten: 0,
+        rowsPruned: 0,
+        dbBytes: null,
+      });
+    },
+  );
+
+  test("a wrong AllPricesToday version wins over its missing date", async () => {
+    const source = spiedSource(files({ todayMeta: { version: "4.0.0" } }));
+    const { result } = await run({ source });
+    expect(result.status).toBe("error");
+    expect(result.error).toContain(UNSUPPORTED_VERSION);
   });
 
   test.each([
@@ -500,6 +587,27 @@ describe("identifiers (T8, AC-8)", () => {
     expectRefused(db, result, IDENTIFIERS_NOT_LOADED);
     // Refused before AllPricesToday's entries are parsed.
     expect(result.priceStats).toBeNull();
+  });
+
+  test("missing identifiers win over the budget: an empty table on a 460 MB database → error, no size read, no prune (S0.3d8)", async () => {
+    const { db, result } = await run({
+      dbOptions: { identifiers: [], sizes: [460_000_000] },
+    });
+    expectRefused(db, result, IDENTIFIERS_NOT_LOADED);
+    expect(db.matching(/pg_database_size/)).toHaveLength(0);
+  });
+
+  test("a stale date wins over missing identifiers: Meta.json 2026-10-04 with an empty table → source_stale, no identifier load, one prune (S0.3d8)", async () => {
+    const source = spiedSource(
+      files({ meta: { date: "2026-10-04", version: META.version } }),
+    );
+    const { db, result } = await run({
+      source,
+      dbOptions: { identifiers: [] },
+    });
+    expect(result.status).toBe("source_stale");
+    expect(db.matching(/mtgjson_identifiers/)).toHaveLength(0);
+    expect(db.matching(/^DELETE/)).toHaveLength(1);
   });
 
   test("identifiers present but no TCGplayer-retail UUID maps → the same", async () => {
@@ -834,5 +942,386 @@ describe("streaming (T10, AC-11)", () => {
     expect(text).not.toMatch(
       /\.json\s*\(\s*\)|\.text\s*\(\s*\)|\.arrayBuffer\s*\(/,
     );
+  });
+});
+
+describe("today's rows only, under a cap (T8, ADV.8, S0.3d25)", () => {
+  test("an AllPricesToday carrying 31 dates per series on a 449 MB database → only runDate's rows written, a warning, ok", async () => {
+    const cards = manyCards(3, 31);
+    const source = spiedSource({
+      [META_FILE]: Buffer.from(metaJson(META)),
+      [ALL_PRICES_TODAY_FILE]: gz(allPricesJson(cards, META)),
+    });
+    const { db, result, log } = await run({
+      source,
+      dbOptions: { identifiers: identifiersFor(cards), sizes: [449_000_000] },
+    });
+    expect(result.status).toBe("ok");
+    const written = upserted(db);
+    expect(written).toHaveLength(3);
+    expect(new Set(written.map((r) => r.date))).toEqual(new Set([RUN_DATE]));
+    expect(result.rowsWritten).toBe(3);
+    // Two size reads only (before and after), and one other-dates warning
+    // plus the 400 MB one.
+    expect(db.matching(/pg_database_size/)).toHaveLength(2);
+    const warnings = log.warn.mock.calls.map((c) => String(c[0]));
+    expect(
+      warnings.filter((w) => /dated other than 2026-10-05/.test(w)),
+    ).toEqual([
+      expect.stringContaining(
+        "carried 90 in-window prices dated other than 2026-10-05",
+      ),
+    ]);
+  });
+
+  test("series whose only in-window dates are before runDate → error 'no price rows emitted', nothing written, no prune", async () => {
+    const cards = manyCards(2, 30); // 2026-09-05 … 2026-10-04: never runDate
+    const source = spiedSource({
+      [META_FILE]: Buffer.from(metaJson(META)),
+      [ALL_PRICES_TODAY_FILE]: gz(allPricesJson(cards, META)),
+    });
+    const { db, result } = await run({
+      source,
+      dbOptions: { identifiers: identifiersFor(cards) },
+    });
+    expect(result.status).toBe("error");
+    expect(result.error).toContain(NO_ROWS_EMITTED);
+    expect(result.error).toContain("60 on other dates");
+    expect(db.matching(/unnest/)).toHaveLength(0);
+    expect(db.matching(/^DELETE/)).toHaveLength(0);
+  });
+
+  test("more runDate rows than maxRows → error 'too many price rows', nothing written, no size read, no prune", async () => {
+    const { db, result } = await run({ maxRows: 6 });
+    expect(TODAY_ROWS).toHaveLength(7);
+    expect(result.status).toBe("error");
+    expect(result.error).toContain(TOO_MANY_ROWS);
+    expect(result.error).toContain("more than 6 rows for 2026-10-05");
+    expect(db.matching(/unnest/)).toHaveLength(0);
+    expect(db.matching(/pg_database_size/)).toHaveLength(0);
+    expect(db.matching(/^DELETE/)).toHaveLength(0);
+    expect(finished(db)).toMatchObject({ status: "error", rowsWritten: 0 });
+  });
+
+  test("exactly maxRows runDate rows → written", async () => {
+    const { result } = await run({ maxRows: 7 });
+    expect(result.status).toBe("ok");
+    expect(result.rowsWritten).toBe(7);
+  });
+
+  test("the cap is 3 × the 73,323 rows a real AllPricesToday emitted, rounded, and a bad maxRows is refused", async () => {
+    expect(SYNC_MAX_ROWS).toBe(220_000);
+    expect(SYNC_MAX_ROWS).toBeGreaterThanOrEqual(3 * 73_323);
+    for (const maxRows of [0, -1, 2.5]) {
+      const db = new FakeDb();
+      await expect(
+        runDailySync({ db, source: spiedSource(), now: () => NOW, maxRows }),
+      ).rejects.toThrow(/maxRows/);
+      expect(db.statements).toHaveLength(0);
+    }
+  });
+});
+
+describe("the deadline bounds every await (T9, ADV.2)", () => {
+  const quick = async (options: RunOptions) => {
+    const t0 = performance.now();
+    const outcome = await run({ deadlineMs: 200, ...options });
+    return { ...outcome, elapsedMs: performance.now() - t0 };
+  };
+
+  test("a hung first query (connect) → error with runId null, no row, within about a second", async () => {
+    const base = new FakeDb({ identifiers: STANDARD_IDENTIFIERS });
+    const { result, elapsedMs } = await quick({
+      db: hangingOn(
+        base,
+        /^UPDATE "price_sync_runs"[\s\S]*'running'/,
+      ) as FakeDb,
+    });
+    expect(elapsedMs).toBeLessThan(1_500);
+    expect(result.status).toBe("error");
+    expect(result.runId).toBeNull();
+    expect(result.error).toMatch(
+      /deadline exceeded: 200 ms into the run, during the stale-run update; nothing written/,
+    );
+    expect(base.matching(/INSERT INTO "price_sync_runs"/)).toHaveLength(0);
+  });
+
+  test("a hung identifier load → error, the run row finished, nothing written", async () => {
+    const base = new FakeDb({ identifiers: STANDARD_IDENTIFIERS });
+    const { result, elapsedMs } = await quick({
+      db: hangingOn(base, /FROM "mtgjson_identifiers"/) as FakeDb,
+    });
+    expect(elapsedMs).toBeLessThan(1_500);
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(/during the identifier load; nothing written/);
+    expect(base.matching(/unnest/)).toHaveLength(0);
+    expect(finished(base)).toMatchObject({ status: "error", rowsWritten: 0 });
+  });
+
+  test("a hung second upsert → error, the first chunk counted, the row finished, no prune", async () => {
+    const base = new FakeDb({ identifiers: STANDARD_IDENTIFIERS });
+    const { result, elapsedMs } = await quick({
+      db: hangingOn(base, /unnest/, 2) as FakeDb,
+      chunkRows: 3,
+    });
+    expect(elapsedMs).toBeLessThan(1_500);
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(
+      /during the upserts; committed chunks kept, nothing pruned/,
+    );
+    expect(result.rowsWritten).toBe(3);
+    expect(base.matching(/unnest/)).toHaveLength(2);
+    expect(base.matching(/^DELETE/)).toHaveLength(0);
+    expect(finished(base)).toMatchObject({
+      status: "error",
+      rowsWritten: 3,
+      rowsPruned: 0,
+    });
+  });
+
+  test("a hung prune → error saying the prune may still complete; the row is finished error", async () => {
+    const base = new FakeDb({ identifiers: STANDARD_IDENTIFIERS });
+    const { result } = await quick({
+      db: hangingOn(base, /^DELETE/) as FakeDb,
+    });
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(
+      /during the prune; the prune was sent and may still complete/,
+    );
+    expect(finished(base)).toMatchObject({
+      status: "error",
+      rowsWritten: 7,
+      rowsPruned: 0,
+    });
+  });
+
+  test("a download that never settles → error, nothing written", async () => {
+    const base = spiedSource();
+    const source: typeof base = {
+      ...base,
+      async prepare(names) {
+        if (names.includes(ALL_PRICES_TODAY_FILE)) {
+          return new Promise<void>(() => undefined);
+        }
+        return base.prepare(names);
+      },
+    };
+    const { db, result, elapsedMs } = await quick({ source });
+    expect(elapsedMs).toBeLessThan(1_500);
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(
+      /during AllPricesToday\.json\.gz; nothing written/,
+    );
+    expect(db.matching(/mtgjson_identifiers/)).toHaveLength(0);
+    expect(finished(db)).toMatchObject({ status: "error", rowsWritten: 0 });
+  });
+
+  test("the deadline fired while parsing says nothing was written", async () => {
+    let now = 0;
+    const base = spiedSource();
+    let todayOpens = 0;
+    const source: typeof base = {
+      ...base,
+      open(name) {
+        if (name === ALL_PRICES_TODAY_FILE && ++todayOpens === 2) now += 1_000;
+        return base.open(name);
+      },
+    };
+    const { result } = await run({ source, deadlineMs: 500, clock: () => now });
+    expect(result.error).toMatch(/during the parse; nothing written/);
+  });
+
+  test("a hung final update on an ok run → its own grace, the outcome kept with an error, one line", async () => {
+    const base = new FakeDb({ identifiers: STANDARD_IDENTIFIERS });
+    const { result, log, elapsedMs } = await quick({
+      db: hangingOn(base, /"rows_written" = \$3::int4/) as FakeDb,
+      deadlineMs: 60_000,
+      finishGraceMs: 100,
+    });
+    expect(elapsedMs).toBeLessThan(1_500);
+    expect(result.status).toBe("ok");
+    expect(result.error).toMatch(
+      /outcome ok not recorded[\s\S]*took longer than 100 ms/,
+    );
+    expect(finishStatuses(base)).toEqual(["ok"]);
+    expect(log.error).toHaveBeenCalledTimes(1);
+  });
+
+  test("a hung final update on an error run → the original error, one line that the row stays running", async () => {
+    const base = new FakeDb({ identifiers: [] });
+    const { result, log } = await quick({
+      db: hangingOn(base, /"rows_written" = \$3::int4/) as FakeDb,
+      deadlineMs: 60_000,
+      finishGraceMs: 100,
+    });
+    expect(result.status).toBe("error");
+    expect(result.error).toContain(IDENTIFIERS_NOT_LOADED);
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.error.mock.calls[0][0]).toMatch(
+      /stays running until the next run marks it error[\s\S]*took longer than 100 ms/,
+    );
+  });
+});
+
+describe("after the prune, nothing rewrites the row as error (T9, ADV.4)", () => {
+  test("the size read after the prune fails → ok with db_bytes null, one warning, one finish", async () => {
+    const { db, result, log } = await run({
+      dbOptions: {
+        identifiers: STANDARD_IDENTIFIERS,
+        failOn: {
+          match: /pg_database_size/,
+          nth: 2,
+          error: new Error("connection reset"),
+        },
+      },
+    });
+    expect(result.status).toBe("ok");
+    expect(result.error).toBeNull();
+    expect(result.dbBytes).toBeNull();
+    expect(db.matching(/^DELETE/)).toHaveLength(1);
+    expect(finished(db)).toEqual({
+      id: 1,
+      status: "ok",
+      rowsWritten: 7,
+      rowsPruned: 0,
+      unmappedUuids: 1,
+      dbBytes: null,
+      error: null,
+    });
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0][0]).toMatch(
+      /size after the prune could not be read[\s\S]*connection reset/,
+    );
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["ok", files(), [100_000_000]],
+    [
+      "source_stale",
+      files({ meta: { date: "2026-10-04", version: META.version } }),
+      [100_000_000],
+    ],
+    ["budget_stop", files(), [450_000_001]],
+  ] as const)(
+    "the final update rejects on a %s run → no second finish, the status kept with an error, one error line",
+    async (status, input, sizes) => {
+      const { db, result, log } = await run({
+        source: spiedSource(input),
+        dbOptions: {
+          identifiers: STANDARD_IDENTIFIERS,
+          sizes,
+          failOn: {
+            match: /"rows_written" = \$3::int4/,
+            nth: 1,
+            error: new Error("connection reset after commit"),
+          },
+        },
+      });
+      expect(finishStatuses(db)).toEqual([status]);
+      expect(db.matching(/^DELETE/)).toHaveLength(1);
+      expect(result.status).toBe(status);
+      expect(result.error).toMatch(
+        new RegExp(
+          `outcome ${status} not recorded[\\s\\S]*connection reset after commit`,
+        ),
+      );
+      expect(log.error).toHaveBeenCalledTimes(1);
+      expect(log.error.mock.calls[0][0]).toMatch(
+        new RegExp(`the outcome ${status} may not be recorded`),
+      );
+    },
+  );
+});
+
+describe("the deadline's default (T9, ADV.11)", () => {
+  test("SYNC_DEADLINE_MS is 270 s", () => {
+    expect(SYNC_DEADLINE_MS).toBe(270_000);
+  });
+
+  test("with no deadlineMs, a clock that jumps past SYNC_DEADLINE_MS at the first upsert ends the run error", async () => {
+    let now = 0;
+    const db = new FakeDb({
+      identifiers: STANDARD_IDENTIFIERS,
+      onStatement: ({ text }) => {
+        if (text === UPSERT_PRICES_SQL) now += SYNC_DEADLINE_MS + 1;
+      },
+    });
+    const { result } = await run({ db, clock: () => now });
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(/deadline exceeded: 270000 ms/);
+    expect(db.matching(/^DELETE/)).toHaveLength(0);
+  });
+
+  test("with no deadlineMs, a clock that stays just inside SYNC_DEADLINE_MS lets the run finish ok", async () => {
+    let now = 0;
+    const db = new FakeDb({
+      identifiers: STANDARD_IDENTIFIERS,
+      onStatement: ({ text }) => {
+        if (text === UPSERT_PRICES_SQL) now += SYNC_DEADLINE_MS - 1;
+      },
+    });
+    const { result } = await run({ db, clock: () => now });
+    expect(result.status).toBe("ok");
+  });
+
+  test("the deadline checked after Meta.json: a clock jump while it opens → AllPricesToday never prepared", async () => {
+    let now = 0;
+    const base = spiedSource();
+    const source: typeof base = {
+      ...base,
+      open(name) {
+        if (name === META_FILE) now += SYNC_DEADLINE_MS + 1;
+        return base.open(name);
+      },
+    };
+    const { result } = await run({ source, clock: () => now });
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(/deadline exceeded/);
+    expect(base.prepared).toEqual([META_FILE]);
+  });
+});
+
+describe("phase timings (T4, ADV.12)", () => {
+  test("each phase is charged exactly its own time; total adds the untimed statements", async () => {
+    let now = 0;
+    const db = new FakeDb({
+      identifiers: STANDARD_IDENTIFIERS,
+      onStatement: ({ text }) => {
+        if (text === MARK_STALE_RUNS_SQL) now += 7; // untimed
+        if (text === LOAD_IDENTIFIERS_SQL) now += 10;
+        if (text === UPSERT_PRICES_SQL) now += 1;
+        if (text === PRUNE_SQL) now += 1_000;
+      },
+    });
+    const base = spiedSource();
+    let todayOpens = 0;
+    const source: typeof base = {
+      ...base,
+      async prepare(names) {
+        now += 100;
+        return base.prepare(names);
+      },
+      open(name) {
+        // The parser's open of AllPricesToday is the second one.
+        if (name === ALL_PRICES_TODAY_FILE && ++todayOpens === 2) now += 5;
+        return base.open(name);
+      },
+    };
+    const { result } = await run({
+      db,
+      source,
+      chunkRows: 3,
+      clock: () => now,
+    });
+    expect(result.status).toBe("ok");
+    expect(result.phasesMs).toEqual({
+      fetch: 200,
+      identifiers: 10,
+      parse: 5,
+      upserts: 3,
+      prune: 1_000,
+      total: 1_225,
+    });
   });
 });
