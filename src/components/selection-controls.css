@@ -1,0 +1,99 @@
+/* ─────────────────────────────────────────────────────────
+   Mox Market V2 — printing and finish selectors (S2.3)
+   Headless UI Listboxes in the result page's selector row. The row's
+   geometry (two tracks, fixed height, shared with the skeleton) lives in
+   src/app/[card]/result.css; this file styles the controls inside a
+   track. State styling uses Headless UI's data attributes on whole class
+   strings, never a conditional className (S2.4 ADV.1).
+   ───────────────────────────────────────────────────────── */
+
+.mm-selector {
+  position: relative;
+  display: grid;
+  grid-template-rows: 12px 40px;
+  row-gap: 8px;
+  align-content: start;
+}
+
+.mm-selector-label {
+  font: var(--ts-label);
+  line-height: 12px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
+
+.mm-selector-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  min-width: 0;
+  padding: 0 12px;
+  border-radius: var(--mox-radius-md);
+  background: var(--glass-fill-strong);
+  border: 1px solid var(--glass-stroke-strong);
+  color: var(--fg-primary);
+  font: var(--ts-body-md);
+  text-align: left;
+  cursor: pointer;
+}
+.mm-selector-button[data-hover] {
+  background: var(--bg-amethyst-12);
+}
+.mm-selector-button[data-focus] {
+  outline: 2px solid var(--mox-sapphire-bright);
+  outline-offset: 2px;
+}
+.mm-selector-button[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.mm-selector-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-selector-chevron {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-secondary);
+}
+
+.mm-selector-options {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  min-width: 100%;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-base);
+  border: 1px solid var(--glass-stroke-strong);
+  border-radius: var(--mox-radius-md);
+  box-shadow: var(--shadow-panel);
+  outline: none;
+}
+
+.mm-selector-option {
+  padding: 8px 10px;
+  border-radius: var(--mox-radius-sm);
+  font: var(--ts-body);
+  white-space: nowrap;
+  color: var(--fg-primary);
+  cursor: pointer;
+}
+.mm-selector-option[data-focus] {
+  background: var(--glass-fill-strong);
+}
+.mm-selector-option[data-selected] {
+  background: var(--bg-amethyst-15);
+  font-weight: var(--fw-semibold);
+}

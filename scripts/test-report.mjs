@@ -69,8 +69,9 @@ export const FEATURES = [
       /src\/lib\/(printings|scryfall)/,
       /src\/lib\/copy\/result-labels/,
       // S2.4d14: the entry points: the link builder, the shared submit path,
-      // the landing form and its copy, and the Scryfall error type.
-      /src\/lib\/(result-href|entry-submit)/,
+      // the landing form and its copy, and the Scryfall error type. S2.3d11:
+      // the selection href builder.
+      /src\/lib\/(result-href|entry-submit|selection-href)/,
       /src\/app\/landing-form/,
       /src\/lib\/copy\/entry-points/,
       /src\/types\/scryfall/,

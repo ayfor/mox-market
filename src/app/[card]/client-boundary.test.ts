@@ -2,6 +2,8 @@
 // (AC-1, AC-16): the server/client boundary, read from the TypeScript AST.
 // No client module reaches the engine or a server-only module, no S2.1 file
 // touches Prisma or V1's price_snapshots, and no source uses Math.random.
+// S2.3's T16 (AC-5, AC-11): the selectors are seen by the scan, and their
+// closure holds no engine or template code.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -210,7 +212,44 @@ describe("client modules never reach the engine or a server-only module (T24)", 
         "src/components/card-combobox.tsx",
         "src/components/result-navigation.tsx",
         "src/app/evaluate/evaluate-client.tsx",
+        // S2.3 (T16): the selectors.
+        "src/components/printing-select.tsx",
+        "src/components/finish-select.tsx",
+        "src/components/selection-controls.tsx",
       ]),
+    );
+  });
+
+  test("the selectors' import closure holds no engine or copy.ts module: option labels are built on the server (T16, C1.54)", () => {
+    const closure = (entry: string) => {
+      const seen = new Set<string>();
+      const queue = [entry];
+      while (queue.length > 0) {
+        const file = queue.shift()!;
+        if (seen.has(file)) continue;
+        seen.add(file);
+        const text = diskFs.read(file);
+        if (text === undefined || !isCode(file)) continue;
+        for (const spec of runtimeSpecifiers(parse(file, text))) {
+          const target = resolve(file, spec, diskFs);
+          if (target !== null) queue.push(target);
+        }
+      }
+      return [...seen];
+    };
+    const files = closure("src/components/selection-controls.tsx");
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "src/components/printing-select.tsx",
+        "src/components/finish-select.tsx",
+        "src/lib/selection-href.ts",
+        "src/lib/recommendation/ui-copy.ts",
+      ]),
+    );
+    expect(files.filter((f) => ENGINE_LOGIC.includes(f))).toEqual([]);
+    expect(files).not.toContain("src/lib/recommendation/copy.ts");
+    expect(files.filter((f) => f.startsWith("src/lib/evaluation/"))).toEqual(
+      [],
     );
   });
 

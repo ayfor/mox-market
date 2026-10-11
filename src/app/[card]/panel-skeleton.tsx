@@ -1,8 +1,10 @@
 // The pending state (F2 §UI loading state, AC-8; S2.1d10): a badge
-// placeholder, four tile placeholders and the two selector slots S2.3 fills,
-// laid out like the result so the swap causes no layout shift. No hooks, so
-// the server page uses it as the Suspense fallback and ResultSlot (client)
-// shows it while a navigation is pending.
+// placeholder, four tile placeholders and the two selector slots, laid out
+// like the result so the swap causes no layout shift. Each slot fills its
+// track of the fixed-height .mm-selector-row, as PrintingSelect and
+// FinishSelect do (S2.3d7, AC-12). No hooks, so the server page uses it as
+// the Suspense fallback and ResultSlot (client) shows it while a navigation
+// is pending.
 import { LOADING_LABEL } from "@/lib/copy/result-labels";
 
 const TILE_SLOTS = ["delta", "trend", "range", "volatility"] as const;

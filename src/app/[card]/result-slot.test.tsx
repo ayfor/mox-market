@@ -1,8 +1,11 @@
 // T17 (AC-8; S2.1d10): submitting above a result swaps the previous panel
 // for the skeleton in the same render, and the new panel replaces it when
-// the navigation settles. The retry button shares the transition.
+// the navigation settles. The retry button shares the transition. S2.3's
+// T15 (AC-12, AC-5): a selector switch does the same, and the skeleton keeps
+// both selector slots in the selector row.
 import { EntryForm } from "@/components/entry-form";
 import { ResultNavigationProvider } from "@/components/result-navigation";
+import { SelectionControls } from "@/components/selection-controls";
 import { LOADING_LABEL } from "@/lib/copy/result-labels";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Suspense } from "react";
@@ -17,7 +20,10 @@ const router = vi.hoisted(() => ({
   replace: vi.fn(),
   prefetch: vi.fn(),
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => router,
+  useSearchParams: () => new URLSearchParams("price=54.00"),
+}));
 
 beforeEach(() => {
   router.push.mockReset();
@@ -215,5 +221,66 @@ describe("submits while a result loads (ADV-8)", () => {
     expect(priceField()).toHaveValue("65");
     rerender(<UrlPage price="54.00" paramsKey="a" />);
     expect(priceField()).toHaveValue("54.00");
+  });
+});
+
+describe("a selector switch (T15, AC-5, AC-12)", () => {
+  test("a pending switch shows the skeleton at once, two selector slots in .mm-selector-row; the previous panel and selectors are gone", async () => {
+    const nav = pendingNavigation();
+    router.push.mockImplementation(() => nav.promise);
+    const { container } = render(
+      <ResultNavigationProvider>
+        <ResultSlot>
+          <Suspense key="a" fallback={<PanelSkeleton />}>
+            <div className="mm-result">
+              <SelectionControls
+                options={[
+                  { id: "x", label: "Set X (X) · #1", finishes: ["normal"] },
+                  { id: "y", label: "Set Y (Y) · #2", finishes: ["foil"] },
+                ]}
+                printingId="x"
+                printingLabel="Set X (X) · #1"
+                finish="normal"
+                offeredFinishes={["normal"]}
+              />
+              <BuyPanel reason="9% below market." />
+            </div>
+          </Suspense>
+        </ResultSlot>
+      </ResultNavigationProvider>,
+    );
+    expect(container.querySelectorAll(".mm-selector")).toHaveLength(2);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Printing/ }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: "Set Y (Y) · #2" }));
+    });
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "?price=54.00&finish=foil&printing=y",
+    );
+    const shown = skeleton();
+    expect(shown).not.toBeNull();
+    const row = shown!.querySelector(".mm-selector-row")!;
+    expect(
+      row.querySelectorAll('[data-skeleton-part="selector"]'),
+    ).toHaveLength(2);
+    expect(row.children).toHaveLength(2);
+    expect(screen.queryByText("9% below market.")).toBeNull();
+    expect(container.querySelector(".mm-selector")).toBeNull();
+    expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
+    await nav.settle();
+  });
+
+  test("the skeleton's selector slots are the row's only children, each a .mm-skeleton-selector", () => {
+    const { container } = render(<PanelSkeleton />);
+    const rows = container.querySelectorAll(".mm-selector-row");
+    expect(rows).toHaveLength(1);
+    const slots = [...rows[0].children];
+    expect(slots).toHaveLength(2);
+    for (const slot of slots) {
+      expect(slot).toHaveClass("mm-skeleton-block", "mm-skeleton-selector");
+      expect(slot).toHaveAttribute("data-skeleton-part", "selector");
+    }
   });
 });

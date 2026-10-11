@@ -224,7 +224,8 @@ describe("parseResultParams (T2)", () => {
       price: "$74.99",
       askingPriceCents: 7499,
       finish: "normal",
-      paramsKey: "Esper Sentinel|7499|normal",
+      printing: null,
+      paramsKey: "Esper Sentinel|7499|normal|",
     });
   });
 
@@ -238,11 +239,143 @@ describe("parseResultParams (T2)", () => {
     expect(key("Esper", { price: "74.98" })).not.toBe(base);
     expect(key("Esper", { price: "74.99", finish: "foil" })).not.toBe(base);
   });
+});
 
-  test("printing is ignored until S2.3", () => {
+// --- S2.3: the printing param ----------------------------------------------
+const SLD_ID = "f8b6c532-b837-42b6-9ed2-0231d0779626";
+const MH2_ID = "f3537373-ef54-4578-9d05-6216420ee349";
+const FORM_ERROR = (price = "74.99") => ({
+  kind: "form",
+  card: "Esper",
+  price,
+  error: true,
+});
+
+describe("the printing param (T1, AC-4, AC-9; C1.52)", () => {
+  test("absent and printing= → printing null, the default printing", () => {
+    expect(ok(parseResultParams("Esper", { price: "1" })).printing).toBeNull();
     expect(
-      ok(parseResultParams("Esper", { price: "1", printing: "not-a-uuid" }))
-        .paramsKey,
-    ).toBe("Esper|100|normal");
+      ok(parseResultParams("Esper", { price: "1", printing: "" })).printing,
+    ).toBeNull();
+  });
+
+  test("the canonical sld id → that id; upper-cased → lower-cased", () => {
+    expect(
+      ok(parseResultParams("Esper", { price: "1", printing: SLD_ID })).printing,
+    ).toBe(SLD_ID);
+    expect(
+      ok(
+        parseResultParams("Esper", {
+          price: "1",
+          printing: SLD_ID.toUpperCase(),
+        }),
+      ).printing,
+    ).toBe(SLD_ID);
+  });
+
+  test.each([
+    ["abc", "abc"],
+    ["the id without dashes", SLD_ID.replace(/-/g, "")],
+    ["the id with a trailing space", `${SLD_ID} `],
+    ["the id with a leading space", ` ${SLD_ID}`],
+    ["37 characters", `${SLD_ID}0`],
+    ["the id wrapped in braces", `{${SLD_ID}}`],
+    ["a lone space", " "],
+    ["sld-2123", "sld-2123"],
+    ["../x", "../x"],
+    ["%00", "%00"],
+    ["a NUL character", "\u0000"],
+    ["a non-hex UUID shape", "g8b6c532-b837-42b6-9ed2-0231d0779626"],
+  ])("printing %s → the form with the error", (_name, printing) => {
+    expect(parseResultParams("Esper", { price: "74.99", printing })).toEqual(
+      FORM_ERROR(),
+    );
+  });
+
+  test("a repeated printing → the form with the error, even when both are valid and equal", () => {
+    expect(
+      parseResultParams("Esper", {
+        price: "74.99",
+        printing: [SLD_ID, SLD_ID],
+      }),
+    ).toEqual(FORM_ERROR());
+    expect(
+      parseResultParams("Esper", {
+        price: "74.99",
+        printing: [SLD_ID, MH2_ID],
+      }),
+    ).toEqual(FORM_ERROR());
+  });
+
+  test("a malformed printing with a blank or missing price → the form with the error", () => {
+    expect(parseResultParams("Esper", { price: "", printing: "abc" })).toEqual(
+      FORM_ERROR(""),
+    );
+    expect(parseResultParams("Esper", { printing: "abc" })).toEqual(
+      FORM_ERROR(""),
+    );
+  });
+
+  test("a valid printing with a blank price → the form without the error", () => {
+    expect(parseResultParams("Esper", { printing: SLD_ID })).toEqual({
+      kind: "form",
+      card: "Esper",
+      price: "",
+      error: false,
+    });
+  });
+
+  test("a valid printing with an invalid price → the form with the error", () => {
+    expect(
+      parseResultParams("Esper", { price: "74.999", printing: SLD_ID }),
+    ).toEqual(FORM_ERROR("74.999"));
+  });
+
+  test("paramsKey differs between no printing, printing A and printing B, and is equal for the upper- and lower-case id", () => {
+    const key = (search: Record<string, string>) =>
+      ok(parseResultParams("Esper", { price: "74.99", ...search })).paramsKey;
+    const none = key({});
+    const a = key({ printing: SLD_ID });
+    const b = key({ printing: MH2_ID });
+    expect(new Set([none, a, b]).size).toBe(3);
+    expect(key({ printing: SLD_ID.toUpperCase() })).toBe(a);
+    expect(key({ printing: "" })).toBe(none);
+    expect(a).toBe(`Esper|7499|normal|${SLD_ID}`);
+    expect(none).toBe("Esper|7499|normal|");
+  });
+
+  test.each([
+    ["etched", { finish: "etched" }],
+    ["Foil", { finish: "Foil" }],
+    ["a repeated finish", { finish: ["foil", "foil"] }],
+  ])(
+    "finish %s with a valid printing → the form with the error",
+    (_n, extra) => {
+      expect(
+        parseResultParams("Esper", {
+          price: "74.99",
+          printing: SLD_ID,
+          ...extra,
+        }),
+      ).toEqual(FORM_ERROR());
+    },
+  );
+
+  test("the AC-9 URL → ok with that printing and finish normal", () => {
+    expect(
+      parseResultParams("Esper%20Sentinel", {
+        printing: SLD_ID,
+        finish: "normal",
+        price: "74.99",
+      }),
+    ).toEqual({
+      kind: "ok",
+      card: "Esper Sentinel",
+      price: "74.99",
+      askingPriceCents: 7499,
+      finish: "normal",
+      printing: SLD_ID,
+      paramsKey: `Esper Sentinel|7499|normal|${SLD_ID}`,
+    });
   });
 });

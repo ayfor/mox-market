@@ -1,10 +1,10 @@
-// The result route /[card]?price=&finish= (C1.06 = A; S2.1d5, S2.1d9): an
-// async server component. It validates the params before any Scryfall call
-// (no price is the prefilled form and no call, S2.4 AC-16), then streams the
-// server-computed panel, a lookup miss or the error panel into a Suspense
-// boundary keyed by the query, under the prefilled entry form. The form and
-// the slot share one field, so a miss message describes the card field
-// (S2.4d9). Renders write nothing (C1.28).
+// The result route /[card]?price=&finish=&printing= (C1.06 = A; S2.1d5,
+// S2.1d9, S2.3d2): an async server component. It validates the params
+// before any Scryfall call (no price is the prefilled form and no call, S2.4
+// AC-16), then streams the server-computed panel, a lookup miss or the error
+// panel into a Suspense boundary keyed by the query, under the prefilled
+// entry form. The form and the slot share one field, so a miss message
+// describes the card field (S2.4d9). Renders write nothing (C1.28).
 import { EntryForm } from "@/components/entry-form";
 import { NavBar } from "@/components/nav-bar";
 import { ResultField } from "@/components/result-field";
@@ -71,6 +71,7 @@ export default async function ResultPage({
                       card: parsed.card,
                       askingPriceCents: parsed.askingPriceCents,
                       finish: parsed.finish,
+                      printing: parsed.printing,
                     }}
                   />
                 </Suspense>

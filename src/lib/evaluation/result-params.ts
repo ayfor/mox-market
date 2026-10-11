@@ -97,11 +97,33 @@ export type ResultParams =
       readonly price: string;
       readonly askingPriceCents: number;
       readonly finish: ShownFinish;
-      /** The Suspense key: card, cents and finish (S2.1d5). */
+      /** A Scryfall card id, lower-cased; null is the default printing (S2.3d2). */
+      readonly printing: string | null;
+      /** The Suspense key: card, cents, finish and printing (S2.1d5, S2.3d2). */
       readonly paramsKey: string;
     };
 
 const SHOWN_FINISHES: readonly string[] = ["normal", "foil"];
+
+/** A Scryfall card id: a UUID, any case (S2.3d2, C1.52). */
+const SCRYFALL_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The `printing` param (S2.3d2, AC-9): absent or exactly empty is null (the
+ * default printing); a Scryfall id is lower-cased, since Scryfall's ids are;
+ * anything else, a repeated `printing` included, is invalid.
+ */
+function parsePrinting(
+  value: string | string[] | undefined,
+): { valid: true; printing: string | null } | { valid: false } {
+  const { value: raw, repeated } = single(value);
+  if (repeated) return { valid: false };
+  if (raw === undefined || raw === "") return { valid: true, printing: null };
+  return SCRYFALL_ID.test(raw)
+    ? { valid: true, printing: raw.toLowerCase() }
+    : { valid: false };
+}
 
 /** A single value, or undefined when the parameter is absent or repeated. */
 function single(value: string | string[] | undefined): {
@@ -130,7 +152,9 @@ export function decodeCardSegment(segment: string): string | null {
  * and the search params (C1.52). A malformed or invalid card is not_found; a
  * missing price is the form without an error; an invalid or repeated price,
  * or a finish other than normal or foil (etched included, C1.08 = A), is the
- * form with the error. `printing` is ignored until S2.3.
+ * form with the error. A `printing` that is not one Scryfall id (S2.3d2) is
+ * the form with the error too, before any Scryfall call, also when the price
+ * is blank.
  */
 export function parseResultParams(
   cardSegment: string,
@@ -146,12 +170,14 @@ export function parseResultParams(
   const finishValid =
     !finish.repeated &&
     (finish.value === undefined || SHOWN_FINISHES.includes(finish.value));
+  const printing = parsePrinting(search.printing);
 
   if (!price.repeated && typedPrice.trim() === "") {
-    return { kind: "form", card, price: typedPrice, error: !finishValid };
+    const error = !finishValid || !printing.valid;
+    return { kind: "form", card, price: typedPrice, error };
   }
   const cents = price.repeated ? null : parsePriceCents(typedPrice);
-  if (cents === null || !finishValid) {
+  if (cents === null || !finishValid || !printing.valid) {
     return { kind: "form", card, price: typedPrice, error: true };
   }
   const shownFinish = (finish.value ?? "normal") as ShownFinish;
@@ -161,6 +187,7 @@ export function parseResultParams(
     price: typedPrice,
     askingPriceCents: cents,
     finish: shownFinish,
-    paramsKey: `${card}|${cents}|${shownFinish}`,
+    printing: printing.printing,
+    paramsKey: `${card}|${cents}|${shownFinish}|${printing.printing ?? ""}`,
   };
 }

@@ -161,6 +161,11 @@ describe("featureOf", () => {
     ["src/lib/evaluation/lookup-miss.test.ts", "F2 · Live Evaluation"],
     ["src/lib/copy/entry-points.test.ts", "F2 · Live Evaluation"],
     ["src/types/scryfall.test-d.ts", "F2 · Live Evaluation"],
+    // S2.3d11 (T17): this story's new test files map to F2.
+    ["src/lib/selection-href.test.ts", "F2 · Live Evaluation"],
+    ["src/components/printing-select.test.tsx", "F2 · Live Evaluation"],
+    ["src/components/finish-select.test.tsx", "F2 · Live Evaluation"],
+    ["src/components/selection-controls.test.tsx", "F2 · Live Evaluation"],
   ])("%s → %s", (file, feature) => {
     expect(featureOf(file)).toBe(feature);
   });

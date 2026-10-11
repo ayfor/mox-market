@@ -1,12 +1,19 @@
 // ResultView by props (S2.1d9): T11 (AC-2), T13 (AC-3, AC-14), T14 (AC-4),
 // T15 (AC-6), T16 (AC-7, AC-14), T20 (AC-11, C1.02) and T25 (AC-17, D2).
+// S2.3 adds its T13 (AC-8, AC-10): the selectors in every ok panel.
 import {
+  ESPER_SENTINEL_PRINTS,
   MH2_12_ID,
   scryfallCard,
+  SLD_2123_ID,
 } from "@/lib/__fixtures__/esper-sentinel-prints";
 import { RECOMMENDATION_DISCLAIMER, SOURCE_LABEL } from "@/lib/copy/legal";
-import type { Evaluation } from "@/lib/evaluation/build-evaluation";
+import type {
+  Evaluation,
+  EvaluationSelection,
+} from "@/lib/evaluation/build-evaluation";
 import { EMPTY_TILE_VALUE } from "@/lib/evaluation/tiles";
+import { offeredFinishes, selectablePrintings } from "@/lib/printings";
 import { REASON_COPY } from "@/lib/recommendation/copy";
 import { computeRecommendation } from "@/lib/recommendation/engine";
 import { dailyHistory } from "@/lib/recommendation/fixtures";
@@ -15,7 +22,7 @@ import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import type { ScryfallCard } from "@/types/scryfall";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { ResultView } from "./result-view";
+import { printingLine, ResultView } from "./result-view";
 
 const router = vi.hoisted(() => ({
   push: vi.fn(),
@@ -23,7 +30,11 @@ const router = vi.hoisted(() => ({
   replace: vi.fn(),
   prefetch: vi.fn(),
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+const searchParams = vi.hoisted(() => ({ current: "price=54" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => router,
+  useSearchParams: () => new URLSearchParams(searchParams.current),
+}));
 
 beforeEach(() => {
   router.refresh.mockReset();
@@ -45,6 +56,7 @@ interface Options {
   historyUnavailable?: boolean;
   syncStale?: boolean;
   printing?: ScryfallCard;
+  selection?: EvaluationSelection;
 }
 
 /** An ok evaluation through the real engine. */
@@ -76,9 +88,23 @@ function evaluation(
       latestSnapshotAt,
     },
   );
+  const printing = options.printing ?? PRINTING;
   return {
     status: "ok",
-    printing: options.printing ?? PRINTING,
+    printing,
+    selection: options.selection ?? {
+      options: [
+        {
+          id: printing.id,
+          set: printing.set,
+          set_name: printing.set_name,
+          collector_number: printing.collector_number,
+          finishes: ["normal", "foil"],
+        },
+      ],
+      printingId: printing.id,
+      offeredFinishes: ["normal", "foil"],
+    },
     requestedFinish,
     appliedFinish,
     recommendation,
@@ -486,5 +512,110 @@ describe("the card header (T25, AC-17, D2)", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       "Esper Sentinel",
     );
+  });
+});
+
+// --- S2.3: the selectors in the panel ---------------------------------------
+/** The Esper Sentinel selection as buildEvaluation makes it. */
+function esperSelection(printingId = MH2_12_ID): EvaluationSelection {
+  const printing = ESPER_SENTINEL_PRINTS.find((p) => p.id === printingId)!;
+  return {
+    options: selectablePrintings(ESPER_SENTINEL_PRINTS).map((p) => ({
+      id: p.id,
+      set: p.set,
+      set_name: p.set_name,
+      collector_number: p.collector_number,
+      finishes: offeredFinishes(p),
+    })),
+    printingId,
+    offeredFinishes: offeredFinishes(printing),
+  };
+}
+
+const printingSelect = () =>
+  screen.getByRole("button", {
+    name: new RegExp(`^${UI_COPY.printingLabel}`),
+  });
+const finishSelect = () =>
+  screen.getByRole("button", { name: new RegExp(`^${UI_COPY.finishLabel}`) });
+
+describe("the selectors in the panel (T13, AC-8, AC-10)", () => {
+  test("an ok evaluation renders both selectors inside .mm-selector-row; option labels are printingLine of each option; the header's set line is the shown option's label", () => {
+    const printing = ESPER_SENTINEL_PRINTS.find((p) => p.id === MH2_12_ID)!;
+    const selection = esperSelection();
+    const { container } = render(
+      <ResultView evaluation={evaluation({ printing, selection })} />,
+    );
+    const row = container.querySelector(".mm-selector-row")!;
+    expect(row).not.toBeNull();
+    expect(row.contains(printingSelect())).toBe(true);
+    expect(row.contains(finishSelect())).toBe(true);
+    expect(row.querySelectorAll(".mm-selector")).toHaveLength(2);
+    const setLine = container.querySelector(".mm-card-set")!.textContent;
+    expect(setLine).toBe("Modern Horizons 2 (MH2) · #12");
+    expect(printingSelect()).toHaveTextContent(setLine!);
+    printingSelect().focus();
+    fireEvent.keyDown(printingSelect(), { key: "ArrowDown" });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(
+      selection.options.map(printingLine),
+    );
+    expect(
+      screen
+        .getAllByRole("option")
+        .filter((o) => o.getAttribute("aria-selected") === "true")
+        .map((o) => o.textContent),
+    ).toEqual([setLine]);
+    expect(finishSelect()).toHaveTextContent("Normal");
+  });
+
+  test("the insufficient_data panel renders both selectors (AC-10)", () => {
+    const sld = ESPER_SENTINEL_PRINTS.find((p) => p.id === SLD_2123_ID)!;
+    const e = insufficient({
+      printing: sld,
+      selection: esperSelection(SLD_2123_ID),
+      currentPriceCents: null,
+    });
+    expect(e.recommendation.kind).toBe("insufficient_data");
+    const { container } = render(<ResultView evaluation={e} />);
+    expect(container.querySelector(".mm-rec-panel")).toHaveAttribute(
+      "data-kind",
+      "insufficient_data",
+    );
+    expect(printingSelect()).toHaveTextContent(
+      "Secret Lair Drop (SLD) · #2123",
+    );
+    expect(finishSelect()).toHaveTextContent("Normal");
+    finishSelect().focus();
+    fireEvent.keyDown(finishSelect(), { key: "ArrowDown" });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Foil",
+    ]);
+  });
+
+  test("foil requested with no foil price: the fallback notice, and FinishSelect still shows Foil (AC-8)", () => {
+    const e = evaluation({
+      requestedFinish: "foil",
+      appliedFinish: "normal",
+      selection: esperSelection(),
+    });
+    expect(e.recommendation.signals.fallbackNotice).toBe(true);
+    render(<ResultView evaluation={e} />);
+    expect(screen.getByRole("note")).toHaveTextContent("Foil");
+    expect(finishSelect()).toHaveTextContent("Foil");
+    expect(finishSelect()).not.toHaveTextContent("Normal");
+  });
+
+  test.each<[string, Evaluation]>([
+    ["error", { status: "error" }],
+    ["ambiguous", { status: "ambiguous" }],
+    ["not_found", { status: "not_found" }],
+    ["invalid", { status: "invalid" }],
+  ])("the %s view renders no selector and no listbox button", (_n, e) => {
+    const { container } = render(<ResultView evaluation={e} />);
+    expect(container.querySelector(".mm-selector-row")).toBeNull();
+    expect(container.querySelector(".mm-selector")).toBeNull();
+    expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Printing/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Finish/ })).toBeNull();
   });
 });

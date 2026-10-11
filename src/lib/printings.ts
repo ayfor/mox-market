@@ -96,3 +96,106 @@ function isBefore(
   if (a.released_at !== b.released_at) return a.released_at < b.released_at;
   return a.id < b.id;
 }
+
+/**
+ * The finishes a printing offers from the shown ones (S2.3d3; C1.08 = A):
+ * normal when Scryfall lists nonfoil, then foil when it lists foil, in that
+ * order. Etched is never offered, and a missing or malformed `finishes` (not
+ * an array, non-string entries) offers nothing.
+ */
+export function offeredFinishes(
+  printing: Pick<ScryfallCard, "finishes">,
+): ShownFinish[] {
+  const finishes: unknown = printing.finishes;
+  if (!Array.isArray(finishes)) return [];
+  const offered: ShownFinish[] = [];
+  if (finishes.includes(SCRYFALL_FINISH.normal)) offered.push("normal");
+  if (finishes.includes(SCRYFALL_FINISH.foil)) offered.push("foil");
+  return offered;
+}
+
+/** The fields an option needs to be labelled and sorted, as strings. */
+function isLabellable(printing: ScryfallCard): boolean {
+  return (
+    typeof printing.id === "string" &&
+    typeof printing.set === "string" &&
+    typeof printing.set_name === "string" &&
+    typeof printing.collector_number === "string" &&
+    typeof printing.released_at === "string"
+  );
+}
+
+/** A collector number's leading digits, without leading zeros, and the rest. */
+function collectorParts(collectorNumber: string): {
+  digits: string | null;
+  rest: string;
+} {
+  const match = /^(\d+)([\s\S]*)$/.exec(collectorNumber);
+  if (match === null) return { digits: null, rest: collectorNumber };
+  return { digits: match[1].replace(/^0+(?=\d)/, ""), rest: match[2] };
+}
+
+/** -1, 0 or 1 by UTF-16 code unit, never by locale. */
+function compareCodeUnits(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/**
+ * Collector numbers in numeric-aware order without ICU (S2.3d3): leading
+ * digits compare as integers ("9" < "10", "4" < "12" < "12s" < "328"), then
+ * the rest by code unit ("12" < "12s" < "12★"); a number with leading digits
+ * sorts before one without; the full text breaks any remaining tie.
+ */
+export function compareCollectorNumbers(a: string, b: string): number {
+  const pa = collectorParts(a);
+  const pb = collectorParts(b);
+  if (pa.digits !== null && pb.digits !== null) {
+    if (pa.digits.length !== pb.digits.length) {
+      return pa.digits.length < pb.digits.length ? -1 : 1;
+    }
+    const byNumber = compareCodeUnits(pa.digits, pb.digits);
+    if (byNumber !== 0) return byNumber;
+    const byRest = compareCodeUnits(pa.rest, pb.rest);
+    if (byRest !== 0) return byRest;
+  } else if (pa.digits !== null || pb.digits !== null) {
+    return pa.digits !== null ? -1 : 1;
+  }
+  return compareCodeUnits(a, b);
+}
+
+/** Newest released_at first, then collector number, then id. */
+function compareOptions(a: ScryfallCard, b: ScryfallCard): number {
+  if (a.released_at !== b.released_at) {
+    return a.released_at > b.released_at ? -1 : 1;
+  }
+  return (
+    compareCollectorNumbers(a.collector_number, b.collector_number) ||
+    compareCodeUnits(a.id, b.id)
+  );
+}
+
+/**
+ * The printings PrintingSelect offers (S2.3d3; AC-1, AC-2, AC-4): every
+ * paper printing (`digital === false`) that offers normal or foil and carries
+ * the fields its option shows, the first of any repeated id, newest
+ * released_at first, then collector number, then id, so Scryfall's order
+ * never matters. Promo, box, memorabilia, token and minigame printings stay:
+ * C1.26 and C1.46's exclusions shape only the default. Never mutates its
+ * input.
+ */
+export function selectablePrintings(
+  printings: readonly ScryfallCard[],
+): ScryfallCard[] {
+  const seen = new Set<string>();
+  const selectable: ScryfallCard[] = [];
+  for (const printing of printings) {
+    if (printing === null || typeof printing !== "object") continue;
+    if (printing.digital !== false || !isLabellable(printing)) continue;
+    if (offeredFinishes(printing).length === 0) continue;
+    if (seen.has(printing.id)) continue;
+    seen.add(printing.id);
+    selectable.push(printing);
+  }
+  return selectable.sort(compareOptions);
+}

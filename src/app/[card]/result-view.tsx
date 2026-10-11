@@ -1,6 +1,12 @@
 // The recommendation panel by props (S2.1d9; F2 §UI): a pure server
 // component, so every state is testable without Scryfall or the reader.
-// Every string comes from a copy module (C1.54).
+// Every string comes from a copy module (C1.54). An ok panel, the
+// insufficient_data one included, carries the printing and finish selectors
+// (S2.3, AC-10); their option labels are built here, on the server.
+import {
+  SelectionControls,
+  type SelectionOption,
+} from "@/components/selection-controls";
 import { RECOMMENDATION_DISCLAIMER, SOURCE_LABEL } from "@/lib/copy/legal";
 import { CONFIDENCE_LABELS, KIND_LABELS } from "@/lib/copy/result-labels";
 import type {
@@ -23,7 +29,9 @@ const CARD_IMAGE_HEIGHT = 680;
 type OkEvaluation = Extract<Evaluation, { status: "ok" }>;
 
 /** "Modern Horizons 2 (MH2) · #12", one string everywhere (S2.1d13). */
-export function printingLine(printing: EvaluatedPrinting): string {
+export function printingLine(
+  printing: Pick<EvaluatedPrinting, "set" | "set_name" | "collector_number">,
+): string {
   return fillTemplate(UI_COPY.printingOption, {
     set_name: printing.set_name,
     SET: printing.set.toUpperCase(),
@@ -92,6 +100,15 @@ function DataFooter({ evaluation }: { evaluation: OkEvaluation }) {
   );
 }
 
+/** PrintingSelect's options with their labels, in the selection's order (S2.3d6). */
+function selectorOptions(evaluation: OkEvaluation): SelectionOption[] {
+  return evaluation.selection.options.map((option) => ({
+    id: option.id,
+    label: printingLine(option),
+    finishes: option.finishes,
+  }));
+}
+
 function OkView({ evaluation }: { evaluation: OkEvaluation }) {
   const { printing, recommendation, requestedFinish, historyUnavailable } =
     evaluation;
@@ -114,8 +131,13 @@ function OkView({ evaluation }: { evaluation: OkEvaluation }) {
             <h1 className="mm-card-name">{printing.name}</h1>
             <p className="mm-card-set">{printingLine(printing)}</p>
           </div>
-          {/* Reserved for S2.3's selectors, so the skeleton's slots cause no shift. */}
-          <div className="mm-selector-row" />
+          <SelectionControls
+            options={selectorOptions(evaluation)}
+            printingId={evaluation.selection.printingId}
+            printingLabel={printingLine(printing)}
+            finish={requestedFinish}
+            offeredFinishes={evaluation.selection.offeredFinishes}
+          />
           <section
             className="mm-rec-panel"
             data-kind={kind}

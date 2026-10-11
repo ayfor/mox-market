@@ -25,6 +25,7 @@ import { ResultPanel } from "./result-panel";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams("price=74.99"),
 }));
 vi.mock("@/lib/throttle", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/throttle")>();

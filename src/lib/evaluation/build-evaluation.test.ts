@@ -1,16 +1,39 @@
 // T9 (AC-1, AC-4, AC-13), T15 (AC-6, end to end) and T21 (AC-13):
 // buildEvaluation with Scryfall and the reader mocked, through the real engine.
 // S2.4 adds T10 (AC-6, AC-7: the two misses compute nothing), T11 (AC-8: a
-// failure is never a miss) and T14's unit half (AC-9: a fuzzy hit).
+// failure is never a miss) and T14's unit half (AC-9: a fuzzy hit). S2.3
+// adds T6 (AC-1, AC-3: the default selection), T7 (AC-9: an explicit
+// printing), T8 (AC-2: pagination) and T9 (AC-7, AC-8: never blended).
 import {
+  ESPER_PRINTS_PAGE_1,
+  ESPER_PRINTS_PAGE_2,
+  ESPER_PRINTS_PAGE_2_URI,
+  ESPER_PRINTS_URI,
   ESPER_SENTINEL_PRINTS,
+  etchedOnlyPrinting,
+  H2R_4_ID,
+  J21_ID,
   MH2_12_ID,
+  MH2_328_ID,
+  PLST_ID,
+  PMH2_12S_ID,
   scryfallCard,
+  SLD_2123_ID,
+  WC21_ID,
 } from "@/lib/__fixtures__/esper-sentinel-prints";
+import {
+  historyKey,
+  keyedHistoryReader,
+} from "@/lib/__fixtures__/keyed-history";
+import { offeredFinishes, selectablePrintings } from "@/lib/printings";
 import * as engine from "@/lib/recommendation/engine";
 import { dailyHistory } from "@/lib/recommendation/fixtures";
 import type { RecommendationInput } from "@/lib/recommendation/types";
-import { getCardByName, ScryfallApiError } from "@/lib/scryfall";
+import {
+  getAllPrintings,
+  getCardByName,
+  ScryfallApiError,
+} from "@/lib/scryfall";
 import { throttle, ThrottleBacklogError } from "@/lib/throttle";
 import type { ScryfallCard } from "@/types/scryfall";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -26,6 +49,7 @@ import {
   defaultHistoryReader,
   type PriceHistoryReader,
 } from "./history-reader";
+import { signalTiles } from "./tiles";
 
 vi.mock("@/lib/recommendation/engine", async (importOriginal) => {
   const actual =
@@ -41,6 +65,10 @@ vi.mock("@/lib/throttle", async (importOriginal) => {
 });
 
 const computeSpy = vi.mocked(engine.computeRecommendation);
+const { computeRecommendation: realCompute } = await vi.importActual<
+  typeof import("@/lib/recommendation/engine")
+>("@/lib/recommendation/engine");
+const ETCHED_ONLY = etchedOnlyPrinting();
 const NOW = new Date("2026-10-10T12:00:00.000Z");
 const AS_OF = "2026-10-10";
 const FLAT_30 = dailyHistory(AS_OF, Array(30).fill(5917));
@@ -645,5 +673,414 @@ describe("foil with no foil-priced candidate → the default normal printing (AD
     const { deps } = depsWith({ getAllPrintings: async () => onlyFoil });
     const result = ok(await buildEvaluation(query(5400, "normal"), deps));
     expect(result.printing.id).toBe(NAMED.id);
+  });
+});
+
+// --- S2.3: the selection ---------------------------------------------------
+/** A fetch mock answering Scryfall URLs from a table; anything else rejects. */
+function scryfallFetch(
+  routes: Record<string, () => Response | Promise<Response>>,
+) {
+  const fetchMock = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    const answer = routes[url];
+    if (answer === undefined) throw new TypeError(`unexpected fetch ${url}`);
+    return answer();
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+const NAMED_URL = (card: string) =>
+  `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(card)}`;
+
+const onePage = (data: readonly ScryfallCard[]) => () =>
+  Response.json({
+    object: "list",
+    total_cards: data.length,
+    has_more: false,
+    data,
+  });
+
+const fetchedUrls = (fetchMock: ReturnType<typeof scryfallFetch>) =>
+  fetchMock.mock.calls.map(([url]) => String(url));
+
+describe("the default selection (T6, AC-1, AC-3)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("no printing → mh2 #12 / normal; options are selectablePrintings in order; one prints fetch", async () => {
+    const { deps, scryfall } = depsWith({});
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.printing.id).toBe(MH2_12_ID);
+    expect(result.requestedFinish).toBe("normal");
+    expect(result.selection.printingId).toBe(MH2_12_ID);
+    expect(result.selection.offeredFinishes).toEqual(["normal", "foil"]);
+    expect(result.selection.options).toEqual(
+      selectablePrintings(ESPER_SENTINEL_PRINTS).map((p) => ({
+        id: p.id,
+        set: p.set,
+        set_name: p.set_name,
+        collector_number: p.collector_number,
+        finishes: offeredFinishes(p),
+      })),
+    );
+    expect(result.selection.options.map((o) => o.id)).toEqual([
+      SLD_2123_ID,
+      PLST_ID,
+      WC21_ID,
+      H2R_4_ID,
+      MH2_12_ID,
+      PMH2_12S_ID,
+      MH2_328_ID,
+    ]);
+    expect(scryfall.getAllPrintings).toHaveBeenCalledOnce();
+  });
+
+  test("finish foil → mh2 #12 / foil", async () => {
+    const { deps, scryfall, reader } = depsWith({});
+    const result = ok(await buildEvaluation(query(7499, "foil"), deps));
+    expect(result.selection.printingId).toBe(MH2_12_ID);
+    expect(result.requestedFinish).toBe("foil");
+    expect(result.appliedFinish).toBe("foil");
+    expect(scryfall.getAllPrintings).toHaveBeenCalledOnce();
+    expect(vi.mocked(reader.getPriceHistory)).toHaveBeenCalledExactlyOnceWith(
+      MH2_12_ID,
+      "foil",
+      AS_OF,
+    );
+  });
+
+  test("through the real client: the prints URL is fetched exactly once, serving the default and the selector", async () => {
+    const named = scryfallCard({ id: MH2_12_ID });
+    const fetchMock = scryfallFetch({
+      [NAMED_URL("Esper Sentinel")]: () => Response.json(named),
+      [ESPER_PRINTS_URI]: onePage(ESPER_SENTINEL_PRINTS),
+    });
+    const { deps } = depsWith({ getCardByName, getAllPrintings });
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.selection.options).toHaveLength(7);
+    expect(result.printing.id).toBe(MH2_12_ID);
+    expect(fetchedUrls(fetchMock)).toEqual([
+      NAMED_URL("Esper Sentinel"),
+      ESPER_PRINTS_URI,
+    ]);
+  });
+});
+
+describe("an explicit printing (T7, AC-9)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const withPrinting = (
+    printing: string,
+    finish: "normal" | "foil" = "normal",
+  ): EvaluationQuery => ({ ...query(7499, finish), printing });
+
+  test("mh2 #328 → mh2 #328 evaluated; the reader called once with its key", async () => {
+    const { deps, reader } = depsWith({});
+    const result = ok(await buildEvaluation(withPrinting(MH2_328_ID), deps));
+    expect(result.printing.id).toBe(MH2_328_ID);
+    expect(result.selection.printingId).toBe(MH2_328_ID);
+    expect(result.printing.collector_number).toBe("328");
+    expect(vi.mocked(reader.getPriceHistory)).toHaveBeenCalledExactlyOnceWith(
+      MH2_328_ID,
+      "normal",
+      AS_OF,
+    );
+    expect(computeSpy.mock.calls[0][0].cardId).toBe(MH2_328_ID);
+    expect(computeSpy.mock.calls[0][1].currentPriceCents).toBe(7120);
+  });
+
+  test("the sld id with finish normal → sld #2123, offered foil only, insufficient_data; read for (sld, normal)", async () => {
+    const { deps, reader } = depsWith({});
+    const result = ok(await buildEvaluation(withPrinting(SLD_2123_ID), deps));
+    expect(result.printing.id).toBe(SLD_2123_ID);
+    expect(result.selection.offeredFinishes).toEqual(["foil"]);
+    expect(result.requestedFinish).toBe("normal");
+    expect(result.appliedFinish).toBe("normal");
+    expect(result.recommendation.kind).toBe("insufficient_data");
+    expect(vi.mocked(reader.getPriceHistory)).toHaveBeenCalledExactlyOnceWith(
+      SLD_2123_ID,
+      "normal",
+      AS_OF,
+    );
+  });
+
+  test("a promo printing is evaluated when chosen, though never the default", async () => {
+    const { deps } = depsWith({});
+    const result = ok(await buildEvaluation(withPrinting(PMH2_12S_ID), deps));
+    expect(result.printing.id).toBe(PMH2_12S_ID);
+  });
+
+  test.each([
+    [
+      "a well-formed id of another card",
+      "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d",
+    ],
+    ["j21's id (digital)", J21_ID],
+    ["an etched-only printing's id", ETCHED_ONLY.id],
+  ])(
+    "%s → the default mh2 #12; the reader only for mh2 #12; no /cards/<id> fetch",
+    async (_name, id) => {
+      const named = scryfallCard({ id: MH2_12_ID });
+      const fetchMock = scryfallFetch({
+        [NAMED_URL("Esper Sentinel")]: () => Response.json(named),
+        [ESPER_PRINTS_URI]: onePage([...ESPER_SENTINEL_PRINTS, ETCHED_ONLY]),
+      });
+      const { deps, reader } = depsWith({ getCardByName, getAllPrintings });
+      const result = ok(await buildEvaluation(withPrinting(id), deps));
+      expect(result.printing.id).toBe(MH2_12_ID);
+      expect(result.selection.printingId).toBe(MH2_12_ID);
+      expect(result.selection.options.map((o) => o.id)).not.toContain(id);
+      expect(
+        vi.mocked(reader.getPriceHistory).mock.calls.map(([cardId]) => cardId),
+      ).toEqual([MH2_12_ID]);
+      expect(fetchedUrls(fetchMock)).toEqual([
+        NAMED_URL("Esper Sentinel"),
+        ESPER_PRINTS_URI,
+      ]);
+      expect(fetchedUrls(fetchMock).some((u) => u.includes(id))).toBe(false);
+    },
+  );
+
+  test("an unknown id with foil → the foil default, as with no printing", async () => {
+    const { deps } = depsWith({});
+    const result = ok(
+      await buildEvaluation(
+        withPrinting("0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d", "foil"),
+        deps,
+      ),
+    );
+    expect(result.printing.id).toBe(MH2_12_ID);
+    expect(result.appliedFinish).toBe("foil");
+  });
+
+  test("a printing the list holds twice is evaluated from its first copy", async () => {
+    const first = ESPER_SENTINEL_PRINTS.find((p) => p.id === MH2_328_ID)!;
+    const copy = { ...first, collector_number: "999" };
+    const { deps } = depsWith({
+      getAllPrintings: async () => [...ESPER_SENTINEL_PRINTS, copy],
+    });
+    const result = ok(await buildEvaluation(withPrinting(MH2_328_ID), deps));
+    expect(result.printing.collector_number).toBe("328");
+    expect(
+      result.selection.options.filter((o) => o.id === MH2_328_ID),
+    ).toHaveLength(1);
+  });
+
+  test("the named-card fallback (no candidate) keeps its offered finishes; it may sit outside the options", async () => {
+    const digitalNamed = scryfallCard({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      digital: true,
+      finishes: ["nonfoil"],
+    });
+    const { deps } = depsWith({
+      getCardByName: async () => digitalNamed,
+      getAllPrintings: async () => [digitalNamed],
+    });
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.printing.id).toBe(digitalNamed.id);
+    expect(result.selection.printingId).toBe(digitalNamed.id);
+    expect(result.selection.options).toEqual([]);
+    expect(result.selection.offeredFinishes).toEqual(["normal"]);
+  });
+});
+
+describe("pagination and page failures (T8, AC-2)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const named = scryfallCard({ id: MH2_12_ID });
+  const page1 = () => Response.json(ESPER_PRINTS_PAGE_1);
+  const page2 = () => Response.json(ESPER_PRINTS_PAGE_2);
+
+  test("page 1 has_more with next_page, page 2 the last → options from both pages in T3's order", async () => {
+    expect(ESPER_PRINTS_PAGE_1.data.length).toBeGreaterThan(0);
+    expect(ESPER_PRINTS_PAGE_2.data.length).toBeGreaterThan(0);
+    const fetchMock = scryfallFetch({
+      [NAMED_URL("Esper Sentinel")]: () => Response.json(named),
+      [ESPER_PRINTS_URI]: page1,
+      [ESPER_PRINTS_PAGE_2_URI]: page2,
+    });
+    const { deps, log } = depsWith({ getCardByName, getAllPrintings });
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.selection.options.map((o) => o.id)).toEqual(
+      selectablePrintings(ESPER_SENTINEL_PRINTS).map((p) => p.id),
+    );
+    // Both pages contribute: sld from page 1, mh2 #12 from page 2.
+    const pageOf = (id: string) =>
+      ESPER_PRINTS_PAGE_1.data.some((p) => p.id === id) ? 1 : 2;
+    expect(new Set(result.selection.options.map((o) => pageOf(o.id)))).toEqual(
+      new Set([1, 2]),
+    );
+    expect(fetchedUrls(fetchMock)).toEqual([
+      NAMED_URL("Esper Sentinel"),
+      ESPER_PRINTS_URI,
+      ESPER_PRINTS_PAGE_2_URI,
+    ]);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  const scryfall503 = () =>
+    new Response(JSON.stringify({ object: "error", code: "x", details: "x" }), {
+      status: 503,
+    });
+
+  test.each<[string, Record<string, () => Response | Promise<Response>>]>([
+    [
+      "page 2 answering 503",
+      { [ESPER_PRINTS_URI]: page1, [ESPER_PRINTS_PAGE_2_URI]: scryfall503 },
+    ],
+    [
+      "page 2 answering an HTML 502",
+      {
+        [ESPER_PRINTS_URI]: page1,
+        [ESPER_PRINTS_PAGE_2_URI]: () =>
+          new Response("<html>bad gateway</html>", { status: 502 }),
+      },
+    ],
+    [
+      "page 2's fetch rejecting",
+      {
+        [ESPER_PRINTS_URI]: page1,
+        [ESPER_PRINTS_PAGE_2_URI]: () =>
+          Promise.reject(new TypeError("fetch failed")),
+      },
+    ],
+    [
+      "page 1 with has_more and no next_page",
+      {
+        [ESPER_PRINTS_URI]: () =>
+          Response.json({ ...ESPER_PRINTS_PAGE_1, next_page: undefined }),
+      },
+    ],
+    [
+      "page 1 with a next_page off api.scryfall.com",
+      {
+        [ESPER_PRINTS_URI]: () =>
+          Response.json({
+            ...ESPER_PRINTS_PAGE_1,
+            next_page: "https://evil.example/cards/search?page=2",
+          }),
+      },
+    ],
+    ["page 1 answering 503", { [ESPER_PRINTS_URI]: scryfall503 }],
+  ])(
+    "%s → error, one scryfall_failed log, no reader or engine call, no selection",
+    async (_name, routes) => {
+      scryfallFetch({
+        [NAMED_URL("Esper Sentinel")]: () => Response.json(named),
+        ...routes,
+      });
+      const { deps, reader, log } = depsWith({
+        getCardByName,
+        getAllPrintings,
+      });
+      const result = await buildEvaluation(query(7499), deps);
+      expect(result).toEqual({ status: "error" });
+      expect(result).not.toHaveProperty("selection");
+      expect(log).toHaveBeenCalledOnce();
+      expect(log).toHaveBeenCalledWith("scryfall_failed", expect.anything());
+      expect(vi.mocked(reader.getPriceHistory)).not.toHaveBeenCalled();
+      expect(vi.mocked(reader.getHistoryFreshness)).not.toHaveBeenCalled();
+      expect(computeSpy).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("history is never blended (T9, AC-7, AC-8)", () => {
+  const A = MH2_12_ID;
+  const B = MH2_328_ID;
+  const SERIES = {
+    // (A, normal): 30 flat days at A's normal price.
+    [historyKey(A, "normal")]: dailyHistory(AS_OF, Array(30).fill(5917)),
+    // (A, foil): a 20-day rising ramp.
+    [historyKey(A, "foil")]: dailyHistory(
+      AS_OF,
+      Array.from({ length: 20 }, (_, i) => 6800 + i * 45),
+    ),
+    // (B, normal): 14 days with a wide range.
+    [historyKey(B, "normal")]: dailyHistory(
+      AS_OF,
+      Array.from({ length: 14 }, (_, i) => (i % 2 === 0 ? 5200 : 8900)),
+    ),
+  };
+
+  type Key = [string, "normal" | "foil"];
+  const KEYS: Key[] = [
+    [A, "normal"],
+    [A, "foil"],
+    [B, "normal"],
+  ];
+
+  async function evaluateKey([printing, finish]: Key) {
+    const reader = keyedHistoryReader(SERIES, NOW);
+    const { deps } = depsWith({ reader });
+    computeSpy.mockClear();
+    const result = ok(
+      await buildEvaluation({ ...query(7499, finish), printing }, deps),
+    );
+    return { result, reader, market: computeSpy.mock.calls[0][1] };
+  }
+
+  test.each(KEYS)(
+    "(%s, %s): one read with exactly that key; signals and the trend tile equal the engine on that series alone",
+    async (printing, finish) => {
+      const { result, reader, market } = await evaluateKey([printing, finish]);
+      expect(reader.calls).toEqual([[printing, finish, AS_OF]]);
+      const own = SERIES[historyKey(printing, finish)];
+      expect(market.history).toEqual(own);
+      const expected = realCompute(
+        { askingPriceCents: 7499, cardId: printing, finish },
+        { ...market, history: [...own] },
+      );
+      const { signals } = result.recommendation;
+      expect(signals.snapshotCount30d).toBe(own.length);
+      expect(signals.snapshotCount30d).toBe(expected.signals.snapshotCount30d);
+      expect(signals.range30dCents).toEqual(expected.signals.range30dCents);
+      expect(signals.slope30dPct).toBe(expected.signals.slope30dPct);
+      expect(signals.trendDirection).toBe(expected.signals.trendDirection);
+      const trend = (s: typeof signals) =>
+        signalTiles(s).find((t) => t.id === "trend")!.value;
+      expect(trend(signals)).toBe(trend(expected.signals));
+    },
+  );
+
+  test("each key's count, range and trend differ from the other two keys'", async () => {
+    const seen = await Promise.all(KEYS.map(evaluateKey));
+    const signals = seen.map(({ result }) => result.recommendation.signals);
+    const counts = signals.map((s) => s.snapshotCount30d);
+    expect(new Set(counts).size).toBe(3);
+    const ranges = signals.map((s) => JSON.stringify(s.range30dCents));
+    expect(new Set(ranges).size).toBe(3);
+    const trends = signals.map(
+      (s) => signalTiles(s).find((t) => t.id === "trend")!.value,
+    );
+    expect(new Set(trends).size).toBe(3);
+  });
+
+  test("fallback: printing A with usd_foil null and foil requested → read for (A, normal) only, fallbackNotice", async () => {
+    const reader = keyedHistoryReader(SERIES, NOW);
+    const noFoilPrice = ESPER_SENTINEL_PRINTS.map((p) =>
+      p.id === A ? { ...p, prices: { ...p.prices, usd_foil: null } } : p,
+    );
+    const { deps } = depsWith({
+      reader,
+      getAllPrintings: async () => noFoilPrice,
+    });
+    const result = ok(
+      await buildEvaluation({ ...query(5400, "foil"), printing: A }, deps),
+    );
+    expect(reader.calls).toEqual([[A, "normal", AS_OF]]);
+    expect(result.printing.id).toBe(A);
+    expect(result.appliedFinish).toBe("normal");
+    expect(result.requestedFinish).toBe("foil");
+    expect(result.recommendation.kind).not.toBe("insufficient_data");
+    expect(result.recommendation.signals.fallbackNotice).toBe(true);
+    expect(result.recommendation.signals.snapshotCount30d).toBe(30);
   });
 });
