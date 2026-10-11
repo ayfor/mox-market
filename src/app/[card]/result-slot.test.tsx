@@ -258,6 +258,7 @@ describe("a selector switch (T15, AC-5, AC-12)", () => {
     });
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       "?price=54.00&finish=foil&printing=y",
+      { scroll: false },
     );
     const shown = skeleton();
     expect(shown).not.toBeNull();

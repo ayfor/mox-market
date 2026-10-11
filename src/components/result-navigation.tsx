@@ -32,7 +32,11 @@ export interface NavigateOptions {
 export interface ResultNavigation {
   /** A navigation or refresh started here has not finished. */
   readonly isPending: boolean;
-  /** router.push(href) inside the transition; records or clears the focus request. */
+  /**
+   * router.push(href) inside the transition; records or clears the focus
+   * request. With a focus target (a selector switch) the scroll position is
+   * kept.
+   */
   navigate(href: string, options?: NavigateOptions): void;
   /** router.refresh() inside the transition; clears the focus request. */
   refresh(): void;
@@ -58,7 +62,13 @@ function useOwnNavigation(): ResultNavigation {
       // pending until the navigation settles.
       navigate: (href: string, options?: NavigateOptions) => {
         focusRequest.current = options?.focus ?? null;
-        startTransition(() => router.push(href));
+        // A selector switch re-evaluates the card in place, so it keeps the
+        // scroll position instead of jumping to the top (S2.3 Deviation 3).
+        startTransition(() =>
+          options?.focus === undefined
+            ? router.push(href)
+            : router.push(href, { scroll: false }),
+        );
       },
       refresh: () => {
         focusRequest.current = null;

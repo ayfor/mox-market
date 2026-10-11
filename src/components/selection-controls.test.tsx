@@ -120,6 +120,8 @@ const printingButton = () =>
 const finishButton = () =>
   screen.getByRole("button", { name: new RegExp(`^${UI_COPY.finishLabel}`) });
 const skeleton = () => screen.queryByRole("status", { name: LOADING_LABEL });
+/** A switch keeps the scroll position (S2.3 Deviation 3). */
+const KEEP_SCROLL = { scroll: false };
 
 /** Opens a control's list and clicks the option with that name. */
 async function choose(button: HTMLElement, name: string) {
@@ -137,6 +139,7 @@ describe("one push per commit (T12, AC-5, AC-6)", () => {
     await choose(finishButton(), "Foil");
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       `?price=74.99&finish=foil&printing=${MH2_12_ID}`,
+      KEEP_SCROLL,
     );
   });
 
@@ -145,6 +148,7 @@ describe("one push per commit (T12, AC-5, AC-6)", () => {
     await choose(printingButton(), "Secret Lair Drop (SLD) · #2123");
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       `?price=74.99&finish=foil&printing=${SLD_2123_ID}`,
+      KEEP_SCROLL,
     );
   });
 
@@ -153,6 +157,7 @@ describe("one push per commit (T12, AC-5, AC-6)", () => {
     await choose(printingButton(), "The List (PLST) · #MH2-12");
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       `?price=74.99&finish=normal&printing=${PLST_ID}`,
+      KEEP_SCROLL,
     );
   });
 
@@ -162,6 +167,7 @@ describe("one push per commit (T12, AC-5, AC-6)", () => {
     await choose(printingButton(), "Modern Horizons 2 (MH2) · #328");
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       `?price=%2474.99&finish=normal&printing=${MH2_328_ID}`,
+      KEEP_SCROLL,
     );
   });
 
@@ -189,6 +195,7 @@ describe("one push per commit (T12, AC-5, AC-6)", () => {
     // sld → plst → mh2 #12 → mh2 #328; foil kept, mh2 #328 offers it.
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       `?price=74.99&finish=foil&printing=${MH2_328_ID}`,
+      KEEP_SCROLL,
     );
   });
 
