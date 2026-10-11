@@ -4,9 +4,16 @@
 // so each chunk commits by itself (autocommit) and an interrupted run keeps
 // the chunks before the fault. Never string-concatenated SQL: table and
 // column names are literals, and every value travels as a parameter.
-// S0.3's daily sync reuses these functions over the same Db interface.
-import { HISTORY_WINDOW_DAYS } from "./consts";
-import type { IdentifierRow, PriceRow } from "./transform";
+// S0.3's daily sync reuses these functions over the same Db interface, and
+// adds three of its own (S0.3d9, S0.3d10): markStaleRuns, setRunSource and
+// loadIdentifierIndex.
+import { HISTORY_WINDOW_DAYS, STALE_RUN_MS } from "./consts";
+import {
+  IdentifierIndex,
+  isCalendarDate,
+  type IdentifierRow,
+  type PriceRow,
+} from "./transform";
 
 /** The slice of pg.Client the writer uses. */
 export interface QueryResultLike {
@@ -213,6 +220,90 @@ WHERE "id" = $1::int4`,
       outcome.error === null ? null : sanitizeErrorMessage(outcome.error),
     ],
   );
+}
+
+// --- the daily sync's statements (S0.3d9, S0.3d10) ---------------------------
+
+/** The fixed text a stale run's row gets (S0.3d9). */
+export const STALE_RUN_MESSAGE = "abandoned: still running after 1 hour";
+
+/**
+ * Marks every run still `running` after `$1` ms, any trigger, as `error`. The
+ * age is measured with the database's own clock, so the app clock and the
+ * database clock are never mixed. The sync sends it before inserting its own
+ * row, so a run never marks itself.
+ */
+export const MARK_STALE_RUNS_SQL = `UPDATE "price_sync_runs"
+SET "status" = 'error', "finished_at" = now(), "error" = $2::text
+WHERE "status" = 'running' AND "started_at" < now() - ($1::int8 * interval '1 millisecond')`;
+
+/** Records Meta.json's date and version on a run (S0.3d10). */
+export const SET_RUN_SOURCE_SQL = `UPDATE "price_sync_runs" SET "source_date" = $2::date, "source_version" = $3::text WHERE "id" = $1::int4`;
+
+/** The whole identifier map, for IdentifierIndex.add (S0.3d7). */
+export const LOAD_IDENTIFIERS_SQL = `SELECT "mtgjson_uuid"::text AS "uuid", "scryfall_id"::text AS "scryfallId", "side", "edhrec_rank" AS "edhrecRank"
+FROM "mtgjson_identifiers"`;
+
+/** The longest source_version a run row stores (S0.3d10). */
+export const SOURCE_VERSION_MAX_CHARS = 100;
+
+/**
+ * Ends every run left `running` for longer than `staleMs` as `error` with
+ * STALE_RUN_MESSAGE; returns how many it marked (AC-9).
+ */
+export async function markStaleRuns(
+  db: Db,
+  staleMs: number = STALE_RUN_MS,
+): Promise<number> {
+  const result = await db.query(MARK_STALE_RUNS_SQL, [
+    staleMs,
+    STALE_RUN_MESSAGE,
+  ]);
+  return result.rowCount ?? 0;
+}
+
+/**
+ * Records what Meta.json said on the run row before any check, so every
+ * outcome shows what arrived: the date only when it is a calendar date, the
+ * version cut to SOURCE_VERSION_MAX_CHARS.
+ */
+export async function setRunSource(
+  db: Db,
+  id: number,
+  source: { date: string | null; version: string | null },
+): Promise<void> {
+  await db.query(SET_RUN_SOURCE_SQL, [
+    id,
+    isCalendarDate(source.date) ? source.date : null,
+    source.version === null
+      ? null
+      : source.version.slice(0, SOURCE_VERSION_MAX_CHARS),
+  ]);
+}
+
+/**
+ * Loads mtgjson_identifiers into an IdentifierIndex (S0.3d7): the same
+ * validation and preferred-UUID rule the bulk ingest applies to
+ * AllIdentifiers, so an invalid stored row is counted by the index, not
+ * thrown.
+ */
+export async function loadIdentifierIndex(
+  db: Db,
+  index: IdentifierIndex = new IdentifierIndex(),
+): Promise<IdentifierIndex> {
+  const result = await db.query(LOAD_IDENTIFIERS_SQL);
+  for (const row of result.rows) {
+    index.add({
+      uuid: typeof row.uuid === "string" ? row.uuid.toLowerCase() : "",
+      scryfallId:
+        typeof row.scryfallId === "string"
+          ? row.scryfallId.toLowerCase()
+          : row.scryfallId,
+      side: row.side,
+      edhrecRank: row.edhrecRank,
+    });
+  }
+  return index;
 }
 
 /** The longest error text a run row stores (F0 §Fields). */

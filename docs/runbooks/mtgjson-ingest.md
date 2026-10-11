@@ -1,6 +1,6 @@
 # Runbook: MTGJson price-history ingest
 
-The one-shot bulk load of F0's price history (Design F0 W1) and the identifier refresh (W4), with `scripts/ingest-mtgjson-history.ts`. Story S0.2; plan `docs/plans/S0.2-mtgjson-ingest.md`. The daily sync that keeps the history fresh afterwards is S0.3's cron route.
+The one-shot bulk load of F0's price history (Design F0 W1) and the identifier refresh (W4), with `scripts/ingest-mtgjson-history.ts`. Story S0.2; plan `docs/plans/S0.2-mtgjson-ingest.md`. The daily sync that keeps the history fresh afterwards is S0.3's cron route, `/api/prices/sync-mtgjson` (README, "Daily price sync").
 
 ## What the script does
 
@@ -131,6 +131,10 @@ Step 0, after the S0.1 merge: README "Production" (a) to (d), which are S1.1's b
 2. Resume production deploys after S0.3 is merged and Josh signs off, and confirm a production deployment containing `/api/prices/sync-mtgjson` is live.
 3. The same UTC day: path C, identifiers then prices, with the preconditions above.
 4. The next day: confirm a cron `ok` run whose `rows_written` is within 10% of the dry-run's rows/day.
+
+Josh removes the Vercel Firewall rule on `/api/prices/snapshot` (V1's writer, deleted by S0.3) only after a production deployment without it is live (step 2); until then the live V1 build still serves that route, and the rule keeps it unreachable.
+
+Start path C outside 16:30 to 18:00 UTC, so it never runs alongside the 17:00 UTC cron: both upsert `price_history`, and a row-lock wait or deadlock between them could end the cron run `error` (S0.3 ADV.5).
 
 ```sql
 SELECT trigger, status, started_at, finished_at, rows_written, unmapped_uuids, db_bytes

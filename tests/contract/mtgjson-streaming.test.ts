@@ -1,5 +1,6 @@
 // T7 (AC-5; S0.2d4): a static scan of the MTGJson modules and the ingest
-// script. No whole-file reads or parses (JSON.parse, readFile, readFileSync,
+// script, and since S0.3 (T17, AC-11) the sync route and its guard. No
+// whole-file reads or parses (JSON.parse, readFile, readFileSync,
 // Response .json/.text/.arrayBuffer, the sync zlib calls), and the only file
 // writer is source.ts's download(). fetch's body is not raw: it is decoded
 // when the server sets a Content-Encoding (ADV.3), so for a .gz file
@@ -16,12 +17,20 @@ import { describe, expect, test } from "vitest";
 const ROOT = path.resolve(__dirname, "..", "..");
 const MTGJSON = path.join(ROOT, "src", "lib", "mtgjson");
 
-/** The production files: src/lib/mtgjson/*.ts (no tests, no fixtures) and the script. */
+/**
+ * The production files: src/lib/mtgjson/*.ts (no tests, no fixtures), the
+ * ingest script, and S0.3's sync route and guard (T17).
+ */
 function scannedFiles(): string[] {
   const modules = readdirSync(MTGJSON)
     .filter((f) => f.endsWith(".ts") && !/\.test(-d)?\.ts$/.test(f))
     .map((f) => path.join(MTGJSON, f));
-  return [...modules, path.join(ROOT, "scripts", "ingest-mtgjson-history.ts")];
+  return [
+    ...modules,
+    path.join(ROOT, "scripts", "ingest-mtgjson-history.ts"),
+    path.join(ROOT, "src", "app", "api", "prices", "sync-mtgjson", "route.ts"),
+    path.join(ROOT, "src", "lib", "cron-auth.ts"),
+  ];
 }
 
 /** Source text with comments removed (strings and code kept). */
@@ -96,6 +105,12 @@ describe("MTGJson streaming contract (T7, AC-5)", () => {
       "src/lib/mtgjson/transform.ts",
       "src/lib/mtgjson/store.ts",
       "scripts/ingest-mtgjson-history.ts",
+      // S0.3 (T17): the daily sync's modules, its route and its guard.
+      "src/lib/mtgjson/sync.ts",
+      "src/lib/mtgjson/sync-handler.ts",
+      "src/lib/mtgjson/prisma-db.ts",
+      "src/app/api/prices/sync-mtgjson/route.ts",
+      "src/lib/cron-auth.ts",
     ]) {
       expect(names).toContain(expected);
     }

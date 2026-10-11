@@ -2,6 +2,7 @@
 // text and parameter arrays and answers the handful of queries the store
 // sends. It never opens a socket; integration tests use a scratch database.
 import type { Db, QueryResultLike } from "../store";
+import type { IdentifierRow } from "../transform";
 
 export interface Statement {
   readonly text: string;
@@ -24,6 +25,10 @@ export interface FakeDbOptions {
   readonly failOn?: FailRule | readonly FailRule[];
   /** Called with each statement before it is answered (an abort hook). */
   readonly onStatement?: (statement: Statement) => void;
+  /** S0.3: the rows the identifier load reads (default: none). */
+  readonly identifiers?: readonly IdentifierRow[];
+  /** S0.3: how many runs the stale-run update reports marked (default 0). */
+  readonly staleRuns?: number;
 }
 
 export class FakeDb implements Db {
@@ -64,6 +69,18 @@ export class FakeDb implements Db {
     }
     if (/NOT EXISTS/.test(text)) {
       return { rowCount: 1, rows: [{ empty: this.options.empty ?? true }] };
+    }
+    if (/^SELECT[\s\S]*FROM "mtgjson_identifiers"/.test(text)) {
+      const rows = (this.options.identifiers ?? []).map((row) => ({
+        uuid: row.mtgjsonUuid,
+        scryfallId: row.scryfallId,
+        side: row.side,
+        edhrecRank: row.edhrecRank,
+      }));
+      return { rowCount: rows.length, rows };
+    }
+    if (/^UPDATE "price_sync_runs"[\s\S]*'running'/.test(text)) {
+      return { rowCount: this.options.staleRuns ?? 0, rows: [] };
     }
     if (/INSERT INTO "price_sync_runs"/.test(text)) {
       return { rowCount: 1, rows: [{ id: 1 }] };
