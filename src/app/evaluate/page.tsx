@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 
+import { EVALUATE_COPY } from "@/lib/copy/entry-points";
 import { EvaluatePageClient } from "./evaluate-client";
 import "./evaluate.css";
 
 export const metadata: Metadata = {
-  title: "Evaluate",
-  description:
-    "Enter a card and a price. We'll tell you whether it's a deal.",
+  title: EVALUATE_COPY.title,
+  description: EVALUATE_COPY.description,
 };
 
 export default function EvaluatePage() {

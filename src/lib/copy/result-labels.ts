@@ -37,8 +37,8 @@ export const TILE_CAPTIONS = Object.freeze({
 
 /**
  * The entry form's field and button labels, and the retry button. The card
- * field reads "Card": the landing form (S2.4's) still holds "Card name" as
- * a literal, and one string has one home (S1.3 T19).
+ * field reads "Card" on the entry form and the landing form alike (S2.4
+ * AC-10): one string has one home (S1.3 T19).
  */
 export const FORM_LABELS = Object.freeze({
   card: "Card",

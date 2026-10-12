@@ -2,6 +2,7 @@
 
 import { EntryForm } from "@/components/entry-form";
 import { NavBar } from "@/components/nav-bar";
+import { EVALUATE_COPY } from "@/lib/copy/entry-points";
 
 /* ────────────────────────────────────────────────────────────
    Mox Market V2 — /evaluate
@@ -11,7 +12,8 @@ import { NavBar } from "@/components/nav-bar";
    shared EntryForm: it validates the price and pushes the result route
    /[card]?price=, where the recommendation is computed on the server.
    S2.1 deleted the client-side mock market and the Recent Evaluations
-   list (C1.33, C1.44 = A); that list returns with F6/F7.
+   list (C1.33, C1.44 = A); a Phase 2 feature may bring the list back.
+   The hero's strings come from EVALUATE_COPY (C1.54).
    ──────────────────────────────────────────────────────────── */
 
 /* ─── Hero — page header ─── */
@@ -20,12 +22,9 @@ function Hero() {
   return (
     <section className="mm-hero">
       <div className="mm-hero-text">
-        <div className="mm-hero-eyebrow">Evaluate</div>
-        <h1 className="mm-hero-headline">Evaluate a card.</h1>
-        <p className="mm-hero-subhead">
-          Enter a card and a price. We&rsquo;ll tell you whether it&rsquo;s a
-          deal.
-        </p>
+        <div className="mm-hero-eyebrow">{EVALUATE_COPY.eyebrow}</div>
+        <h1 className="mm-hero-headline">{EVALUATE_COPY.headline}</h1>
+        <p className="mm-hero-subhead">{EVALUATE_COPY.description}</p>
       </div>
       <svg className="mm-hero-hex" viewBox="0 0 96 96" aria-hidden="true">
         <polygon

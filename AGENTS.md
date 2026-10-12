@@ -53,15 +53,15 @@ Bitey creates the branch `story/S#.#-slug`, commits the plan and `.cursor/hooks/
 | Purpose | Command | Status |
 |---------|---------|--------|
 | Dev server | `npm run dev` | exists (Node 22) |
-| Lint | `npm run lint` | **broken until S1.1**: the script is `next lint`, which Next 16 removed; S1.1 repoints it to `eslint .` |
+| Lint | `npm run lint` (`eslint .`, ESLint 9 flat config) | since S1.1 |
 | Format | `npx prettier --write <files you changed>` | Do **not** run `npm run format`: it rewrites the whole repo, including files you must not touch |
 | Build | `npm run build` (runs `prisma generate`) | exists (Node 22) |
-| Test | `npm test` (Vitest) | lands S1.1 (Vitest 4.x with React Testing Library, ruling C1.49 = A) |
-| Test report | `npm run test:report` → `docs/test-report.md` | lands S1.1 |
+| Test | `npm test` (Vitest 4 with React Testing Library; unit, component and integration projects) | since S1.1 (ruling C1.49 = A) |
+| Test report | `npm run test:report` → `docs/test-report.md` | since S1.1 |
 | MTGJson ingest (paths A, B) | `npx tsx scripts/ingest-mtgjson-history.ts --dry-run` (A, no database); `npx tsx scripts/ingest-mtgjson-history.ts --source-dir .cache/mtgjson` (B, localhost only; host checks first) | since S0.2. Path C (`--production`) is Josh's alone: `docs/runbooks/mtgjson-ingest.md` |
 | Daily sync evidence (local only) | `POSTGRES_URL_NON_POOLING=<localhost URL> npx tsx scripts/sync-evidence.ts --source-dir .cache/mtgjson --days 7` (runs `runDailySync` on a local copy, then 7 re-dated days; refuses any non-local host before connecting) | since S0.3 |
 
-Before setting `In Review`: build and tests green locally, and lint green once S1.1 lands.
+Before setting `In Review`: lint, build and tests green locally.
 
 ## Conventions (binding)
 
