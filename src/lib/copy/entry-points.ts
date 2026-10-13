@@ -40,3 +40,25 @@ export const NAV_LABELS = Object.freeze({
   cta: "New Listing Analysis",
   ctaName: "New listing analysis",
 } as const);
+
+/**
+ * The root layout's meta description. The site title and its template stay
+ * in src/app/layout.tsx (title.default is their one home, S2.4d5): both
+ * carry the em dash the copy hygiene suite reserves for three strings.
+ */
+export const SITE_COPY = Object.freeze({
+  description:
+    "Mox Market evaluates a single Magic: The Gathering card listing against the 30-day market. Enter a card and a price; get a Buy, Fair or Wait recommendation.",
+} as const);
+
+/**
+ * The /evaluate page's title, hero and meta description. The subhead and
+ * the description are one sentence with one home. ASCII apostrophes, as in
+ * LANDING_COPY (S2.4d5).
+ */
+export const EVALUATE_COPY = Object.freeze({
+  title: "Evaluate",
+  eyebrow: "Evaluate",
+  headline: "Evaluate a card.",
+  description: "Enter a card and a price. We'll tell you whether it's a deal.",
+} as const);

@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import type React from "react";
 
 import { SiteFooter } from "@/components/site-footer";
+import { SITE_COPY } from "@/lib/copy/entry-points";
 import "./globals.css";
 
 const InterVariable = localFont({
@@ -13,13 +14,14 @@ const InterVariable = localFont({
   ],
 });
 
+// The title and its template are the one place these two strings live
+// (S2.4d5); every other string on the site comes from a copy module.
 export const metadata: Metadata = {
   title: {
     template: "%s — Mox Market",
     default: "Mox Market — Should you buy it?",
   },
-  description:
-    "Mox Market evaluates a single Magic: The Gathering card listing against the 30-day market. Enter a card and a price; get a verdict.",
+  description: SITE_COPY.description,
 };
 
 export default function RootLayout({

@@ -29,6 +29,21 @@ const STORY_TSX = [
   "src/components/selection-controls.tsx",
   "src/components/select-chevron.tsx",
   "src/app/[card]/panel-skeleton.tsx",
+  // Copy-home pass (2026-10-12): the root layout and /evaluate joined the
+  // convention; their descriptions and the hero read from entry-points.ts.
+  "src/app/layout.tsx",
+  "src/app/evaluate/page.tsx",
+  "src/app/evaluate/evaluate-client.tsx",
+];
+
+/**
+ * The site title and its template stay literals in the root layout: that is
+ * their one home (S2.4d5), and both carry the em dash the copy hygiene suite
+ * reserves for three strings. Nothing else in its metadata may be a literal.
+ */
+const LAYOUT_TITLE_LITERALS = [
+  '"%s — Mox Market"',
+  '"Mox Market — Should you buy it?"',
 ];
 
 /** Attributes a user reads or hears. */
@@ -157,10 +172,20 @@ describe("no user-facing literal in this story's TSX (T15, AC-10)", () => {
     expect(userFacingLiterals(file, read(file))).toEqual([]);
   });
 
-  test("src/app/page.tsx exports metadata with no string literal", () => {
-    const source = read("src/app/page.tsx");
-    expect(source).toMatch(/export const metadata/);
-    expect(metadataLiterals("src/app/page.tsx", source)).toEqual([]);
+  test.each(["src/app/page.tsx", "src/app/evaluate/page.tsx"])(
+    "%s exports metadata with no string literal",
+    (file) => {
+      const source = read(file);
+      expect(source).toMatch(/export const metadata/);
+      expect(metadataLiterals(file, source)).toEqual([]);
+    },
+  );
+
+  test("src/app/layout.tsx's metadata holds only the two title strings", () => {
+    const source = read("src/app/layout.tsx");
+    expect(metadataLiterals("src/app/layout.tsx", source)).toEqual(
+      LAYOUT_TITLE_LITERALS,
+    );
   });
 
   test("self-test: planted text, labels, placeholders, alt, titles and metadata are flagged; classes and glyphs are not", () => {
