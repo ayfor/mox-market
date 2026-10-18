@@ -9,9 +9,13 @@ import { PrismaPg } from "@prisma/adapter-pg";
 
 // One name is the runtime contract (S1.1d19): no DATABASE_URL fallback, and a
 // missing URL fails loudly at module load instead of connecting to nothing.
+// The code is what F2's log line shows (errorCodes never reads messages), so
+// "no database configured" is not logged as a bare `Error`.
 const connectionString = process.env.POSTGRES_PRISMA_URL;
 if (!connectionString) {
-  throw new Error("POSTGRES_PRISMA_URL unset");
+  throw Object.assign(new Error("POSTGRES_PRISMA_URL unset"), {
+    code: "POSTGRES_PRISMA_URL_UNSET",
+  });
 }
 // S0.1d20: the root a remote host's certificate must chain to (unset: Node's
 // CA store). Never plaintext and never unverified to a remote host.
