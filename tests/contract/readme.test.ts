@@ -269,6 +269,13 @@ describe("README Local startup", () => {
     expect(startup).toMatch(/must not be under `\/tmp` or `\/private\/tmp`/);
   });
 
+  test("checks the cache's date before path B, so an old cache is never reloaded alone", () => {
+    expect(startup).toContain(
+      'grep -oE \'"date": *"[0-9-]+"\' .cache/mtgjson/Meta.json',
+    );
+    expect(startup).toContain("Never run path B alone on an older cache");
+  });
+
   test("names the log line a missing .env produces", () => {
     expect(startup).toContain(
       "[evaluation] history_read_failed: Error [POSTGRES_PRISMA_URL_UNSET]",

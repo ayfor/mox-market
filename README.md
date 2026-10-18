@@ -113,8 +113,10 @@ Getting started is the one-time setup. Run this routine at the start of every se
 
 5. Check the price history: open http://localhost:3000/Esper%20Sentinel?price=74.99.
    - A Buy, Fair or Wait badge: the history is loaded.
-   - "No price history yet for this printing.": the tables are empty. Load them with path B (MTGJson price history, below).
-   - "Price data is temporarily out of date.": the last load finished over 48 hours ago. Nothing runs the daily sync locally, so refresh with path A, which downloads today's files, and then path B.
+   - "No price history yet for this printing.": the tables are empty. Load them (below).
+   - "Price data is temporarily out of date.": the last load finished over 48 hours ago. Nothing runs the daily sync locally, so refresh (below).
+
+   To load or refresh, first read the cache's date: `grep -oE '"date": *"[0-9-]+"' .cache/mtgjson/Meta.json | head -1`. If it is today's UTC date, run path B. Otherwise, or if the file is missing, run path A, which downloads today's files, and then path B (MTGJson price history, below). Each took about five minutes on an idle Mac. Never run path B alone on an older cache: the banner and the "newest … ago" history line measure when rows were loaded, not the prices' date, so a load from an old cache makes stale prices look current.
 
 At the end of the session, stop `npm run dev` with Ctrl+C, then stop Postgres with your setup's command from step 2.
 
