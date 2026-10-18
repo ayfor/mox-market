@@ -229,6 +229,65 @@ describe("README Getting started (T23)", () => {
   });
 });
 
+// The every-session routine for any Postgres setup (Docker Compose, Supabase
+// CLI or native), added after a dev server ran with no database configured.
+describe("README Local startup", () => {
+  const startup = section(readme, "Local startup", 2);
+
+  test("sits right after Getting started", () => {
+    const topLevel = [...readme.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+    const at = topLevel.indexOf("Getting started");
+    expect(topLevel[at + 1]).toBe("Local startup");
+  });
+
+  test("runs Node, Postgres, the migration check, the app and the history check in order", () => {
+    const order = [
+      "nvm use",
+      "docker compose up -d --wait db",
+      "npx prisma migrate status",
+      "npm run dev",
+      "/Esper%20Sentinel?price=74.99",
+    ].map((step) => startup.indexOf(step));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  test("gives a start and a stop command for each setup", () => {
+    for (const command of [
+      "docker compose up -d --wait db",
+      "docker compose stop db",
+      "supabase start",
+      "supabase stop",
+      "pg_ctl -D ~/.mox-market/pgdata -l ~/.mox-market/pg.log start",
+      "pg_ctl -D ~/.mox-market/pgdata stop",
+    ]) {
+      expect(startup).toContain(command);
+    }
+  });
+
+  test("warns that a native data directory under /tmp is lost", () => {
+    expect(startup).toMatch(/must not be under `\/tmp` or `\/private\/tmp`/);
+  });
+
+  test("names the log line a missing .env produces", () => {
+    expect(startup).toContain(
+      "[evaluation] history_read_failed: Error [POSTGRES_PRISMA_URL_UNSET]",
+    );
+  });
+
+  test("native first time: initdb, start, createdb, then migrate deploy, in order", () => {
+    const native = section(readme, "Native Postgres, first time", 3);
+    const order = [
+      "initdb -D ~/.mox-market/pgdata",
+      "pg_ctl -D ~/.mox-market/pgdata -l ~/.mox-market/pg.log start",
+      "createdb -h localhost -U postgres mox_market",
+      "npx prisma migrate deploy",
+    ].map((step) => native.indexOf(step));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+});
+
 // S0.3 T18 (AC-12; S0.3d18): the README documents the daily sync, its
 // fail-closed guard, CRON_SECRET in Production only, the Firewall rule by
 // purpose, and the rollout as step 0 plus the runbook's four steps, with the

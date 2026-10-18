@@ -77,6 +77,61 @@ Integration tests (`*.int.test.ts`) create and drop their own scratch database o
 | `[evaluation] history_read_failed: Error [POSTGRES_PRISMA_URL_UNSET]` (and `freshness_read_failed`) on every result page | `npm run dev` started without a database URL, so result pages fall back to "Price history temporarily unavailable". `cp .env.example .env`, start Postgres, `npx prisma migrate deploy`, then restart `npm run dev`. |
 | `P3005: The database schema is not empty` | `migrate deploy` found tables that no migration created (for example from a schema created before Migrate). Locally, drop and recreate the dev database: `docker compose down -v && docker compose up -d --wait db`, then `npx prisma migrate deploy`. Never do this against production. |
 
+## Local startup
+
+Getting started is the one-time setup. Run this routine at the start of every session: a new shell, after a reboot, or after pulling `main`. Only step 2 depends on where your Postgres runs.
+
+1. Use Node 22 in this shell:
+
+   ```bash
+   nvm use
+   ```
+
+2. Start Postgres for your setup. Use one setup at a time: they all listen on a local port, and `.env` names one of them.
+
+   | Setup | Start | Stop | Where the data lives |
+   |-------|-------|------|----------------------|
+   | Docker Compose (Getting started) | `docker compose up -d --wait db` | `docker compose stop db` | the `mox-market-pg` volume, kept across restarts |
+   | Supabase CLI | `supabase start` (port 54322; set both `.env` URLs as in Troubleshooting) | `supabase stop` | Supabase's Docker volumes, kept across restarts |
+   | Native Postgres 14 or later (Homebrew, EDB, Postgres.app) | `pg_ctl -D ~/.mox-market/pgdata -l ~/.mox-market/pg.log start` | `pg_ctl -D ~/.mox-market/pgdata stop` | the data directory, which must not be under `/tmp` or `/private/tmp`: macOS clears those, and the database goes with them |
+
+3. Check that the database answers and its migrations are current:
+
+   ```bash
+   npx prisma migrate status
+   ```
+
+   "Database schema is up to date!" means go on. A pending migration (after you pull a branch that adds one) means run `npx prisma migrate deploy`. `P1001: Can't reach database server` means Postgres is not running: go back to step 2.
+
+4. Start the app:
+
+   ```bash
+   npm run dev        # http://localhost:3000
+   ```
+
+   The first lines must include `- Environments: .env`. If they do not, `.env` is missing (`cp .env.example .env`), and every result page logs `[evaluation] history_read_failed: Error [POSTGRES_PRISMA_URL_UNSET]`.
+
+5. Check the price history: open http://localhost:3000/Esper%20Sentinel?price=74.99.
+   - A Buy, Fair or Wait badge: the history is loaded.
+   - "No price history yet for this printing.": the tables are empty. Load them with path B (MTGJson price history, below).
+   - "Price data is temporarily out of date.": the last load finished over 48 hours ago. Nothing runs the daily sync locally, so refresh with path A, which downloads today's files, and then path B.
+
+At the end of the session, stop `npm run dev` with Ctrl+C, then stop Postgres with your setup's command from step 2.
+
+### Native Postgres, first time
+
+Without Docker, create the data directory once. Use a path outside `/tmp`; `~/.mox-market/pgdata` matches the table above. `-A trust` is for a database that listens on `localhost` only, as configured here; the passwords in `.env` are then ignored.
+
+```bash
+initdb -D ~/.mox-market/pgdata -U postgres -A trust --encoding=UTF8 --locale=C
+printf "listen_addresses = 'localhost'\nport = 5432\n" >> ~/.mox-market/pgdata/postgresql.conf
+pg_ctl -D ~/.mox-market/pgdata -l ~/.mox-market/pg.log start
+createdb -h localhost -U postgres mox_market
+npx prisma migrate deploy
+```
+
+If `initdb` and `pg_ctl` are not on your `PATH`, use their full paths (EDB installs them in `/Library/PostgreSQL/<version>/bin`).
+
 ## Database and migrations
 
 Prisma Migrate is the only schema tool (ruling C1.01 = A). Migrations live in `prisma/migrations/` and are numbered `0000_baseline` (S1.1), `0001_price_history` (S0.1), `0002_recommendation_log` (S5.1). Apply them locally with:
@@ -129,7 +184,7 @@ npx tsx scripts/ingest-mtgjson-history.ts --dry-run                         # pa
 npx tsx scripts/ingest-mtgjson-history.ts --source-dir .cache/mtgjson       # path B: load your local database (localhost only)
 ```
 
-Path B writes to `POSTGRES_URL_NON_POOLING` and refuses any host but `localhost` or `127.0.0.1`. It takes about four minutes and ≈285 MB of database space. Path C (production) is Josh's alone.
+Path B writes to `POSTGRES_URL_NON_POOLING` and refuses any host but `localhost` or `127.0.0.1`. It takes about four minutes on an idle machine (75 minutes were measured on a heavily loaded laptop) and ≈285 MB of database space. Path C (production) is Josh's alone.
 
 ## Daily price sync
 
