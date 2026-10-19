@@ -234,6 +234,23 @@ describe("README Getting started (T23)", () => {
 describe("README Local startup", () => {
   const startup = section(readme, "Local startup", 2);
 
+  test("points to the Cursor command, which exists and covers the same routine", () => {
+    expect(startup).toContain("`/local-startup`");
+    const command = readFileSync(
+      path.join(ROOT, ".cursor", "commands", "local-startup.md"),
+      "utf8",
+    );
+    for (const step of [
+      "npx prisma migrate status",
+      "npm run dev",
+      "/Esper%20Sentinel?price=74.99",
+      ".cache/mtgjson/Meta.json",
+      "Never offer path B alone on an older cache",
+    ]) {
+      expect(command).toContain(step);
+    }
+  });
+
   test("sits right after Getting started", () => {
     const topLevel = [...readme.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
     const at = topLevel.indexOf("Getting started");

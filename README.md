@@ -81,6 +81,8 @@ Integration tests (`*.int.test.ts`) create and drop their own scratch database o
 
 Getting started is the one-time setup. Run this routine at the start of every session: a new shell, after a reboot, or after pulling `main`. Only step 2 depends on where your Postgres runs.
 
+In Cursor, the `/local-startup` command (`.cursor/commands/local-startup.md`) runs this routine for you: local databases only, and it asks before anything slow or that changes state.
+
 1. Use Node 22 in this shell:
 
    ```bash
