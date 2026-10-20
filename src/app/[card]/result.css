@@ -177,6 +177,51 @@
   color: var(--fg-secondary);
 }
 
+/* F3's shock annotation (S3.2d9): a glyph beside the chip; its tooltip is
+   the title attribute plus this bubble on hover and keyboard focus. */
+.mm-rec-shock {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 999px;
+  cursor: help;
+}
+
+.mm-rec-shock:focus-visible {
+  outline: 2px solid var(--fg-primary);
+  outline-offset: 2px;
+}
+
+.mm-rec-shock::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 1;
+  width: max-content;
+  max-width: 240px;
+  padding: 6px 10px;
+  border-radius: var(--mox-radius-md);
+  border: 1px solid var(--glass-stroke-strong);
+  background: var(--bg-base);
+  color: var(--fg-primary);
+  font: var(--ts-body);
+  text-transform: none;
+  transform: translateX(-50%);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mm-rec-shock:hover::after,
+.mm-rec-shock:focus-visible::after {
+  visibility: visible;
+  opacity: 1;
+}
+
 .mm-rec-reason {
   margin: 0;
   font: var(--ts-h3);
@@ -361,6 +406,20 @@
   }
   .mm-rec-panel {
     padding: 20px;
+  }
+  /* The shock bubble anchors to the head's left edge and never outgrows it,
+     so .mm-app's overflow-x never clips the tooltip (S3.2 ADV UB-1). */
+  .mm-rec-head {
+    position: relative;
+  }
+  .mm-rec-shock {
+    position: static;
+  }
+  .mm-rec-shock::after {
+    left: 0;
+    box-sizing: border-box;
+    max-width: 100%;
+    transform: none;
   }
   .mm-rec-tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));

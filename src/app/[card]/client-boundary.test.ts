@@ -125,6 +125,8 @@ const ENGINE_LOGIC = [
   "engine",
   // S3.1 T18: Tier 2 is engine logic.
   "tier2",
+  // S3.2 T16: the shock annotation is engine logic.
+  "shock",
   "bands",
   "reason",
   "signals",

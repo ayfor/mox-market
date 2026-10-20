@@ -185,6 +185,138 @@ describe("extreme trends (S3.1 adversarial review UB-1; S3.1d16)", () => {
   });
 });
 
+describe("the caveat slot: stale > thin-data > volatility (S3.2 T14; S3.2d5)", () => {
+  const base = {
+    kind: "fair" as const,
+    deltaBp: -184,
+    bandPct: 7.5,
+    snapshotCount30d: 20,
+  };
+
+  test("stale gives the stale clause whatever the confidence", () => {
+    for (const confidence of ["high", "medium", "low"] as const) {
+      expect(keep(buildReason({ ...base, confidence, stale: { d: 8 } }))).toBe(
+        "Within 2% of market; latest price data is 8 days old.",
+      );
+    }
+  });
+
+  test("low confidence without stale gives the thin-data clause", () => {
+    expect(
+      keep(
+        buildReason({
+          ...base,
+          confidence: "low",
+          snapshotCount30d: 10,
+          volatility: { X: 30 },
+        }),
+      ),
+    ).toBe("Within 2% of market; only 10 price snapshots.");
+  });
+
+  test("volatility without stale or low confidence gives the volatility clause", () => {
+    expect(
+      keep(
+        buildReason({
+          ...base,
+          kind: "fair",
+          deltaBp: -1200,
+          bandPct: 10,
+          confidence: "high",
+          volatility: { X: 30 },
+        }),
+      ),
+    ).toBe("12% below market; price has been volatile (±30%).");
+  });
+
+  test("all three passed give the stale clause only", () => {
+    const reason = keep(
+      buildReason({
+        ...base,
+        confidence: "low",
+        snapshotCount30d: 10,
+        stale: { d: 15 },
+        volatility: { X: 30 },
+      }),
+    );
+    expect(reason).toBe(
+      "Within 2% of market; latest price data is 15 days old.",
+    );
+    expect(reason).not.toContain("snapshots");
+    expect(reason).not.toContain("volatile");
+  });
+
+  test("the trend clause always sits before the caveat", () => {
+    const trend = { direction: "falling" as const, X: 18 };
+    expect(
+      keep(
+        buildReason({
+          ...base,
+          kind: "fair",
+          deltaBp: -920,
+          confidence: "low",
+          trend,
+          stale: { d: 8 },
+        }),
+      ),
+    ).toBe(
+      "9% below market; 30-day trend is falling 18%; latest price data is 8 days old.",
+    );
+    expect(
+      keep(
+        buildReason({
+          ...base,
+          kind: "buy",
+          deltaBp: -500,
+          bandPct: 5.77,
+          confidence: "high",
+          trend: { direction: "rising", X: 60 },
+          volatility: { X: 17 },
+        }),
+      ),
+    ).toBe(
+      "5% below market; 30-day trend is rising 60%; price has been volatile (±17%).",
+    );
+  });
+
+  test("the strings are F1's locked templates, filled", () => {
+    expect(buildReason({ ...base, confidence: "high", stale: { d: 9 } })).toBe(
+      `Within 2% of market; ${fillTemplate(REASON_COPY.stale, { d: 9 })}.`,
+    );
+    expect(
+      buildReason({ ...base, confidence: "high", volatility: { X: 44 } }),
+    ).toBe(
+      `Within 2% of market; ${fillTemplate(REASON_COPY.volatility, { X: 44 })}.`,
+    );
+  });
+
+  test("Tier-1 inputs (no stale, no volatility) give S1.2's reasons unchanged", () => {
+    for (const f of CANONICAL_FIXTURES) {
+      expect(computeRecommendation(f.input, f.market).reason, f.name).toBe(
+        f.expected.reason,
+      );
+    }
+    expect(reasonFor("fair", -184, "medium", 20)).toBe("Within 2% of market.");
+    expect(reasonFor("wait", 1905, "low", 10)).toBe(
+      "19% above market; only 10 price snapshots.",
+    );
+  });
+
+  test("insufficient_data ignores stale and volatility", () => {
+    expect(
+      buildReason({
+        kind: "insufficient_data",
+        deltaBp: null,
+        bandPct: 5,
+        confidence: "low",
+        snapshotCount30d: 3,
+        stale: { d: 20 },
+        volatility: { X: 40 },
+      }),
+    ).toBe(INSUFFICIENT_DATA_SENTENCE);
+  });
+});
+
 describe("fillTemplate", () => {
   test("fills known placeholders and leaves unknown ones", () => {
     expect(fillTemplate("{X}% of {n}", { X: 9, n: 3 })).toBe("9% of 3");

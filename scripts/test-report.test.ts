@@ -119,6 +119,12 @@ describe("featureOf", () => {
     ["src/lib/recommendation/tiered-parity.test.ts", "F3 · Market Adjustments"],
     ["src/lib/recommendation/volatility.test.ts", "F3 · Market Adjustments"],
     ["src/lib/recommendation/shock.test.ts", "F3 · Market Adjustments"],
+    // S3.2d16 (T17): this story's new test files map by their prefixes.
+    [
+      "src/lib/recommendation/tier2-adjustments.test.ts",
+      "F3 · Market Adjustments",
+    ],
+    ["src/lib/evaluation/shock-tooltip.test.ts", "F2 · Live Evaluation"],
     ["src/lib/classification/rules.test.ts", "F4 · Card Classification"],
     ["src/lib/Category.test.ts", "F4 · Card Classification"],
     ["src/lib/recommendation-log/write.test.ts", "F5 · Recommendation Log"],

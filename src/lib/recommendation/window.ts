@@ -44,6 +44,30 @@ const isUsablePrice = (value: unknown): value is number =>
   Number.isSafeInteger(value) && (value as number) > 0;
 
 /**
+ * Whether history holds a real snapshot dated `date`, by readWindow's rules:
+ * the last entry for that date wins, and an unusable kept price is a gap.
+ * F3's staleness reads the newest history date, and a row dated asOf sits
+ * just outside the window (S3.2d4, ADV SPEC-1).
+ */
+export function hasRealSnapshotOn(history: unknown, date: string): boolean {
+  if (!Array.isArray(history)) return false;
+  let kept: unknown = undefined;
+  let found = false;
+  for (const entry of history as readonly unknown[]) {
+    if (entry === null || typeof entry !== "object") continue;
+    const row = entry as {
+      readonly date?: unknown;
+      readonly priceCents?: unknown;
+    };
+    if (row.date === date) {
+      kept = row.priceCents;
+      found = true;
+    }
+  }
+  return found && isUsablePrice(kept);
+}
+
+/**
  * The real snapshots inside the window, oldest first. Entries are walked in
  * array order and the last one per window date wins; a kept entry with an
  * unusable price makes its date a gap (the superseded value is not

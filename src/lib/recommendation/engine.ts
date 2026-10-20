@@ -6,7 +6,8 @@ import "server-only";
 // (throws), then the market snapshot's shape and applied finish, the window,
 // the market price, the window count, then bands. One tiered call computes
 // Tier 1 by that path and Tier 2 from it (tier2.ts); TIER2_ENABLED picks the
-// served one (S3.1d3).
+// served one (S3.1d3). Tier 1's signals carry F3's shock annotation
+// (shock.ts), so the served result has it whatever the flag says (S3.2d7).
 import {
   BP_PER_PCT,
   bandKind,
@@ -16,12 +17,13 @@ import {
 } from "./bands";
 import { RECOMMENDATION_PARAMS, type RecommendationParams } from "./params";
 import { buildReason } from "./reason";
+import { shockAnnotationOf } from "./shock";
 import {
   computeHistorySignals,
   exactSlopePct,
   interpolatedSeries,
 } from "./signals";
-import { computeTier2 } from "./tier2";
+import { computeTier2, latestAgeDays } from "./tier2";
 import type {
   Confidence,
   Finish,
@@ -75,10 +77,11 @@ function confidenceFor(
   return "high";
 }
 
-/** Tier 1 and the window it was computed from. */
+/** Tier 1, the window it was computed from and the usable snapshot. */
 interface Tier1Result {
   readonly tier1: Recommendation;
   readonly windowSnapshots: readonly WindowSnapshot[];
+  readonly snapshot: Partial<MarketSnapshot>;
 }
 
 /** F1 W1: the Tier-1 recommendation, by S1.2's path unchanged. */
@@ -132,27 +135,50 @@ function computeTier1(
       wideningFactor: TIER1_WIDENING_FACTOR,
       buyThresholdPct: withoutNegativeZero(thresholds.buyBp / BP_PER_PCT),
       waitThresholdPct: withoutNegativeZero(thresholds.waitBp / BP_PER_PCT),
+      // F3: on the badge, so none on the insufficient_data panel (S3.2d7).
+      shockAnnotation:
+        kind === "insufficient_data"
+          ? null
+          : shockAnnotationOf(windowSnapshots, params),
     },
   };
-  return { tier1, windowSnapshots };
+  return { tier1, windowSnapshots, snapshot };
 }
 
 /**
  * Both tiers for one input (validated once). Tier 2 reads Tier 1's exact
  * 30-day slope, recomputed from the same window, only when Tier 1 has a
- * verdict and a trend.
+ * verdict and a trend, and the newest history row's age (S3.2d4, ADV
+ * SPEC-1).
  */
 function tiersFor(
   input: RecommendationInput,
   market: MarketSnapshot,
   params: RecommendationParams,
 ): TieredRecommendation {
-  const { tier1, windowSnapshots } = computeTier1(input, market, params);
+  const { tier1, windowSnapshots, snapshot } = computeTier1(
+    input,
+    market,
+    params,
+  );
   const slope30d =
     tier1.kind === "insufficient_data" || tier1.signals.slope30dPct === null
       ? null
       : exactSlopePct(interpolatedSeries(windowSnapshots));
-  return { tier1, tier2: computeTier2(tier1, slope30d, params) };
+  return {
+    tier1,
+    tier2: computeTier2(
+      tier1,
+      slope30d,
+      latestAgeDays(
+        snapshot.history,
+        snapshot.asOf ?? "",
+        windowSnapshots,
+        params,
+      ),
+      params,
+    ),
+  };
 }
 
 /** The served tier: Tier 2 when enabled and present, else Tier 1. */

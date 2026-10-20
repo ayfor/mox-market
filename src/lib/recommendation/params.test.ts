@@ -2,7 +2,8 @@
 // S1.3 T11 (AC-4) pins values and version in one inline snapshot; S1.3 T13
 // checks each param's JSDoc. S3.1 T14 (S3.1d4; F1 W2, C3.7 = B):
 // TIER2_ENABLED and the two F3 params S3.1 reads join, and the version moves
-// from 46ec1cd7 to 208c90c2; S3.2's five params are still absent.
+// from 46ec1cd7 to 208c90c2. S3.2 T13 (S3.2d2): the five params S3.2 reads
+// join (nineteen keys), and the version moves from 208c90c2 to 2d4067ed.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -37,30 +38,33 @@ const S3_1_PARAMS = {
   lowConfidenceWidening: 1.5,
 };
 
-const SHIPPED_PARAMS = { ...F1_PARAMS, ...S3_1_PARAMS };
+/** F3's params S3.2 reads, at F3's Fields table values (S3.2d2). */
+const S3_2_PARAMS = {
+  staleDays: 7,
+  volatileCV: 0.15,
+  volatilityWideningCap: 2,
+  shockWindowDays: 7,
+  shockMagnitudePct: 35,
+};
+
+const SHIPPED_PARAMS = { ...F1_PARAMS, ...S3_1_PARAMS, ...S3_2_PARAMS };
 
 describe("RECOMMENDATION_PARAMS (T3)", () => {
-  test("deep-equals F1's eleven params plus S3.1's three, at design values (S3.1 T14)", () => {
+  test("deep-equals F1's eleven params, S3.1's three and S3.2's five, at design values (S3.2 T13)", () => {
     expect(RECOMMENDATION_PARAMS).toStrictEqual(SHIPPED_PARAMS);
     expect(Object.keys(RECOMMENDATION_PARAMS).sort()).toEqual(
       Object.keys(SHIPPED_PARAMS).sort(),
     );
-    expect(Object.keys(RECOMMENDATION_PARAMS)).toHaveLength(14);
+    expect(Object.keys(RECOMMENDATION_PARAMS)).toHaveLength(19);
   });
 
   test("ships with Tier 2 off (F3 dark launch, C1.37)", () => {
     expect(RECOMMENDATION_PARAMS.TIER2_ENABLED).toBe(false);
   });
 
-  test("holds none of S3.2's params yet (S3.1d4)", () => {
-    for (const key of [
-      "staleDays",
-      "volatileCV",
-      "volatilityWideningCap",
-      "shockWindowDays",
-      "shockMagnitudePct",
-    ]) {
-      expect(RECOMMENDATION_PARAMS).not.toHaveProperty(key);
+  test("holds S3.2's five params at F3's Fields values (S3.2d2)", () => {
+    for (const [key, value] of Object.entries(S3_2_PARAMS)) {
+      expect(RECOMMENDATION_PARAMS).toHaveProperty(key, value);
     }
   });
 
@@ -89,7 +93,7 @@ describe("PARAMS_VERSION (T4)", () => {
     const reversed = Object.fromEntries(
       Object.entries(RECOMMENDATION_PARAMS).reverse(),
     ) as unknown as RecommendationParams;
-    expect(Object.keys(reversed)[0]).toBe("lowConfidenceWidening");
+    expect(Object.keys(reversed)[0]).toBe("shockMagnitudePct");
     expect(paramsVersionOf(reversed)).toBe(PARAMS_VERSION);
   });
 
@@ -164,7 +168,7 @@ describe("params guardrail (S1.3 T11, AC-4; C1.58)", () => {
   test("RECOMMENDATION_PARAMS and PARAMS_VERSION match the inline snapshot", () => {
     expect({ PARAMS_VERSION, RECOMMENDATION_PARAMS }).toMatchInlineSnapshot(`
       {
-        "PARAMS_VERSION": "208c90c2",
+        "PARAMS_VERSION": "2d4067ed",
         "RECOMMENDATION_PARAMS": {
           "TIER2_ENABLED": false,
           "buyThresholdAsymmetry": 0.6,
@@ -176,9 +180,14 @@ describe("params guardrail (S1.3 T11, AC-4; C1.58)", () => {
           "minSnapshotsForTrend": 7,
           "minSnapshotsForVerdict": 7,
           "minSnapshotsForVolatility": 14,
+          "shockMagnitudePct": 35,
+          "shockWindowDays": 7,
           "shortSlopeDays": 7,
+          "staleDays": 7,
           "trendShiftFactor": 0.5,
           "trendThresholdPct": 0.5,
+          "volatileCV": 0.15,
+          "volatilityWideningCap": 2,
           "windowDays": 30,
         },
       }

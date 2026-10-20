@@ -165,6 +165,8 @@ describe("engine purity", () => {
       "forbidden-phrases.ts",
       // S3.1 T18: Tier 2.
       "tier2.ts",
+      // S3.2 T16: the shock annotation.
+      "shock.ts",
     ]) {
       expect(names).toContain(name);
     }

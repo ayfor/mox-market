@@ -5,6 +5,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { describe, expect, test } from "vitest";
+import { computeTieredRecommendation } from "./engine";
+import { s32FixtureNamed } from "./fixtures";
 import { RECOMMENDATION_PARAMS } from "./params";
 
 /** Index steps, halving and squaring, the ISO date length, percent and basis points. */
@@ -14,6 +16,12 @@ const ALLOWED = new Set([0, 1, 2, 10, 100, 10000]);
 const EXEMPT = new Set(["params.ts", "limits.ts", "fixtures.ts"]);
 
 const ENGINE_DIR = path.resolve(__dirname);
+
+/**
+ * Params whose value is a unit constant in ALLOWED, so the literal scan
+ * cannot catch them; a behavioural test below does (S3.2, Deviation 1).
+ */
+const CAUGHT_BY_BEHAVIOUR = new Set(["volatilityWideningCap"]);
 
 function literalOffences(file: string, source: string): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
@@ -75,6 +83,8 @@ describe("no thresholds as literals in engine logic (T8)", () => {
       "forbidden-phrases.ts",
       // S3.1 T18: Tier 2.
       "tier2.ts",
+      // S3.2 T16: the shock annotation.
+      "shock.ts",
     ]) {
       expect(files).toContain(name);
     }
@@ -98,7 +108,26 @@ describe("no thresholds as literals in engine logic (T8)", () => {
     expect(numeric.map(([key]) => key)).not.toContain("TIER2_ENABLED");
     expect(numeric).toHaveLength(Object.keys(RECOMMENDATION_PARAMS).length - 1);
     for (const [key, value] of numeric) {
+      if (CAUGHT_BY_BEHAVIOUR.has(key)) continue;
       expect(ALLOWED.has(value), key).toBe(false);
     }
+  });
+
+  // S3.2 (Deviation 1): volatilityWideningCap is 2, which the allowlist
+  // keeps for halving and squaring, so a literal 2 standing in for the cap
+  // would pass the scan. This test catches it instead: the engine must read
+  // the param, so another cap moves VOL30-STALE8's factor (1.97… × 1.5).
+  test("volatilityWideningCap is read from params, not a literal 2 (S3.2)", () => {
+    expect([...CAUGHT_BY_BEHAVIOUR]).toEqual(["volatilityWideningCap"]);
+    const f = s32FixtureNamed("VOL30-STALE8");
+    const at = (cap: number) =>
+      computeTieredRecommendation(f.input, f.market, {
+        ...RECOMMENDATION_PARAMS,
+        volatilityWideningCap: cap,
+      }).tier2?.signals.wideningFactor;
+    expect(at(RECOMMENDATION_PARAMS.volatilityWideningCap)).toBe(2);
+    expect(at(3)).toBeGreaterThan(2.9);
+    expect(at(3)).toBeLessThan(3);
+    expect(at(1.5)).toBe(1.5);
   });
 });

@@ -7,6 +7,7 @@ import { computeRecommendation, computeTieredRecommendation } from "./engine";
 import {
   canonicalFixture,
   INSUFFICIENT_DATA_SENTENCE,
+  S3_2_FIXTURES,
   TIER2_DATA_EDGE_FIXTURES,
   TIER2_FIXTURES,
   tier2FixtureNamed,
@@ -336,8 +337,8 @@ describe("AC-6: the boundary after the shift (T7)", () => {
   });
 });
 
-describe("AC-6: the monster trend (T8)", () => {
-  test("M: slope exactly 2, the +30 shift clamps to +5, the reason cites the raw 60%", () => {
+describe("AC-6: the monster trend (T8; re-pinned by S3.2 T12)", () => {
+  test("M: slope exactly 2, the +30 shift clamps to the widened band, the reason cites the raw 60%", () => {
     const { tier1, tier2 } = tiersOf(named("M"));
     expect(tier1.signals.slope30dPct).toBe(2);
     expect(tier1.signals.trendDirection).toBe("rising");
@@ -345,9 +346,18 @@ describe("AC-6: the monster trend (T8)", () => {
     expect(tier1.reason).toBe("Within 5% of market.");
     const t2 = tier2 as Recommendation;
     expect(t2.kind).toBe("buy");
-    expect(t2.signals.buyThresholdPct).toBe(-3.33);
-    expect(t2.signals.waitThresholdPct).toBe(10);
-    expect(t2.reason).toBe("5% below market; 30-day trend is rising 60%.");
+    expect(t2.confidence).toBe("high");
+    // S3.2d13: CV ≈ 0.17311 widens the band by volatility30d ÷ 0.15.
+    const volatility = t2.signals.volatility30d as number;
+    expect(volatility).toBeCloseTo(0.17310882896798378, 12);
+    expect(t2.signals.wideningFactor).toBe(volatility / 0.15);
+    expect(t2.signals.wideningFactor).toBeCloseTo(1.15406, 5);
+    expect(t2.signals.bandPct).toBe(5 * t2.signals.wideningFactor);
+    expect(t2.signals.buyThresholdPct).toBe(-3.85);
+    expect(t2.signals.waitThresholdPct).toBe(11.54);
+    expect(t2.reason).toBe(
+      "5% below market; 30-day trend is rising 60%; price has been volatile (±17%).",
+    );
     expect(t2.reason).not.toMatch(/rising (5|15)%/);
   });
 });
@@ -423,8 +433,8 @@ describe("the fair frames Tier 2 makes reachable (T10, C1.25; S3.1d12)", () => {
   });
 });
 
-/** F3's volatilityWideningCap (2.0×); the param itself lands with S3.2. */
-const VOL_CAP = 2;
+/** F3's volatilityWideningCap (2.0×; S3.2d2). */
+const VOL_CAP = RECOMMENDATION_PARAMS.volatilityWideningCap;
 
 describe("tier2Thresholds on its own (T11; the S3.2 seam)", () => {
   test.each([
@@ -432,7 +442,7 @@ describe("tier2Thresholds on its own (T11; the S3.2 seam)", () => {
     [1.5, -1250, 750],
     [2, -1667, 1000],
   ])("wideningFactor %d, flat: buy %i, wait %i", (factor, buyBp, waitBp) => {
-    // At S3.1 the low-confidence factor is the only one; volWiden is S3.2's.
+    // volWiden passed directly, as computeTier2 does since S3.2.
     const t = tier2Thresholds(
       { confidence: "high", trendDirection: "flat", slope30dPct: 0 },
       RECOMMENDATION_PARAMS,
@@ -590,7 +600,10 @@ describe("a crash never states a fall of 100% or more (S3.1 adversarial review U
       ),
     );
     expect(X).toBe(169);
-    expect(tier2?.reason).toBe("4% below market; 30-day trend is rising 169%.");
+    // S3.2d13: CV ≈ 0.49 widens to the 2.0 cap, so buy becomes fair.
+    expect(tier2?.reason).toBe(
+      "Within 4% of market; 30-day trend is rising 169%; price has been volatile (±49%).",
+    );
   });
 });
 
@@ -634,15 +647,20 @@ describe("the finish fallback reaches Tier 2 unchanged (S3.1 adversarial review 
   });
 });
 
-describe("tier2 copies tier1 except the adjusted fields (S3.1d8)", () => {
-  test("only kind, reason, bandPct, wideningFactor and the two thresholds differ", () => {
-    for (const f of [...TIER2_FIXTURES, ...TIER2_DATA_EDGE_FIXTURES]) {
+describe("tier2 copies tier1 except the adjusted fields (S3.1d8, S3.2d4)", () => {
+  test("only kind, confidence, reason, bandPct, wideningFactor and the two thresholds differ", () => {
+    for (const f of [
+      ...TIER2_FIXTURES,
+      ...TIER2_DATA_EDGE_FIXTURES,
+      ...S3_2_FIXTURES,
+    ]) {
       const { tier1, tier2 } = tiersOf(f);
       if (tier2 === null) continue;
       expect(
         {
           ...tier2,
           kind: tier1.kind,
+          confidence: tier1.confidence,
           reason: tier1.reason,
           signals: {
             ...tier2.signals,

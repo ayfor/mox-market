@@ -1,6 +1,7 @@
 // ResultView by props (S2.1d9): T11 (AC-2), T13 (AC-3, AC-14), T14 (AC-4),
 // T15 (AC-6), T16 (AC-7, AC-14), T20 (AC-11, C1.02) and T25 (AC-17, D2).
-// S2.3 adds its T13 (AC-8, AC-10): the selectors in every ok panel.
+// S2.3 adds its T13 (AC-8, AC-10): the selectors in every ok panel. S3.2 T5
+// (AC-4; S3.2d9): F3's shock annotation as a ⚠️ beside the confidence chip.
 import {
   ESPER_SENTINEL_PRINTS,
   MH2_12_ID,
@@ -16,10 +17,20 @@ import { EMPTY_TILE_VALUE } from "@/lib/evaluation/tiles";
 import { offeredFinishes, selectablePrintings } from "@/lib/printings";
 import { REASON_COPY } from "@/lib/recommendation/copy";
 import {
+  computeRecommendation,
   computeTieredRecommendation,
   servedRecommendation,
 } from "@/lib/recommendation/engine";
-import { dailyHistory } from "@/lib/recommendation/fixtures";
+import {
+  alt,
+  dailyHistory,
+  flat,
+  s32FixtureNamed,
+} from "@/lib/recommendation/fixtures";
+import {
+  RECOMMENDATION_PARAMS,
+  type RecommendationParams,
+} from "@/lib/recommendation/params";
 import type { Finish, PriceSnapshot } from "@/lib/recommendation/types";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import type { ScryfallCard } from "@/types/scryfall";
@@ -60,6 +71,8 @@ interface Options {
   syncStale?: boolean;
   printing?: ScryfallCard;
   selection?: EvaluationSelection;
+  /** Engine params; the served result follows their TIER2_ENABLED (S3.2 ADV TC-2). */
+  params?: RecommendationParams;
 }
 
 /** An ok evaluation through the real engine. */
@@ -73,25 +86,30 @@ function evaluation(
     options.latestSnapshotAt === undefined
       ? new Date(NOW.getTime() - 3 * HOUR)
       : options.latestSnapshotAt;
-  const tiers = computeTieredRecommendation(
-    {
-      askingPriceCents: options.askingPriceCents ?? 5400,
-      cardId: MH2_12_ID,
-      finish: requestedFinish,
-    },
-    {
-      appliedFinish,
-      currentPriceCents:
-        options.currentPriceCents === undefined
-          ? 5917
-          : options.currentPriceCents,
-      history,
-      asOf: AS_OF,
-      source: "scryfall",
-      latestSnapshotAt,
-    },
-  );
-  const recommendation = servedRecommendation(tiers);
+  const input = {
+    askingPriceCents: options.askingPriceCents ?? 5400,
+    cardId: MH2_12_ID,
+    finish: requestedFinish,
+  };
+  const market = {
+    appliedFinish,
+    currentPriceCents:
+      options.currentPriceCents === undefined
+        ? 5917
+        : options.currentPriceCents,
+    history,
+    asOf: AS_OF,
+    source: "scryfall" as const,
+    latestSnapshotAt,
+  };
+  const tiers =
+    options.params === undefined
+      ? computeTieredRecommendation(input, market)
+      : computeTieredRecommendation(input, market, options.params);
+  const recommendation =
+    options.params === undefined
+      ? servedRecommendation(tiers)
+      : computeRecommendation(input, market, options.params);
   const printing = options.printing ?? PRINTING;
   return {
     status: "ok",
@@ -622,5 +640,140 @@ describe("the selectors in the panel (T13, AC-8, AC-10)", () => {
     expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
     expect(screen.queryByRole("button", { name: /^Printing/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Finish/ })).toBeNull();
+  });
+});
+
+describe("F3's shock annotation (S3.2 T5, AC-4; S3.2d9)", () => {
+  /**
+   * The ok evaluation for an S3.2 fixture's market: flag off (Tier 1 served)
+   * unless params say otherwise.
+   */
+  const fromFixture = (name: string, params?: RecommendationParams) => {
+    const f = s32FixtureNamed(name);
+    return evaluation({
+      askingPriceCents: f.input.askingPriceCents,
+      currentPriceCents: f.market.currentPriceCents,
+      history: f.market.history,
+      params,
+    });
+  };
+
+  // ADV TC-2: AC-6 says the annotation renders whatever TIER2_ENABLED says
+  // and whatever the confidence. VOL30-STALE8 (+85.7% week) serves Tier 1
+  // buy, medium with the flag off and Tier 2 fair, low with it on.
+  test.each([
+    [
+      "flag off: Tier 1 served, buy, medium",
+      undefined,
+      "Buy",
+      "Medium confidence",
+    ],
+    [
+      "flag on: Tier 2 served, fair, low",
+      { ...RECOMMENDATION_PARAMS, TIER2_ENABLED: true },
+      "Fair",
+      "Low confidence",
+    ],
+  ] as const)(
+    "VOL30-STALE8, %s: the icon renders beside the chip with the locked tooltip",
+    (_name, params, badge, chipText) => {
+      const e = fromFixture("VOL30-STALE8", params);
+      if (params === undefined) {
+        expect(e.recommendation).toBe(e.tiers.tier1);
+      } else {
+        expect(e.recommendation).toStrictEqual(e.tiers.tier2);
+      }
+      const { container } = render(<ResultView evaluation={e} />);
+      expect(container.querySelector(".mm-rec-badge")).toHaveTextContent(badge);
+      const chip = container.querySelector(".mm-rec-chip");
+      expect(chip).toHaveTextContent(chipText);
+      const icon = screen.getByRole("img", {
+        name: "Price moved +86% over the last 7 days.",
+      });
+      expect(icon).toHaveAttribute(
+        "title",
+        "Price moved +86% over the last 7 days.",
+      );
+      expect(chip?.nextElementSibling).toBe(icon);
+    },
+  );
+
+  test("SHOCK45: the icon sits beside the confidence chip, named and titled by the locked tooltip", () => {
+    const e = fromFixture("SHOCK45");
+    expect(e.recommendation).toBe(e.tiers.tier1);
+    expect(e.recommendation.signals.shockAnnotation).toStrictEqual({
+      detected: true,
+      magnitude: 45,
+      window: 7,
+    });
+    const { container } = render(<ResultView evaluation={e} />);
+    const icon = screen.getByRole("img", {
+      name: "Price moved +45% over the last 7 days.",
+    });
+    expect(icon).toHaveAttribute(
+      "title",
+      "Price moved +45% over the last 7 days.",
+    );
+    expect(icon).toHaveAttribute(
+      "data-tooltip",
+      "Price moved +45% over the last 7 days.",
+    );
+    expect(icon).toHaveAttribute("tabindex", "0");
+    expect(icon).toHaveTextContent("⚠️");
+    const chip = container.querySelector(".mm-rec-chip");
+    expect(chip?.nextElementSibling).toBe(icon);
+    expect(icon.closest(".mm-rec-head")).not.toBeNull();
+    // The verdict is the non-shock one: Fair, at market.
+    expect(container.querySelector(".mm-rec-badge")).toHaveTextContent("Fair");
+    expect(container.querySelector(".mm-rec-reason")).toHaveTextContent(
+      "At market price.",
+    );
+  });
+
+  test("VOL30: a fall reads with U+2212, rounded: −46%", () => {
+    render(<ResultView evaluation={fromFixture("VOL30")} />);
+    const icon = screen.getByRole("img", {
+      name: "Price moved \u221246% over the last 7 days.",
+    });
+    expect(icon.getAttribute("title")).toBe(
+      "Price moved \u221246% over the last 7 days.",
+    );
+  });
+
+  test("the icon is the only addition: no new words in the panel beyond the tooltip", () => {
+    const { container } = render(
+      <ResultView evaluation={fromFixture("SHOCK45")} />,
+    );
+    const head = container.querySelector(".mm-rec-head") as HTMLElement;
+    expect(head.textContent).toBe("FairHigh confidence⚠️");
+  });
+
+  test.each([
+    [
+      "canonical A",
+      () =>
+        evaluation({
+          askingPriceCents: 7400,
+          currentPriceCents: 8150,
+          history: dailyHistory(AS_OF, flat(30, 8150)),
+        }),
+    ],
+    [
+      "CALM5 (a −9.5% week)",
+      () =>
+        evaluation({
+          askingPriceCents: 7172,
+          currentPriceCents: 8150,
+          history: dailyHistory(AS_OF, alt(30, 8400, 7600)),
+        }),
+    ],
+    [
+      "insufficient_data (6 rows after a +45% step)",
+      () => fromFixture("SHOCK-6-rows"),
+    ],
+  ])("%s renders no icon", (_name, make) => {
+    const { container } = render(<ResultView evaluation={make()} />);
+    expect(container.querySelector(".mm-rec-shock")).toBeNull();
+    expect(screen.queryByRole("img", { name: /Price moved/ })).toBeNull();
   });
 });

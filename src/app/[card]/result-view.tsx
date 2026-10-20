@@ -8,15 +8,21 @@ import {
   type SelectionOption,
 } from "@/components/selection-controls";
 import { RECOMMENDATION_DISCLAIMER, SOURCE_LABEL } from "@/lib/copy/legal";
-import { CONFIDENCE_LABELS, KIND_LABELS } from "@/lib/copy/result-labels";
+import {
+  CONFIDENCE_LABELS,
+  KIND_LABELS,
+  SHOCK_ICON,
+} from "@/lib/copy/result-labels";
 import type {
   EvaluatedPrinting,
   Evaluation,
 } from "@/lib/evaluation/build-evaluation";
 import { STALENESS_FLAG_HOURS } from "@/lib/evaluation/consts";
+import { shockTooltip } from "@/lib/evaluation/shock-tooltip";
 import { isHistoryStale, relativeTime } from "@/lib/evaluation/staleness";
 import { signalTiles } from "@/lib/evaluation/tiles";
 import { FALLBACK_NOTICE, fillTemplate } from "@/lib/recommendation/copy";
+import type { ShockAnnotation } from "@/lib/recommendation/types";
 import { FINISH_LABELS, UI_COPY } from "@/lib/recommendation/ui-copy";
 import { getCardImageUri } from "@/lib/scryfall";
 import { LookupMiss } from "./lookup-miss";
@@ -101,6 +107,28 @@ function DataFooter({ evaluation }: { evaluation: OkEvaluation }) {
   );
 }
 
+/**
+ * F3's shock annotation beside the confidence chip (S3.2d9): a focusable
+ * glyph whose accessible name and tooltip are the filled SHOCK_TOOLTIP. The
+ * tooltip is the title attribute plus a CSS bubble on hover and keyboard
+ * focus, so no client JavaScript is added. The verdict never changes.
+ */
+function ShockMark({ annotation }: { annotation: ShockAnnotation }) {
+  const text = shockTooltip(annotation);
+  return (
+    <span
+      className="mm-rec-shock"
+      role="img"
+      aria-label={text}
+      title={text}
+      tabIndex={0}
+      data-tooltip={text}
+    >
+      <span aria-hidden="true">{SHOCK_ICON}</span>
+    </span>
+  );
+}
+
 /** PrintingSelect's options with their labels, in the selection's order (S2.3d6). */
 function selectorOptions(evaluation: OkEvaluation): SelectionOption[] {
   return evaluation.selection.options.map((option) => ({
@@ -154,6 +182,9 @@ function OkView({ evaluation }: { evaluation: OkEvaluation }) {
                 <span className="mm-rec-chip">
                   {CONFIDENCE_LABELS[confidence]}
                 </span>
+                {signals.shockAnnotation !== null && (
+                  <ShockMark annotation={signals.shockAnnotation} />
+                )}
               </div>
             )}
             <p className="mm-rec-reason">{reasonText}</p>

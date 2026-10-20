@@ -4,7 +4,9 @@
 // reads at most 99% (D8; S3.1d16). A low confidence adds the thin-data caveat on buy,
 // fair and wait alike (Josh's sequence review ruling, 2026-10-08). Tier 2 may
 // add one trend clause, after the primary clause and before the caveat
-// (F1 composition rule; S3.1d7); Tier 1 never passes one.
+// (F1 composition rule; S3.1d7), and fills the single caveat slot by
+// precedence stale > thin-data > volatility (S3.2d5); Tier 1 passes none of
+// trend, stale or volatility, so its reasons are S1.2's.
 import { BP_PER_PCT } from "./bands";
 import {
   CLAUSE_SEPARATOR,
@@ -34,6 +36,16 @@ export interface ReasonInput {
   readonly snapshotCount30d: number;
   /** Tier 2 only (S3.1d7); absent on every Tier-1 reason. */
   readonly trend?: TrendClause;
+  /**
+   * Tier 2 only (S3.2d5): the newest row is d UTC days old, more than
+   * staleDays. Takes the caveat slot first.
+   */
+  readonly stale?: { readonly d: number };
+  /**
+   * Tier 2 only (S3.2d5): volWiden > 1, X = Math.round(volatility30d × 100).
+   * Takes the caveat slot only when neither stale nor low confidence does.
+   */
+  readonly volatility?: { readonly X: number };
 }
 
 /** 100%: the whole market price. */
@@ -77,6 +89,23 @@ function trendClause({ direction, X }: TrendClause) {
   });
 }
 
+/**
+ * The one caveat, by F1's precedence stale > thin-data > volatility
+ * (S3.2d5), or null.
+ */
+function caveatClause(input: ReasonInput): string | null {
+  if (input.stale !== undefined) {
+    return fillTemplate(REASON_COPY.stale, { d: input.stale.d });
+  }
+  if (input.confidence === "low") {
+    return fillTemplate(REASON_COPY.thinData, { n: input.snapshotCount30d });
+  }
+  if (input.volatility !== undefined) {
+    return fillTemplate(REASON_COPY.volatility, { X: input.volatility.X });
+  }
+  return null;
+}
+
 /** One sentence for the recommendation; insufficient_data ignores every other field. */
 export function buildReason(input: ReasonInput): string {
   if (input.kind === "insufficient_data" || input.deltaBp === null) {
@@ -86,10 +115,7 @@ export function buildReason(input: ReasonInput): string {
   if (input.trend !== undefined) {
     clauses.push(trendClause(input.trend));
   }
-  if (input.confidence === "low") {
-    clauses.push(
-      fillTemplate(REASON_COPY.thinData, { n: input.snapshotCount30d }),
-    );
-  }
+  const caveat = caveatClause(input);
+  if (caveat !== null) clauses.push(caveat);
   return clauses.join(CLAUSE_SEPARATOR) + SENTENCE_END;
 }

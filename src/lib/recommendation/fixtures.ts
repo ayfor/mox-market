@@ -267,7 +267,7 @@ const UNSHIFTED_LOW = {
  * Tier-2 kind, confidence and reason, and Tier 2's band and thresholds. The
  * canonical entries are reused from CANONICAL_FIXTURES, never copied. A param
  * change that flips one updates it here, in the same PR (F1 W2); S3.2's
- * volatility widening changes M's thresholds (CV 0.173).
+ * volatility widening changed M's thresholds and reason (CV 0.173, S3.2d13).
  */
 export const TIER2_FIXTURES: readonly Tier2Fixture[] = [
   // T1, AC-1: C. The −9 shift clamps to −5.
@@ -454,11 +454,17 @@ export const TIER2_FIXTURES: readonly Tier2Fixture[] = [
     8000,
     ramp(30, 5680, 160),
     { kind: "fair", confidence: "high", reason: "Within 5% of market." },
+    // S3.2d13: CV ≈ 0.17311 widens the band by volatility30d ÷ 0.15, and the
+    // reason gains the volatility caveat (F1 W2).
     {
       kind: "buy",
       confidence: "high",
-      reason: "5% below market; 30-day trend is rising 60%.",
-      ...RISING_FULL,
+      reason:
+        "5% below market; 30-day trend is rising 60%; price has been volatile (±17%).",
+      buyThresholdPct: -3.85,
+      waitThresholdPct: 11.54,
+      bandPct: 5.770294298932793,
+      wideningFactor: 1.1540588597865586,
     },
   ),
   // T9: the dead-zone edge at full history (±0.5 %/day is flat).
@@ -571,6 +577,14 @@ function cWithNoise(): PriceSnapshot[] {
   ];
 }
 
+/** Widened to the 2.0 cap, the −10 shift at the widened band: −26.67 / 0 (S3.2d13). */
+const FALLING_CAPPED = {
+  buyThresholdPct: -26.67,
+  waitThresholdPct: 0,
+  bandPct: 10,
+  wideningFactor: 2,
+} as const;
+
 /** Low confidence, the −7.5 shift at the widened band: −20 / 0. */
 const FALLING_LOW = {
   buyThresholdPct: -20,
@@ -586,8 +600,8 @@ const FALLING_LOW = {
  * and out-of-window rows, and crashes whose monthly trend passes −100%
  * (UB-1, S3.1d16). The S1.2 results of these cases are recorded in
  * __snapshots__/tiered-parity.s1.2-data-edges.json from the engine at
- * 97b4bba. S3.2's volatility widening changes the crash and surge
- * thresholds (their CV is far above 0.15); S3.2 updates them (F1 W2).
+ * 97b4bba. S3.2's volatility widening changed the crash and surge
+ * thresholds and reasons (their CV is far above 0.15; S3.2d13, F1 W2).
  */
 export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
   dataEdgeFixture(
@@ -715,8 +729,9 @@ export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
     {
       kind: "fair",
       confidence: "high",
-      reason: "10% below market; 30-day trend is falling 99%.",
-      ...FALLING_FULL,
+      reason:
+        "Within 10% of market; 30-day trend is falling 99%; price has been volatile (±49%).",
+      ...FALLING_CAPPED,
     },
   ),
   dataEdgeFixture(
@@ -727,8 +742,9 @@ export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
     {
       kind: "fair",
       confidence: "high",
-      reason: "10% below market; 30-day trend is falling 99%.",
-      ...FALLING_FULL,
+      reason:
+        "Within 10% of market; 30-day trend is falling 99%; price has been volatile (±61%).",
+      ...FALLING_CAPPED,
     },
   ),
   dataEdgeFixture(
@@ -754,10 +770,14 @@ export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
     fixtureMarket(5000, ramp(30, 500, 155)),
     { kind: "fair", confidence: "high", reason: "Within 4% of market." },
     {
-      kind: "buy",
+      kind: "fair",
       confidence: "high",
-      reason: "4% below market; 30-day trend is rising 169%.",
-      ...RISING_FULL,
+      reason:
+        "Within 4% of market; 30-day trend is rising 169%; price has been volatile (±49%).",
+      buyThresholdPct: -6.67,
+      waitThresholdPct: 20,
+      bandPct: 10,
+      wideningFactor: 2,
     },
   ),
 ];
@@ -766,5 +786,371 @@ export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
 export function tier2FixtureNamed(name: string): Tier2Fixture {
   const found = TIER2_FIXTURES.find((f) => f.name === name);
   if (!found) throw new Error(`no Tier-2 fixture named ${name}`);
+  return found;
+}
+
+// --- S3.2: volatility, staleness and the shock annotation (plan Test
+// Manifest T1 to T12; F3 W1, W2) -------------------------------------------
+
+/** n values alternating a, b, a, … (S3.2 fixture data). */
+export const alt = (n: number, a: number, b: number): number[] =>
+  Array.from({ length: n }, (_, i) => (i % 2 === 0 ? a : b));
+
+/**
+ * Daily snapshots on consecutive UTC dates ending at FIXTURE_AS_OF − k
+ * (k ≥ 1), oldest first: dailyHistory anchored k − 1 days earlier.
+ */
+export function historyEndingAt(
+  values: readonly number[],
+  k: number,
+): PriceSnapshot[] {
+  const [year, month, day] = FIXTURE_AS_OF.split("-").map(Number);
+  const anchor = new Date(Date.UTC(year, month - 1, day - (k - 1)))
+    .toISOString()
+    .slice(0, 10);
+  return dailyHistory(anchor, values);
+}
+
+/** Tier 2 as S3.2 pins it: every field, or only the kind (plan fixture table). */
+export type S3_2Tier2Expectation =
+  | Tier2Expectation
+  | Pick<Tier2Expectation, "kind">;
+
+export interface S3_2Fixture {
+  readonly name: string;
+  readonly input: RecommendationInput;
+  readonly market: MarketSnapshot;
+  readonly expected: {
+    readonly tier1: TierExpectation;
+    /** Null only when tier1 is insufficient_data (F3 Engine API). */
+    readonly tier2: S3_2Tier2Expectation | null;
+    /** signals.shockAnnotation.magnitude, or null for no annotation. */
+    readonly shockMagnitude: number | null;
+  };
+}
+
+function s32Fixture(
+  name: string,
+  asking: number,
+  market: MarketSnapshot,
+  tier1: TierExpectation,
+  tier2: S3_2Tier2Expectation | null,
+  shockMagnitude: number | null,
+): S3_2Fixture {
+  return {
+    name,
+    input: fixtureInput(asking),
+    market,
+    expected: { tier1, tier2, shockMagnitude },
+  };
+}
+
+/** A market whose history ends at FIXTURE_AS_OF − k (k = 1 is fresh). */
+const marketEndingAt = (
+  current: number | null,
+  values: readonly number[],
+  k = 1,
+): MarketSnapshot => ({
+  ...fixtureMarket(current, []),
+  history: historyEndingAt(values, k),
+});
+
+/** AC-1's CV 0.30 history: 8150 ± 30% (2445 cents), high first. */
+const VOL30_HISTORY = alt(30, 10595, 5705);
+
+/** Widened to the 2.0 cap, no shift: band 10, −16.67 / 10. */
+const CAPPED_FLAT = {
+  buyThresholdPct: -16.67,
+  waitThresholdPct: 10,
+  bandPct: 10,
+  wideningFactor: 2,
+} as const;
+
+/** Stale (low confidence), no volatility, no shift: 1.5×. */
+const STALE_FLAT = {
+  buyThresholdPct: -12.5,
+  waitThresholdPct: 7.5,
+  bandPct: 7.5,
+  wideningFactor: 1.5,
+} as const;
+
+/** No widening and no shift: Tier 1's thresholds. */
+const PLAIN = {
+  buyThresholdPct: -8.33,
+  waitThresholdPct: 5,
+  bandPct: 5,
+  wideningFactor: 1,
+} as const;
+
+/** 23 days at 10000, then 7 at the shocked price (SHOCK45 and its boundaries). */
+const stepTo = (price: number) => [...flat(23, 10000), ...flat(7, price)];
+
+/** V-UNCLAMPED: 7000 + 18i, ±3200, odd days high (i = 0 to 29). */
+const V_UNCLAMPED_HISTORY = Array.from(
+  { length: 30 },
+  (_, i) => 7000 + 18 * i + (i % 2 === 1 ? 3200 : -3200),
+);
+
+/** SHOCK45-GAP: 21 × 10000 on asOf − 30 to − 10, none on − 9 and − 8, 7 × 14500. */
+function shockGapHistory(): PriceSnapshot[] {
+  return sparseHistory(stepTo(14500), (i) => i !== 21 && i !== 22);
+}
+
+/**
+ * S3.2's fixtures (plan fixture table), each with its exact Tier-1 result,
+ * its Tier-2 result (every field, or only the kind where the plan pins no
+ * more) and its shock magnitude. Their S1.2 results are recorded in
+ * __snapshots__/tiered-parity.s3.2-fixtures.json, written once from the
+ * engine at 5c150b4 before any S3.2 engine edit (S3.2d8).
+ */
+export const S3_2_FIXTURES: readonly S3_2Fixture[] = [
+  // T1, AC-1: widening flips the verdict.
+  s32Fixture(
+    "VOL30",
+    7172,
+    marketEndingAt(8150, VOL30_HISTORY),
+    { kind: "buy", confidence: "high", reason: "12% below market." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason: "12% below market; price has been volatile (±30%).",
+      ...CAPPED_FLAT,
+    },
+    -46.15384615384615,
+  ),
+  s32Fixture(
+    "VOL30-low-first",
+    7172,
+    marketEndingAt(8150, alt(30, 5705, 10595)),
+    { kind: "buy", confidence: "high", reason: "12% below market." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason: "12% below market; price has been volatile (±30%).",
+      ...CAPPED_FLAT,
+    },
+    85.71428571428571,
+  ),
+  s32Fixture(
+    "CALM5",
+    7172,
+    marketEndingAt(8150, alt(30, 8400, 7600)),
+    { kind: "buy", confidence: "high", reason: "12% below market." },
+    {
+      kind: "buy",
+      confidence: "high",
+      reason: "12% below market.",
+      ...PLAIN,
+    },
+    null,
+  ),
+  // T3, AC-3: staleness caps Tier 2's confidence at low.
+  s32Fixture(
+    "STALE8-20",
+    8000,
+    marketEndingAt(8150, flat(20, 8150), 8),
+    { kind: "fair", confidence: "medium", reason: "Within 2% of market." },
+    {
+      kind: "fair",
+      confidence: "low",
+      reason: "Within 2% of market; latest price data is 8 days old.",
+      ...STALE_FLAT,
+    },
+    null,
+  ),
+  s32Fixture(
+    "STALE7-20",
+    8000,
+    marketEndingAt(8150, flat(20, 8150), 7),
+    { kind: "fair", confidence: "medium", reason: "Within 2% of market." },
+    {
+      kind: "fair",
+      confidence: "medium",
+      reason: "Within 2% of market.",
+      ...PLAIN,
+    },
+    null,
+  ),
+  s32Fixture(
+    "STALE8-14",
+    8000,
+    marketEndingAt(8150, flat(14, 8150), 8),
+    { kind: "fair", confidence: "medium", reason: "Within 2% of market." },
+    {
+      kind: "fair",
+      confidence: "low",
+      reason: "Within 2% of market; latest price data is 8 days old.",
+      ...STALE_FLAT,
+    },
+    null,
+  ),
+  // T8, AC-7: the caveat slot's precedence.
+  ...([8, 15] as const).map((k) =>
+    s32Fixture(
+      `D-STALE${k}`,
+      5000,
+      marketEndingAt(4200, flat(10, 4200), k),
+      {
+        kind: "wait",
+        confidence: "low",
+        reason: "19% above market; only 10 price snapshots.",
+      },
+      {
+        kind: "wait",
+        confidence: "low",
+        reason: `19% above market; latest price data is ${k} days old.`,
+        ...STALE_FLAT,
+      },
+      null,
+    ),
+  ),
+  s32Fixture(
+    "VOL30-STALE8",
+    7172,
+    marketEndingAt(8150, alt(23, 10595, 5705), 8),
+    { kind: "buy", confidence: "medium", reason: "12% below market." },
+    {
+      kind: "fair",
+      confidence: "low",
+      reason: "12% below market; latest price data is 8 days old.",
+      ...CAPPED_FLAT,
+    },
+    85.71428571428571,
+  ),
+  s32Fixture(
+    "C-STALE8",
+    7400,
+    marketEndingAt(8150, ramp(30, 8696, -48), 8),
+    { kind: "buy", confidence: "medium", reason: "9% below market." },
+    {
+      kind: "fair",
+      confidence: "low",
+      reason:
+        "9% below market; 30-day trend is falling 18%; latest price data is 8 days old.",
+      buyThresholdPct: -20,
+      waitThresholdPct: 0,
+      bandPct: 7.5,
+      wideningFactor: 1.5,
+    },
+    null,
+  ),
+  // T4, AC-4: the shock annotation.
+  s32Fixture(
+    "SHOCK45",
+    14500,
+    marketEndingAt(14500, stepTo(14500)),
+    { kind: "fair", confidence: "high", reason: "At market price." },
+    { kind: "fair" },
+    45,
+  ),
+  ...(
+    [
+      ["SHOCK35", 13500, 35],
+      ["SHOCK34.99", 13499, null],
+      ["SHOCK-35", 6500, -35],
+      ["SHOCK-34.99", 6501, null],
+    ] as const
+  ).map(([name, price, magnitude]) =>
+    s32Fixture(
+      name,
+      price,
+      marketEndingAt(price, stepTo(price)),
+      { kind: "fair", confidence: "high", reason: "At market price." },
+      { kind: "fair" },
+      magnitude,
+    ),
+  ),
+  s32Fixture(
+    "SHOCK45-GAP",
+    14500,
+    { ...fixtureMarket(14500, []), history: shockGapHistory() },
+    { kind: "fair", confidence: "high", reason: "At market price." },
+    { kind: "fair" },
+    45,
+  ),
+  s32Fixture(
+    "SHOCK45-no-market",
+    14500,
+    marketEndingAt(null, stepTo(14500)),
+    {
+      kind: "insufficient_data",
+      confidence: "low",
+      reason: INSUFFICIENT_DATA_SENTENCE,
+    },
+    null,
+    null,
+  ),
+  s32Fixture(
+    "SHOCK-6-rows",
+    14500,
+    {
+      ...fixtureMarket(14500, []),
+      history: [
+        ...historyEndingAt([10000], 20),
+        ...historyEndingAt(flat(5, 14500), 1),
+      ],
+    },
+    {
+      kind: "insufficient_data",
+      confidence: "low",
+      reason: INSUFFICIENT_DATA_SENTENCE,
+    },
+    null,
+    null,
+  ),
+  // T9, AC-8: CV exactly 0.15 does not widen.
+  s32Fixture(
+    "CV15",
+    8000,
+    marketEndingAt(8000, alt(30, 9200, 6800)),
+    { kind: "fair", confidence: "high", reason: "At market price." },
+    { kind: "fair", confidence: "high", reason: "At market price.", ...PLAIN },
+    null,
+  ),
+  // T10, AC-9: the widened boundary at adjacent cents.
+  ...(
+    [
+      [74993, "fair"],
+      [74992, "buy"],
+    ] as const
+  ).map(([asking, kind2]) =>
+    s32Fixture(
+      `VOL30-90000-${asking}`,
+      asking,
+      marketEndingAt(90000, VOL30_HISTORY),
+      { kind: "buy", confidence: "high", reason: "17% below market." },
+      {
+        kind: kind2,
+        confidence: "high",
+        reason: "17% below market; price has been volatile (±30%).",
+        ...CAPPED_FLAT,
+      },
+      -46.15384615384615,
+    ),
+  ),
+  // T11, S3.2d12: an unclamped trend shift.
+  s32Fixture(
+    "V-UNCLAMPED",
+    8000,
+    marketEndingAt(8000, V_UNCLAMPED_HISTORY),
+    { kind: "fair", confidence: "high", reason: "At market price." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason:
+        "At market price; 30-day trend is rising 16%; price has been volatile (±44%).",
+      buyThresholdPct: -8.54,
+      waitThresholdPct: 18.13,
+      bandPct: 10,
+      wideningFactor: 2,
+    },
+    155.52907530981886,
+  ),
+];
+
+/** One S3.2 fixture by name; throws on an unknown name. */
+export function s32FixtureNamed(name: string): S3_2Fixture {
+  const found = S3_2_FIXTURES.find((f) => f.name === name);
+  if (!found) throw new Error(`no S3.2 fixture named ${name}`);
   return found;
 }

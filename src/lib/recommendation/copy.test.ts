@@ -91,7 +91,7 @@ const clause = (template: string) =>
 /**
  * Exactly the insufficient_data sentence, or one primary clause, an optional
  * thin-data clause and one sentence end. No trend, stale or volatility clause
- * exists at Tier 1 (F3 is Draft).
+ * exists at Tier 1 (F3 adds them at Tier 2 only; S3.1d7, S3.2d5).
  */
 const TIER1_REASON = new RegExp(
   `^(?:${escape(REASON_COPY.insufficientData)}|(?:${[
@@ -257,6 +257,8 @@ describe("the engine's logic modules hold no copy (T4)", () => {
         "types.ts",
         // S3.1 T18: Tier 2 is scanned with no allowlist change.
         "tier2.ts",
+        // S3.2 T16: the shock annotation, likewise.
+        "shock.ts",
       ]),
     );
     expect(LOGIC_MODULES.length + COPY_SCAN_EXEMPT.size).toBe(all.length);
@@ -322,6 +324,21 @@ describe("Tier-1 reasons are locked (T9, AC-3)", () => {
     expect(points).not.toContain(0x2019);
     expect(points).not.toContain(0x2013);
     expect(REASON_COPY.insufficientData).toContain("don't");
+  });
+
+  test("the F3 strings have callers (S3.2 T16): reason.ts fills stale and volatility, the result page fills SHOCK_TOOLTIP", () => {
+    const read = (rel: string) =>
+      readFileSync(path.resolve(ENGINE_DIR, "..", "..", "..", rel), "utf8");
+    const reason = read("src/lib/recommendation/reason.ts");
+    expect(reason).toContain("REASON_COPY.stale");
+    expect(reason).toContain("REASON_COPY.volatility");
+    const tooltip = read("src/lib/evaluation/shock-tooltip.ts");
+    expect(tooltip).toMatch(/fillTemplate\(SHOCK_TOOLTIP,/);
+    expect(read("src/app/[card]/result-view.tsx")).toContain("shockTooltip(");
+    // The S1.3 placeholder comments are gone from the copy module.
+    expect(read("src/lib/recommendation/copy.ts")).not.toMatch(
+      /no caller until S3\.2/,
+    );
   });
 
   test("no Tier-1 reason carries a Tier-2 clause", () => {
