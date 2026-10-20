@@ -20,7 +20,7 @@ import {
   type Tier2Fixture,
 } from "./fixtures";
 import { RECOMMENDATION_PARAMS } from "./params";
-import { shockAnnotationOf } from "./shock";
+import { decimalRatio, shockAnnotationOf } from "./shock";
 import type { Recommendation } from "./types";
 import { readWindow } from "./window";
 
@@ -144,6 +144,59 @@ describe("shockAnnotationOf on the window rows (S3.2d6)", () => {
     expect(shock).not.toBeNull();
     expect(Object.is(shock?.magnitude, 0)).toBe(true);
     expect(shock?.window).toBe(RECOMMENDATION_PARAMS.shockWindowDays);
+  });
+
+  // Codex P2 on PR #21: the threshold is compared at its configured
+  // precision, not rounded to hundredths (35.005 once became 35.01).
+  test("shockMagnitudePct 35.005 is applied exactly, not rounded to 35.01", () => {
+    const params = { ...RECOMMENDATION_PARAMS, shockMagnitudePct: 35.005 };
+    const rowsEnding = (latest: number) =>
+      readWindow(
+        [
+          ...historyEndingAt([1000000], 8),
+          ...historyEndingAt(flat(7, latest), 1),
+        ],
+        FIXTURE_AS_OF,
+        RECOMMENDATION_PARAMS.windowDays,
+      );
+    expect(shockAnnotationOf(rowsEnding(1350050), params)).toStrictEqual({
+      detected: true,
+      magnitude: 35.005,
+      window: 7,
+    });
+    expect(shockAnnotationOf(rowsEnding(1350049), params)).toBeNull();
+    expect(shockAnnotationOf(rowsEnding(649950), params)).toStrictEqual({
+      detected: true,
+      magnitude: -35.005,
+      window: 7,
+    });
+    expect(shockAnnotationOf(rowsEnding(649951), params)).toBeNull();
+  });
+
+  test("a threshold in exponent form (1e-7) is applied exactly, not rounded to 0", () => {
+    const params = { ...RECOMMENDATION_PARAMS, shockMagnitudePct: 1e-7 };
+    const rowsEnding = (latest: number) =>
+      readWindow(
+        [
+          ...historyEndingAt([1000000000], 8),
+          ...historyEndingAt(flat(7, latest), 1),
+        ],
+        FIXTURE_AS_OF,
+        RECOMMENDATION_PARAMS.windowDays,
+      );
+    expect(shockAnnotationOf(rowsEnding(1000000001), params)).not.toBeNull();
+    expect(shockAnnotationOf(rowsEnding(1000000000), params)).toBeNull();
+  });
+
+  test.each([
+    [35, BigInt(35), BigInt(1)],
+    [35.005, BigInt(35005), BigInt(1000)],
+    [0.1, BigInt(1), BigInt(10)],
+    [1e-7, BigInt(1), BigInt(10000000)],
+    [1e21, BigInt(`1${"0".repeat(21)}`), BigInt(1)],
+    [0, BigInt(0), BigInt(1)],
+  ] as const)("decimalRatio(%s) is %s / %s", (x, num, den) => {
+    expect(decimalRatio(x)).toStrictEqual({ num, den });
   });
 
   test("shockWindowDays and shockMagnitudePct come from params", () => {
