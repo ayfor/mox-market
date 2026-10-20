@@ -1,6 +1,6 @@
 // T19 (AC-1, AC-6; S1.2d2): computeRecommendation's signature. S3.1 T15
 // (F3 Engine API): computeTieredRecommendation, servedRecommendation and the
-// flag's type.
+// flag's type. S3.2 T15: the shock annotation and the five F3 params.
 import { describe, expectTypeOf, test } from "vitest";
 import {
   computeRecommendation,
@@ -12,6 +12,7 @@ import type {
   MarketSnapshot,
   Recommendation,
   RecommendationInput,
+  ShockAnnotation,
   TieredRecommendation,
 } from "./types";
 
@@ -88,5 +89,32 @@ describe("the tiered API (S3.1 T15)", () => {
     expectTypeOf<
       RecommendationParams["TIER2_ENABLED"]
     >().toEqualTypeOf<boolean>();
+  });
+});
+
+describe("S3.2's types (T15)", () => {
+  test("signals.shockAnnotation is ShockAnnotation | null on every tier", () => {
+    expectTypeOf<
+      Recommendation["signals"]["shockAnnotation"]
+    >().toEqualTypeOf<ShockAnnotation | null>();
+    expectTypeOf<ShockAnnotation>().toEqualTypeOf<{
+      readonly detected: true;
+      readonly magnitude: number;
+      readonly window: number;
+    }>();
+  });
+
+  test("the five F3 params S3.2 reads are numbers", () => {
+    expectTypeOf<RecommendationParams["staleDays"]>().toEqualTypeOf<number>();
+    expectTypeOf<RecommendationParams["volatileCV"]>().toEqualTypeOf<number>();
+    expectTypeOf<
+      RecommendationParams["volatilityWideningCap"]
+    >().toEqualTypeOf<number>();
+    expectTypeOf<
+      RecommendationParams["shockWindowDays"]
+    >().toEqualTypeOf<number>();
+    expectTypeOf<
+      RecommendationParams["shockMagnitudePct"]
+    >().toEqualTypeOf<number>();
   });
 });

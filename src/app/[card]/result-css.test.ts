@@ -74,6 +74,40 @@ describe("badge tokens (T12, C1.14 = A)", () => {
   });
 });
 
+describe("the shock annotation's rules (S3.2 T16; S3.2d9)", () => {
+  test("every .mm-rec-shock rule uses tokens, never a literal colour", () => {
+    const rules = extractRules(RESULT_CSS).filter((r) =>
+      /mm-rec-shock/.test(r.selector),
+    );
+    expect(rules.map((r) => r.selector)).toEqual(
+      expect.arrayContaining([
+        ".mm-rec-shock",
+        ".mm-rec-shock:focus-visible",
+        ".mm-rec-shock::after",
+      ]),
+    );
+    for (const rule of rules) {
+      for (const { property, value } of rule.declarations) {
+        expect(`${rule.selector} { ${property}: ${value} }`).not.toMatch(
+          LITERAL_COLOUR,
+        );
+      }
+    }
+  });
+
+  test("the tooltip shows on hover and on keyboard focus", () => {
+    const shown = extractRules(RESULT_CSS).find(
+      (r) =>
+        /\.mm-rec-shock:hover::after/.test(r.selector) &&
+        /\.mm-rec-shock:focus-visible::after/.test(r.selector),
+    );
+    expect(shown).toBeDefined();
+    expect(shown?.declarations).toEqual(
+      expect.arrayContaining([{ property: "visibility", value: "visible" }]),
+    );
+  });
+});
+
 describe("result.css never reaches the site footer (T12)", () => {
   test("no selector names footer or the site footer's class", () => {
     const selectors = selectorsOf(RESULT_CSS);

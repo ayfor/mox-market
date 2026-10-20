@@ -6,7 +6,8 @@
 // count. Tuning still happens only by editing RECOMMENDATION_PARAMS. S3.1
 // T17: computeTieredRecommendation follows the same two-argument rule,
 // servedRecommendation takes only the tiers, and Tier 2's param-taking
-// helpers stay inside the engine too.
+// helpers stay inside the engine too. S3.2 T16 adds volatilityWiden,
+// latestAgeDays and shockAnnotationOf.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -50,6 +51,10 @@ const PARAM_HELPERS = new Set([
   "tier2Thresholds",
   "computeTier2",
   "trendClauseX",
+  // S3.2 T16: the volatility factor, staleness and the shock annotation.
+  "volatilityWiden",
+  "latestAgeDays",
+  "shockAnnotationOf",
 ]);
 const ENGINE_DIR = "src/lib/recommendation/";
 
@@ -168,6 +173,8 @@ describe("production code computes only with RECOMMENDATION_PARAMS (S1.3 ADV-3)"
       'export const e = engine["computeTieredRecommendation"](i, m, p);',
       'import { tier2Thresholds, computeTier2, trendClauseX } from "@/lib/recommendation/tier2";',
       "export const g = tier2Thresholds(s, p);",
+      'import { volatilityWiden, latestAgeDays } from "@/lib/recommendation/tier2";',
+      'import { shockAnnotationOf } from "@/lib/recommendation/shock";',
     ].join("\n");
     expect(overrides("src/lib/evaluation/x.ts", sample)).toEqual([
       "src/lib/evaluation/x.ts:4 computeTieredRecommendation called with a params argument",
@@ -181,6 +188,9 @@ describe("production code computes only with RECOMMENDATION_PARAMS (S1.3 ADV-3)"
       "src/lib/evaluation/x.ts:11 computeTier2 used outside src/lib/recommendation",
       "src/lib/evaluation/x.ts:11 trendClauseX used outside src/lib/recommendation",
       "src/lib/evaluation/x.ts:12 tier2Thresholds used outside src/lib/recommendation",
+      "src/lib/evaluation/x.ts:13 volatilityWiden used outside src/lib/recommendation",
+      "src/lib/evaluation/x.ts:13 latestAgeDays used outside src/lib/recommendation",
+      "src/lib/evaluation/x.ts:14 shockAnnotationOf used outside src/lib/recommendation",
     ]);
   });
 
@@ -200,7 +210,9 @@ describe("production code computes only with RECOMMENDATION_PARAMS (S1.3 ADV-3)"
       expect.arrayContaining([
         "src/lib/recommendation/engine.ts",
         "src/lib/recommendation/tier2.ts",
+        "src/lib/recommendation/shock.ts",
         "src/lib/evaluation/build-evaluation.ts",
+        "src/lib/evaluation/shock-tooltip.ts",
         "src/app/page.tsx",
         "scripts/test-report.mjs",
       ]),

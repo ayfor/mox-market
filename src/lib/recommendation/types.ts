@@ -56,6 +56,19 @@ export interface PriceRange {
   avg: number;
 }
 
+/**
+ * F3's shock annotation (S3.2d6): the newest window row moved at least
+ * shockMagnitudePct against the newest row at least shockWindowDays before
+ * it. Present only when detected; the verdict never changes.
+ */
+export interface ShockAnnotation {
+  readonly detected: true;
+  /** sevenDayMovePct: (latest − ref) × 100 / ref, signed, never −0. */
+  readonly magnitude: number;
+  /** shockWindowDays, in UTC days. */
+  readonly window: number;
+}
+
 export interface RecommendationSignals {
   deltaPct: number | null;
   deltaBp: number | null;
@@ -73,6 +86,12 @@ export interface RecommendationSignals {
   wideningFactor: number;
   buyThresholdPct: number;
   waitThresholdPct: number;
+  /**
+   * F3 (S3.2d7): the same on both tiers and served whatever TIER2_ENABLED
+   * says (C1.47 = A); null when no shock, or when the kind is
+   * insufficient_data.
+   */
+  shockAnnotation: ShockAnnotation | null;
 }
 
 export interface Recommendation {

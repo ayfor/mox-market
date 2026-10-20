@@ -11,6 +11,7 @@ import type {
   RecommendationInput,
   RecommendationKind,
   RecommendationSignals,
+  ShockAnnotation,
   TrendDirection,
 } from "./types";
 
@@ -82,6 +83,20 @@ describe("F1 contract types", () => {
       wideningFactor: number;
       buyThresholdPct: number;
       waitThresholdPct: number;
+      shockAnnotation: {
+        readonly detected: true;
+        readonly magnitude: number;
+        readonly window: number;
+      } | null;
+    }>();
+    // S3.2 T15: F3's shock annotation, null meaning no annotation.
+    expectTypeOf<
+      RecommendationSignals["shockAnnotation"]
+    >().toEqualTypeOf<ShockAnnotation | null>();
+    expectTypeOf<ShockAnnotation>().toEqualTypeOf<{
+      readonly detected: true;
+      readonly magnitude: number;
+      readonly window: number;
     }>();
     expectTypeOf<
       RecommendationSignals["buyThresholdPct"]

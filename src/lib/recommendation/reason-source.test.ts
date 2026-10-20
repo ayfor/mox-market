@@ -2,10 +2,11 @@
 // time and keeps no duplicate of the text. With the copy module mocked so each
 // Tier-1 template is a sentinel, every reason comes back in sentinel words.
 // S3.1 T18 adds a sentinel trend template: Tier 2's trend clause comes from
-// copy.ts too.
+// copy.ts too. S3.2 T16 adds sentinel stale and volatility templates: Tier
+// 2's caveats come from copy.ts as well.
 import { describe, expect, test, vi } from "vitest";
 import { computeRecommendation, computeTieredRecommendation } from "./engine";
-import { canonicalFixture } from "./fixtures";
+import { canonicalFixture, s32FixtureNamed } from "./fixtures";
 import { buildReason } from "./reason";
 
 vi.mock("./copy", async (importOriginal) => {
@@ -21,6 +22,8 @@ vi.mock("./copy", async (importOriginal) => {
       thinData: "THIN {n}",
       insufficientData: "NO DATA",
       trend: "TREND {direction} {X}",
+      stale: "STALE {d}",
+      volatility: "SWINGY {X}",
     }),
   };
 });
@@ -94,5 +97,28 @@ describe("Tier 2's trend clause comes only from copy.ts (S3.1 T18)", () => {
         trend: { direction: "rising", X: 18 },
       }),
     ).toBe("BELOW 9 PCT; TREND rising 18; THIN 7.");
+  });
+});
+
+describe("Tier 2's caveats come only from copy.ts (S3.2 T16)", () => {
+  test("D-STALE8's tier2 reason uses the stale sentinel", () => {
+    const f = s32FixtureNamed("D-STALE8");
+    const { tier1, tier2 } = computeTieredRecommendation(f.input, f.market);
+    expect(tier1.reason).toBe("ABOVE 19; THIN 10.");
+    expect(tier2?.reason).toBe("ABOVE 19; STALE 8.");
+  });
+
+  test("VOL30's tier2 reason uses the volatility sentinel", () => {
+    const f = s32FixtureNamed("VOL30");
+    const { tier1, tier2 } = computeTieredRecommendation(f.input, f.market);
+    expect(tier1.reason).toBe("BELOW 12 PCT.");
+    expect(tier2?.reason).toBe("BELOW 12 PCT; SWINGY 30.");
+  });
+
+  test("C-STALE8: the trend sentinel, then the stale sentinel", () => {
+    const f = s32FixtureNamed("C-STALE8");
+    const { tier2 } = computeTieredRecommendation(f.input, f.market);
+    expect(tier2?.reason).toBe("BELOW 9 PCT; TREND falling 18; STALE 8.");
+    expect(tier2?.reason).not.toMatch(/days old|volatile/);
   });
 });

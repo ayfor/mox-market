@@ -267,7 +267,7 @@ const UNSHIFTED_LOW = {
  * Tier-2 kind, confidence and reason, and Tier 2's band and thresholds. The
  * canonical entries are reused from CANONICAL_FIXTURES, never copied. A param
  * change that flips one updates it here, in the same PR (F1 W2); S3.2's
- * volatility widening changes M's thresholds (CV 0.173).
+ * volatility widening changed M's thresholds and reason (CV 0.173, S3.2d13).
  */
 export const TIER2_FIXTURES: readonly Tier2Fixture[] = [
   // T1, AC-1: C. The −9 shift clamps to −5.
@@ -454,11 +454,17 @@ export const TIER2_FIXTURES: readonly Tier2Fixture[] = [
     8000,
     ramp(30, 5680, 160),
     { kind: "fair", confidence: "high", reason: "Within 5% of market." },
+    // S3.2d13: CV ≈ 0.17311 widens the band by volatility30d ÷ 0.15, and the
+    // reason gains the volatility caveat (F1 W2).
     {
       kind: "buy",
       confidence: "high",
-      reason: "5% below market; 30-day trend is rising 60%.",
-      ...RISING_FULL,
+      reason:
+        "5% below market; 30-day trend is rising 60%; price has been volatile (±17%).",
+      buyThresholdPct: -3.85,
+      waitThresholdPct: 11.54,
+      bandPct: 5.770294298932793,
+      wideningFactor: 1.1540588597865586,
     },
   ),
   // T9: the dead-zone edge at full history (±0.5 %/day is flat).
@@ -571,6 +577,14 @@ function cWithNoise(): PriceSnapshot[] {
   ];
 }
 
+/** Widened to the 2.0 cap, the −10 shift at the widened band: −26.67 / 0 (S3.2d13). */
+const FALLING_CAPPED = {
+  buyThresholdPct: -26.67,
+  waitThresholdPct: 0,
+  bandPct: 10,
+  wideningFactor: 2,
+} as const;
+
 /** Low confidence, the −7.5 shift at the widened band: −20 / 0. */
 const FALLING_LOW = {
   buyThresholdPct: -20,
@@ -586,8 +600,8 @@ const FALLING_LOW = {
  * and out-of-window rows, and crashes whose monthly trend passes −100%
  * (UB-1, S3.1d16). The S1.2 results of these cases are recorded in
  * __snapshots__/tiered-parity.s1.2-data-edges.json from the engine at
- * 97b4bba. S3.2's volatility widening changes the crash and surge
- * thresholds (their CV is far above 0.15); S3.2 updates them (F1 W2).
+ * 97b4bba. S3.2's volatility widening changed the crash and surge
+ * thresholds and reasons (their CV is far above 0.15; S3.2d13, F1 W2).
  */
 export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
   dataEdgeFixture(
@@ -715,8 +729,9 @@ export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
     {
       kind: "fair",
       confidence: "high",
-      reason: "10% below market; 30-day trend is falling 99%.",
-      ...FALLING_FULL,
+      reason:
+        "Within 10% of market; 30-day trend is falling 99%; price has been volatile (±49%).",
+      ...FALLING_CAPPED,
     },
   ),
   dataEdgeFixture(
@@ -727,8 +742,9 @@ export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
     {
       kind: "fair",
       confidence: "high",
-      reason: "10% below market; 30-day trend is falling 99%.",
-      ...FALLING_FULL,
+      reason:
+        "Within 10% of market; 30-day trend is falling 99%; price has been volatile (±61%).",
+      ...FALLING_CAPPED,
     },
   ),
   dataEdgeFixture(
@@ -754,10 +770,14 @@ export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
     fixtureMarket(5000, ramp(30, 500, 155)),
     { kind: "fair", confidence: "high", reason: "Within 4% of market." },
     {
-      kind: "buy",
+      kind: "fair",
       confidence: "high",
-      reason: "4% below market; 30-day trend is rising 169%.",
-      ...RISING_FULL,
+      reason:
+        "Within 4% of market; 30-day trend is rising 169%; price has been volatile (±49%).",
+      buyThresholdPct: -6.67,
+      waitThresholdPct: 20,
+      bandPct: 10,
+      wideningFactor: 2,
     },
   ),
 ];

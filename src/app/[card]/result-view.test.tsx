@@ -1,6 +1,7 @@
 // ResultView by props (S2.1d9): T11 (AC-2), T13 (AC-3, AC-14), T14 (AC-4),
 // T15 (AC-6), T16 (AC-7, AC-14), T20 (AC-11, C1.02) and T25 (AC-17, D2).
-// S2.3 adds its T13 (AC-8, AC-10): the selectors in every ok panel.
+// S2.3 adds its T13 (AC-8, AC-10): the selectors in every ok panel. S3.2 T5
+// (AC-4; S3.2d9): F3's shock annotation as a ⚠️ beside the confidence chip.
 import {
   ESPER_SENTINEL_PRINTS,
   MH2_12_ID,
@@ -19,7 +20,12 @@ import {
   computeTieredRecommendation,
   servedRecommendation,
 } from "@/lib/recommendation/engine";
-import { dailyHistory } from "@/lib/recommendation/fixtures";
+import {
+  alt,
+  dailyHistory,
+  flat,
+  s32FixtureNamed,
+} from "@/lib/recommendation/fixtures";
 import type { Finish, PriceSnapshot } from "@/lib/recommendation/types";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import type { ScryfallCard } from "@/types/scryfall";
@@ -622,5 +628,96 @@ describe("the selectors in the panel (T13, AC-8, AC-10)", () => {
     expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
     expect(screen.queryByRole("button", { name: /^Printing/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Finish/ })).toBeNull();
+  });
+});
+
+describe("F3's shock annotation (S3.2 T5, AC-4; S3.2d9)", () => {
+  /** The ok evaluation for an S3.2 fixture's market, flag off (Tier 1 served). */
+  const fromFixture = (name: string) => {
+    const f = s32FixtureNamed(name);
+    return evaluation({
+      askingPriceCents: f.input.askingPriceCents,
+      currentPriceCents: f.market.currentPriceCents,
+      history: f.market.history,
+    });
+  };
+
+  test("SHOCK45: the icon sits beside the confidence chip, named and titled by the locked tooltip", () => {
+    const e = fromFixture("SHOCK45");
+    expect(e.recommendation).toBe(e.tiers.tier1);
+    expect(e.recommendation.signals.shockAnnotation).toStrictEqual({
+      detected: true,
+      magnitude: 45,
+      window: 7,
+    });
+    const { container } = render(<ResultView evaluation={e} />);
+    const icon = screen.getByRole("img", {
+      name: "Price moved +45% over the last 7 days.",
+    });
+    expect(icon).toHaveAttribute(
+      "title",
+      "Price moved +45% over the last 7 days.",
+    );
+    expect(icon).toHaveAttribute(
+      "data-tooltip",
+      "Price moved +45% over the last 7 days.",
+    );
+    expect(icon).toHaveAttribute("tabindex", "0");
+    expect(icon).toHaveTextContent("⚠️");
+    const chip = container.querySelector(".mm-rec-chip");
+    expect(chip?.nextElementSibling).toBe(icon);
+    expect(icon.closest(".mm-rec-head")).not.toBeNull();
+    // The verdict is the non-shock one: Fair, at market.
+    expect(container.querySelector(".mm-rec-badge")).toHaveTextContent("Fair");
+    expect(container.querySelector(".mm-rec-reason")).toHaveTextContent(
+      "At market price.",
+    );
+  });
+
+  test("VOL30: a fall reads with U+2212, rounded: −46%", () => {
+    render(<ResultView evaluation={fromFixture("VOL30")} />);
+    const icon = screen.getByRole("img", {
+      name: "Price moved \u221246% over the last 7 days.",
+    });
+    expect(icon.getAttribute("title")).toBe(
+      "Price moved \u221246% over the last 7 days.",
+    );
+  });
+
+  test("the icon is the only addition: no new words in the panel beyond the tooltip", () => {
+    const { container } = render(
+      <ResultView evaluation={fromFixture("SHOCK45")} />,
+    );
+    const head = container.querySelector(".mm-rec-head") as HTMLElement;
+    expect(head.textContent).toBe("FairHigh confidence⚠️");
+  });
+
+  test.each([
+    [
+      "canonical A",
+      () =>
+        evaluation({
+          askingPriceCents: 7400,
+          currentPriceCents: 8150,
+          history: dailyHistory(AS_OF, flat(30, 8150)),
+        }),
+    ],
+    [
+      "CALM5 (a −9.5% week)",
+      () =>
+        evaluation({
+          askingPriceCents: 7172,
+          currentPriceCents: 8150,
+          history: dailyHistory(AS_OF, alt(30, 8400, 7600)),
+        }),
+    ],
+    [
+      "insufficient_data (6 rows after a +45% step)",
+      () => fromFixture("SHOCK-6-rows"),
+    ],
+  ])("%s renders no icon", (_name, make) => {
+    const { container } = render(<ResultView evaluation={make()} />);
+    expect(container.querySelector(".mm-rec-shock")).toBeNull();
+    expect(screen.queryByRole("img", { name: /Price moved/ })).toBeNull();
   });
 });

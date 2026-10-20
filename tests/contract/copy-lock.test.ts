@@ -219,6 +219,15 @@ const EM_DASH_HOMES = [
   "src/lib/recommendation/ui-copy.ts → UI_COPY.errorPanel",
 ];
 
+/**
+ * The one string that may hold a code point outside the allowlist, and its
+ * exact text (S3.2, Deviation 2): F3's warning glyph, U+26A0 then the emoji
+ * presentation selector U+FE0F. Exact, so nothing else rides along.
+ */
+const GLYPH_HOMES: Record<string, string> = {
+  "src/lib/copy/result-labels.ts → SHOCK_ICON": "\u26A0\uFE0F",
+};
+
 /** Each template's placeholder set (S1.3d7); every other string has none. */
 const DECLARED_PLACEHOLDERS: Record<string, string[]> = {
   "src/lib/recommendation/copy.ts → REASON_COPY.within": ["X"],
@@ -306,10 +315,22 @@ describe("tamper-evident copy text (T17)", () => {
   });
 
   test("no string has edge whitespace, a double space, a spaced hyphen or a code point outside printable ASCII, —, ±, · and ©", () => {
-    const problems = COPY_STRINGS.flatMap(({ id, text }) =>
+    const problems = COPY_STRINGS.filter(
+      ({ id, text }) => GLYPH_HOMES[id] !== text,
+    ).flatMap(({ id, text }) =>
       hygiene(text, FRAGMENTS.includes(id)).map((p) => `${id}: ${p}`),
     );
     expect(problems).toEqual([]);
+  });
+
+  test("the glyph homes hold exactly their glyph, and no other string holds U+26A0 or U+FE0F (S3.2)", () => {
+    for (const [id, glyph] of Object.entries(GLYPH_HOMES)) {
+      expect(COPY_STRINGS.find((s) => s.id === id)?.text, id).toBe(glyph);
+    }
+    const withGlyph = COPY_STRINGS.filter(({ text }) =>
+      /[\u26A0\uFE0F]/u.test(text),
+    ).map((s) => s.id);
+    expect(withGlyph.sort()).toEqual(Object.keys(GLYPH_HOMES).sort());
   });
 
   test("U+2014 appears only in the insufficient_data sentence, the fallback notice and the error panel", () => {

@@ -11,6 +11,7 @@ import { CLAUSE_SEPARATOR, REASON_COPY, SENTENCE_END } from "./copy";
 import { computeRecommendation, computeTieredRecommendation } from "./engine";
 import {
   CANONICAL_FIXTURES,
+  S3_2_FIXTURES,
   TIER2_DATA_EDGE_FIXTURES,
   TIER2_FIXTURES,
 } from "./fixtures";
@@ -601,10 +602,18 @@ describe("no assembled reason holds a forbidden phrase (T7)", () => {
   });
 });
 
-// --- S3.1 T18: every Tier-2 reason in the matrix ----------------------------
+// --- S3.1 T18, S3.2 T16: every Tier-2 reason in the matrix ------------------
+/** One caveat (S3.2d5): stale, thin-data or volatility, from the copy module. */
+const CAVEAT = [
+  clause(REASON_COPY.thinData),
+  escape(REASON_COPY.stale).replace(/\\\{d\\\}/, "[1-9]\\d*"),
+  escape(REASON_COPY.volatility).replace(/\\\{X\\\}/, "[1-9]\\d*"),
+].join("|");
+
 /**
  * A Tier-2 reason: one primary clause (X may be 0 on a shifted wait, S3.1d12),
- * at most one trend clause, then at most one thin-data caveat.
+ * at most one trend clause, then at most one caveat in the single slot
+ * (stale, thin-data or volatility; S3.2d5).
  */
 const TIER2_REASON = new RegExp(
   `^(?:${[
@@ -616,12 +625,13 @@ const TIER2_REASON = new RegExp(
     .map((t) => escape(t).replace(/\\\{X\\\}/g, "\\d+"))
     .join("|")})(?:${escape(CLAUSE_SEPARATOR)}${escape(REASON_COPY.trend)
     .replace(/\\\{direction\\\}/, "(?:rising|falling)")
-    .replace(/\\\{X\\\}/, "\\d+")})?(?:${escape(CLAUSE_SEPARATOR)}${clause(
-    REASON_COPY.thinData,
-  )})?${escape(SENTENCE_END)}$`,
+    .replace(
+      /\\\{X\\\}/,
+      "\\d+",
+    )})?(?:${escape(CLAUSE_SEPARATOR)}(?:${CAVEAT}))?${escape(SENTENCE_END)}$`,
 );
 
-describe("no Tier-2 reason holds a forbidden phrase (S3.1 T18)", () => {
+describe("no Tier-2 reason holds a forbidden phrase (S3.1 T18; S3.2 T16)", () => {
   test("self-test: the pattern takes one trend clause before the caveat, never after", () => {
     expect(
       TIER2_REASON.test("9% below market; 30-day trend is falling 18%."),
@@ -644,14 +654,44 @@ describe("no Tier-2 reason holds a forbidden phrase (S3.1 T18)", () => {
     );
   });
 
-  test.each(
-    [...CANONICAL_FIXTURES, ...TIER2_FIXTURES, ...TIER2_DATA_EDGE_FIXTURES].map(
-      (f, i) => [`${i}:${f.name}`, f] as const,
-    ),
-  )("%s: tier2's reason is clean and grammatical", (_name, f) => {
-    const { tier2 } = computeTieredRecommendation(f.input, f.market);
-    if (tier2 === null) return;
-    expect(findForbiddenPhrases(tier2.reason)).toEqual([]);
-    expect(tier2.reason).toMatch(TIER2_REASON);
+  test("self-test (S3.2): one caveat of the three, never two", () => {
+    expect(
+      TIER2_REASON.test(
+        "9% below market; 30-day trend is falling 18%; latest price data is 8 days old.",
+      ),
+    ).toBe(true);
+    expect(
+      TIER2_REASON.test("12% below market; price has been volatile (±30%)."),
+    ).toBe(true);
+    expect(
+      TIER2_REASON.test(
+        "19% above market; latest price data is 8 days old; only 10 price snapshots.",
+      ),
+    ).toBe(false);
+    expect(
+      TIER2_REASON.test(
+        "12% below market; price has been volatile (±30%); 30-day trend is rising 5%.",
+      ),
+    ).toBe(false);
   });
+
+  test.each(
+    [
+      ...CANONICAL_FIXTURES,
+      ...TIER2_FIXTURES,
+      ...TIER2_DATA_EDGE_FIXTURES,
+      ...S3_2_FIXTURES,
+    ].map((f, i) => [`${i}:${f.name}`, f] as const),
+  )(
+    // The filled shock tooltips are linted in
+    // src/lib/evaluation/shock-tooltip.test.ts, over the same matrix (the
+    // formatter lives outside the engine).
+    "%s: tier2's reason is clean and grammatical",
+    (_name, f) => {
+      const { tier2 } = computeTieredRecommendation(f.input, f.market);
+      if (tier2 === null) return;
+      expect(findForbiddenPhrases(tier2.reason)).toEqual([]);
+      expect(tier2.reason).toMatch(TIER2_REASON);
+    },
+  );
 });

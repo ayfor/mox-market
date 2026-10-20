@@ -1,13 +1,14 @@
 // F1 tunables (S1.1, AC-2). Every tunable lives here; tuning never needs a
 // logic change. Changing a value needs a plan-doc deviation and Josh's ruling.
-// TIER2_ENABLED and the two F3 params S3.1 reads joined at S3.1; S3.2 adds
-// the five it reads (S1.1d8, C3.7 = B; S3.1d4).
+// TIER2_ENABLED and the two F3 params S3.1 reads joined at S3.1; S3.2 added
+// the five it reads (S1.1d8, C3.7 = B; S3.1d4, S3.2d2).
 // Server-side only (node:crypto); client-safe limits live in ./limits.
 import { createHash } from "node:crypto";
 
 /**
  * F1's eleven tunables, then F3's (S3.1: TIER2_ENABLED, trendShiftFactor,
- * lowConfidenceWidening). Each field's JSDoc gives its meaning, unit and
+ * lowConfidenceWidening; S3.2: staleDays, volatileCV, volatilityWideningCap,
+ * shockWindowDays, shockMagnitudePct). Each field's JSDoc gives its meaning, unit and
  * rationale (S1.3d9); params.test.ts checks every field has "Unit:" and
  * "Why:". Comments never change PARAMS_VERSION.
  */
@@ -96,6 +97,36 @@ export interface RecommendationParams {
    * Why: F3, thin data earns a wider band rather than a confident verdict (C1.34).
    */
   readonly lowConfidenceWidening: number;
+  /**
+   * Tier 2 caps confidence at low when the newest window row is more than this many UTC days before asOf (liquidity is staleness).
+   * Unit: UTC days (7 → a row dated asOf − 8 or older is stale).
+   * Why: F3 and C1.12 = A, stale data earns a wider band and the stale caveat; density was dropped.
+   */
+  readonly staleDays: number;
+  /**
+   * The coefficient of variation at which Tier 2 starts widening: volWiden = clamp(volatility30d ÷ volatileCV, 1, volatilityWideningCap).
+   * Unit: ratio (dimensionless; 0.15 → a 30-day standard deviation of 15% of the mean).
+   * Why: F3 (C1.35), a card that swings more than ±15% earns a proportionally wider fair band.
+   */
+  readonly volatileCV: number;
+  /**
+   * The cap on volWiden and on the whole widening factor, min(volWiden × confWiden, cap).
+   * Unit: ratio (dimensionless; 2 → at most a ±10% band at fairBandPct 5).
+   * Why: F3 and C1.11 = A, widening never makes a verdict unreachable.
+   */
+  readonly volatilityWideningCap: number;
+  /**
+   * The shock annotation compares the newest window row with the newest row at least this many UTC days before it.
+   * Unit: UTC days.
+   * Why: F3 (C1.55), sevenDayMovePct, the move the locked shock tooltip describes.
+   */
+  readonly shockWindowDays: number;
+  /**
+   * A shock annotation is attached when |sevenDayMovePct| is at least this; the verdict never changes.
+   * Unit: percent (35 → a 35% move either way).
+   * Why: F3, a move that large is worth flagging beside the badge (C1.47 = A).
+   */
+  readonly shockMagnitudePct: number;
 }
 
 export const RECOMMENDATION_PARAMS: RecommendationParams = Object.freeze({
@@ -113,6 +144,11 @@ export const RECOMMENDATION_PARAMS: RecommendationParams = Object.freeze({
   TIER2_ENABLED: false,
   trendShiftFactor: 0.5,
   lowConfidenceWidening: 1.5,
+  staleDays: 7,
+  volatileCV: 0.15,
+  volatilityWideningCap: 2,
+  shockWindowDays: 7,
+  shockMagnitudePct: 35,
 });
 
 /** JSON with object keys sorted at every level, so key order never matters. */

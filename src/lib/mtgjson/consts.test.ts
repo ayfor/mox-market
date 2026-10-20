@@ -79,8 +79,9 @@ describe("F0 ops constants (T1)", () => {
   });
 
   // S3.1 moved the pin from 46ec1cd7 (S3.1d4: TIER2_ENABLED and two F3
-  // params); F0's constants still never join RECOMMENDATION_PARAMS.
-  test("PARAMS_VERSION is unchanged by F0 (S3.1's pin)", () => {
-    expect(PARAMS_VERSION).toBe("208c90c2");
+  // params) and S3.2 from 208c90c2 (S3.2d2: five F3 params); F0's
+  // constants still never join RECOMMENDATION_PARAMS.
+  test("PARAMS_VERSION is unchanged by F0 (S3.2's pin)", () => {
+    expect(PARAMS_VERSION).toBe("2d4067ed");
   });
 });

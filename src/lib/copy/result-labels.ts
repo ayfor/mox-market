@@ -13,6 +13,13 @@ export const KIND_LABELS = Object.freeze({
   wait: "Wait",
 } as const);
 
+/**
+ * The glyph beside the confidence chip when the served result carries F3's
+ * shock annotation (F3 §UI, S3.2d9). A glyph, not words: its accessible name
+ * and tooltip are F1's locked SHOCK_TOOLTIP, filled (S3.2d10).
+ */
+export const SHOCK_ICON = "⚠️";
+
 /** The confidence chip for each confidence level. */
 export const CONFIDENCE_LABELS = Object.freeze({
   high: "High confidence",

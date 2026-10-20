@@ -11,6 +11,13 @@
 // Their S1.2 results live in a second recording,
 // __snapshots__/tiered-parity.s1.2-data-edges.json, written the same way from
 // the engine at 97b4bba (the first recording stays untouched, S3.1d10).
+// S3.2 T7 (AC-6; S3.2d8): the shock annotation is the one field exempt from
+// the deep-equal (C1.47 = A), so every comparison removes
+// signals.shockAnnotation first. S3.2's fixtures have a third recording,
+// __snapshots__/tiered-parity.s3.2-fixtures.json, written once from the
+// engine at 5c150b4 before any S3.2 engine edit; the S3.1 recordings stay
+// untouched. With the flag on, the served annotation equals the flag-off
+// one, and Tier 2's confidence is Tier 1's except on stale data (S3.2d4).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -96,6 +103,7 @@ const S3_2_MATRIX: readonly MatrixCase[] = S3_2_FIXTURES.map((f) => ({
 const FULL_MATRIX: readonly MatrixCase[] = [
   ...PARITY_MATRIX,
   ...DATA_EDGE_MATRIX,
+  ...S3_2_MATRIX,
 ];
 
 const readRecording = (file: string): Record<string, Recommendation> =>
@@ -104,11 +112,30 @@ const readRecording = (file: string): Record<string, Recommendation> =>
 const recorded = (): Record<string, Recommendation> => ({
   ...readRecording(RECORDING),
   ...readRecording(DATA_EDGE_RECORDING),
+  ...readRecording(S3_2_RECORDING),
 });
+
+/**
+ * A result without signals.shockAnnotation, the field AC-6 exempts from the
+ * deep-equal (C1.47 = A). Its key order matches the recordings.
+ */
+function withoutShock(r: Recommendation): Omit<Recommendation, "signals"> & {
+  signals: Omit<Recommendation["signals"], "shockAnnotation">;
+} {
+  const signals: Partial<Recommendation["signals"]> = { ...r.signals };
+  delete signals.shockAnnotation;
+  return {
+    ...r,
+    signals: signals as Omit<Recommendation["signals"], "shockAnnotation">,
+  };
+}
 
 const servedOver = (matrix: readonly MatrixCase[]) =>
   Object.fromEntries(
-    matrix.map((c) => [c.name, computeRecommendation(c.input, c.market)]),
+    matrix.map((c) => [
+      c.name,
+      withoutShock(computeRecommendation(c.input, c.market)),
+    ]),
   );
 
 describe("the S1.2 recording (T12, AC-4; S3.1d10)", () => {
@@ -119,7 +146,8 @@ describe("the S1.2 recording (T12, AC-4; S3.1d10)", () => {
       CANONICAL_FIXTURES.length +
         TIER2_FIXTURES.length +
         BAND_EDGES.length +
-        TIER2_DATA_EDGE_FIXTURES.length,
+        TIER2_DATA_EDGE_FIXTURES.length +
+        S3_2_FIXTURES.length,
     );
     // Every case has exactly one recorded S1.2 result.
     expect(Object.keys(recorded()).sort()).toEqual([...names].sort());
@@ -157,21 +185,21 @@ describe("the S1.2 recording (T12, AC-4; S3.1d10)", () => {
   });
 
   test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
-    "%s: the served recommendation deep-equals the S1.2 result",
+    "%s: the served recommendation, shockAnnotation removed, deep-equals the S1.2 result",
     (name, c) => {
-      expect(computeRecommendation(c.input, c.market)).toStrictEqual(
-        recorded()[name],
-      );
+      const served = computeRecommendation(c.input, c.market);
+      expect(served.signals).toHaveProperty("shockAnnotation");
+      expect(withoutShock(served)).toStrictEqual(recorded()[name]);
     },
   );
 });
 
-describe("Tier 1 of the tiered call is the S1.2 result (T12, AC-4)", () => {
+describe("Tier 1 of the tiered call is the S1.2 result (T12, AC-4; S3.2 T7)", () => {
   test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
-    "%s: computeTieredRecommendation(...).tier1 deep-equals the recording",
+    "%s: computeTieredRecommendation(...).tier1, shockAnnotation removed, deep-equals the recording",
     (name, c) => {
       const { tier1 } = computeTieredRecommendation(c.input, c.market);
-      expect(tier1).toStrictEqual(recorded()[name]);
+      expect(withoutShock(tier1)).toStrictEqual(recorded()[name]);
       expect(tier1.signals.wideningFactor).toBe(1);
       expect(tier1.signals.bandPct).toBe(5);
     },
@@ -192,7 +220,21 @@ const DESCRIPTIVE_SIGNALS = [
   "snapshotCount30d",
   "trendDirection",
   "fallbackNotice",
+  // S3.2d7: the shock annotation rides on both tiers.
+  "shockAnnotation",
 ] as const;
+
+/** S3.2's stale fixtures: Tier 2's confidence is capped at low (S3.2d4). */
+const STALE_CASES = new Set(
+  [
+    "STALE8-20",
+    "STALE8-14",
+    "D-STALE8",
+    "D-STALE15",
+    "VOL30-STALE8",
+    "C-STALE8",
+  ].map((name) => `s3.2:${name}`),
+);
 
 describe("the flag (T13, AC-4; F3 Engine API)", () => {
   const ON = { ...RECOMMENDATION_PARAMS, TIER2_ENABLED: true };
@@ -219,19 +261,57 @@ describe("the flag (T13, AC-4; F3 Engine API)", () => {
   );
 
   test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
-    "%s: tier1 and tier2 share every descriptive signal and the confidence",
-    (_name, c) => {
+    "%s: tier1 and tier2 share every descriptive signal, the shock annotation and (unless stale) the confidence",
+    (name, c) => {
       const { tier1, tier2 } = computeTieredRecommendation(c.input, c.market);
       if (tier2 === null) {
         expect(tier1.kind).toBe("insufficient_data");
         return;
       }
-      expect(tier2.confidence).toBe(tier1.confidence);
+      expect(tier2.confidence).toBe(
+        STALE_CASES.has(name) ? "low" : tier1.confidence,
+      );
       for (const key of DESCRIPTIVE_SIGNALS) {
         expect(tier2.signals[key], key).toStrictEqual(tier1.signals[key]);
       }
     },
   );
+
+  test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
+    "%s: the served shockAnnotation is the same with the flag on and off (C1.47 = A)",
+    (_name, c) => {
+      expect(
+        computeRecommendation(c.input, c.market, ON).signals.shockAnnotation,
+      ).toStrictEqual(
+        computeRecommendation(c.input, c.market).signals.shockAnnotation,
+      );
+    },
+  );
+
+  test("the annotation is served for VOL30, SHOCK45 and crash-ramp-30 whatever the flag", () => {
+    for (const name of ["s3.2:VOL30", "s3.2:SHOCK45", "data:crash-ramp-30"]) {
+      const c = FULL_MATRIX.find((m) => m.name === name) as MatrixCase;
+      expect(
+        computeRecommendation(c.input, c.market).signals.shockAnnotation,
+        name,
+      ).not.toBeNull();
+      expect(
+        computeRecommendation(c.input, c.market, ON).signals.shockAnnotation,
+        name,
+      ).not.toBeNull();
+    }
+  });
+
+  test("stale cases are exactly the S3.2 fixtures whose newest row is over 7 days old", () => {
+    const stale = FULL_MATRIX.filter((c) => {
+      const { tier1, tier2 } = computeTieredRecommendation(c.input, c.market);
+      return tier2 !== null && tier2.confidence !== tier1.confidence;
+    }).map((c) => c.name);
+    // D-STALE8 and D-STALE15 are already low on Tier 1.
+    expect(stale.sort()).toEqual(
+      [...STALE_CASES].filter((n) => !n.startsWith("s3.2:D-STALE")).sort(),
+    );
+  });
 
   test("the shipped params keep Tier 2 dark", () => {
     expect(RECOMMENDATION_PARAMS.TIER2_ENABLED).toBe(false);
