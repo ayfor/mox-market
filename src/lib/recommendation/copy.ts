@@ -22,8 +22,8 @@ export const REASON_COPY = Object.freeze({
   /** The thin-data caveat, whenever confidence is low; n = snapshotCount30d. */
   thinData: "only {n} price snapshots",
   /**
-   * F3 caveat (C1.12 = A), Tier 2 only, d = the newest window row's age in
-   * UTC days; called from reason.ts (S3.2d5).
+   * F3 caveat (C1.12 = A), Tier 2 only, d = the newest history row's age in
+   * UTC days (S3.2d4); called from reason.ts (S3.2d5).
    */
   stale: "latest price data is {d} days old",
   /**

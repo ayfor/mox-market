@@ -106,6 +106,43 @@ describe("the shock annotation's rules (S3.2 T16; S3.2d9)", () => {
       expect.arrayContaining([{ property: "visibility", value: "visible" }]),
     );
   });
+
+  // S3.2 ADV UB-1: at 375 px the icon-centred bubble ran past the viewport
+  // and .mm-app's overflow-x clipped the tooltip. On narrow screens the
+  // bubble's containing block is the head (the icon is static), it starts
+  // at the head's left edge, and its border box never outgrows the head.
+  test("on narrow screens the bubble anchors to the head and stays inside it", () => {
+    const NARROW = "@media (max-width: 760px)";
+    const narrow = (selector: string) =>
+      extractRules(RESULT_CSS)
+        .filter(
+          (r) =>
+            r.selector === selector &&
+            r.atRules.length === 1 &&
+            r.atRules[0] === NARROW,
+        )
+        .flatMap((r) => r.declarations);
+    expect(narrow(".mm-rec-head")).toEqual(
+      expect.arrayContaining([{ property: "position", value: "relative" }]),
+    );
+    expect(narrow(".mm-rec-shock")).toEqual(
+      expect.arrayContaining([{ property: "position", value: "static" }]),
+    );
+    expect(narrow(".mm-rec-shock::after")).toEqual(
+      expect.arrayContaining([
+        { property: "left", value: "0" },
+        { property: "transform", value: "none" },
+        { property: "box-sizing", value: "border-box" },
+        { property: "max-width", value: "100%" },
+      ]),
+    );
+    // The base rule keeps the icon-centred bubble for wide screens.
+    expect(declarationsOf(RESULT_CSS, ".mm-rec-shock::after")).toEqual(
+      expect.arrayContaining([
+        { property: "transform", value: "translateX(-50%)" },
+      ]),
+    );
+  });
 });
 
 describe("result.css never reaches the site footer (T12)", () => {

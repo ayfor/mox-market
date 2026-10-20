@@ -6,6 +6,7 @@
 import { describe, expect, test } from "vitest";
 import { computeTieredRecommendation, servedRecommendation } from "./engine";
 import {
+  canonicalFixture,
   FIXTURE_AS_OF,
   fixtureInput,
   fixtureMarket,
@@ -123,13 +124,26 @@ describe("shockAnnotationOf on the window rows (S3.2d6)", () => {
     expect(shock?.magnitude).toBe(((10595 - 5705) * 100) / 5705);
   });
 
-  test("magnitude is never −0 and window is shockWindowDays", () => {
+  test("window is shockWindowDays on every annotated fixture", () => {
     for (const f of S3_2_FIXTURES) {
       const shock = shockAnnotationOf(windowOf(f), RECOMMENDATION_PARAMS);
       if (shock === null) continue;
-      expect(Object.is(shock.magnitude, -0)).toBe(false);
       expect(shock.window).toBe(RECOMMENDATION_PARAMS.shockWindowDays);
     }
+  });
+
+  // ADV TC-1: an annotation needs |move| ≥ 35%, so no default-params case
+  // reaches 0. With shockMagnitudePct 0 a flat week annotates, and the
+  // magnitude is exactly +0 (integer cents never give −0).
+  test("a zero move under shockMagnitudePct 0 has magnitude exactly +0", () => {
+    const rows = windowOf(canonicalFixture("B"));
+    const shock = shockAnnotationOf(rows, {
+      ...RECOMMENDATION_PARAMS,
+      shockMagnitudePct: 0,
+    });
+    expect(shock).not.toBeNull();
+    expect(Object.is(shock?.magnitude, 0)).toBe(true);
+    expect(shock?.window).toBe(RECOMMENDATION_PARAMS.shockWindowDays);
   });
 
   test("shockWindowDays and shockMagnitudePct come from params", () => {

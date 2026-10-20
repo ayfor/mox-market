@@ -8,6 +8,9 @@ import { computeTieredRecommendation } from "./engine";
 import {
   CANONICAL_FIXTURES,
   canonicalFixture,
+  FIXTURE_AS_OF,
+  flat,
+  historyEndingAt,
   s32FixtureNamed,
   S3_2_FIXTURES,
   TIER2_DATA_EDGE_FIXTURES,
@@ -52,8 +55,10 @@ const thresholdsOf = (r: Recommendation) => [
 const MS_PER_DAY = 86_400_000;
 
 /**
- * utcDay(asOf) − the newest window row's date, from the dates themselves
- * (not the engine's index arithmetic), or null for an empty window.
+ * utcDay(asOf) − the newest real history row's date (F1: F3's stale clause
+ * uses the newest history date; S3.2d4, ADV SPEC-1), from the dates
+ * themselves: the last entry per date wins, rows after asOf never count.
+ * Null for an empty window (Tier 1 is then insufficient_data).
  */
 function ageFromDates(market: MarketSnapshot): number | null {
   const rows = readWindow(
@@ -61,9 +66,20 @@ function ageFromDates(market: MarketSnapshot): number | null {
     market.asOf,
     RECOMMENDATION_PARAMS.windowDays,
   );
-  const latest = rows.at(-1);
-  if (latest === undefined) return null;
-  return (Date.parse(market.asOf) - Date.parse(latest.date)) / MS_PER_DAY;
+  if (rows.length === 0) return null;
+  const kept = new Map<string, unknown>();
+  for (const row of market.history) kept.set(row.date, row.priceCents);
+  const dates = [...kept]
+    .filter(
+      ([date, price]) =>
+        date <= market.asOf &&
+        Number.isSafeInteger(price) &&
+        (price as number) > 0,
+    )
+    .map(([date]) => date)
+    .sort();
+  const newest = dates.at(-1) as string;
+  return (Date.parse(market.asOf) - Date.parse(newest)) / MS_PER_DAY;
 }
 
 describe("every S3.2 fixture matches its table row (T1 to T12)", () => {
@@ -223,25 +239,90 @@ describe("AC-3: staleness caps Tier 2's confidence at low (T3)", () => {
     expect(lenient.tier2?.reason).toBe("Within 2% of market.");
   });
 
-  test("a row dated asOf (outside the window) never makes a card fresh (S3.2d4)", () => {
+  /** STALE8-20's market with extra history rows appended. */
+  const stale8With = (...extra: { date: string; priceCents: number }[]) => {
     const f = named("STALE8-20");
-    const market = {
-      ...f.market,
-      history: [...f.market.history, { date: f.market.asOf, priceCents: 8150 }],
+    return {
+      ...f,
+      market: { ...f.market, history: [...f.market.history, ...extra] },
     };
-    expect(computeTieredRecommendation(f.input, market).tier2?.confidence).toBe(
-      "low",
+  };
+
+  // ADV SPEC-1 / UB-2: the stale clause reads the newest history date (F1),
+  // and the window ends at asOf − 1, so a row dated asOf (the daily sync's
+  // resume-day row) makes the age 0. Tier 1 ignores it, as its window does.
+  test("a real row dated asOf makes the age 0: tier2 fresh, Tier 1 unchanged (S3.2d4)", () => {
+    const f = stale8With({ date: FIXTURE_AS_OF, priceCents: 8150 });
+    expect(ageFromDates(f.market)).toBe(0);
+    const { tier1, tier2 } = tiersOf(f);
+    expect(tier1).toStrictEqual(tiersOf(named("STALE8-20")).tier1);
+    const t2 = tier2 as Recommendation;
+    expect(t2.kind).toBe("fair");
+    expect(t2.confidence).toBe("medium");
+    expect(t2.signals.wideningFactor).toBe(1);
+    expect(t2.signals.bandPct).toBe(5);
+    expect(thresholdsOf(t2)).toEqual([-833, 500]);
+    expect(t2.reason).toBe("Within 2% of market.");
+  });
+
+  test("the resume day after a 9-day outage: no stale clause, no 'latest price data is 9 days old'", () => {
+    // UB-2's input: 20 rows at 8150 on asOf − 28 to asOf − 9, one at asOf.
+    const f = {
+      name: "resume-day",
+      input: named("STALE8-20").input,
+      market: {
+        ...named("STALE8-20").market,
+        history: [
+          ...historyEndingAt(flat(20, 8150), 9),
+          { date: FIXTURE_AS_OF, priceCents: 8150 },
+        ],
+      },
+    };
+    const t2 = tier2Of(f);
+    expect(t2.confidence).toBe("medium");
+    expect(t2.signals.wideningFactor).toBe(1);
+    expect(t2.reason).toBe("Within 2% of market.");
+    expect(t2.reason).not.toContain("days old");
+  });
+
+  test.each([
+    ["an unusable price dated asOf", [{ date: FIXTURE_AS_OF, priceCents: 0 }]],
+    [
+      "a usable asOf row superseded by a later unusable one",
+      [
+        { date: FIXTURE_AS_OF, priceCents: 8150 },
+        { date: FIXTURE_AS_OF, priceCents: -1 },
+      ],
+    ],
+    ["a row dated after asOf", [{ date: "2026-10-11", priceCents: 8150 }]],
+  ])("%s does not refresh the card: still 8 days old", (_name, extra) => {
+    const f = stale8With(...extra);
+    expect(ageFromDates(f.market)).toBe(8);
+    const t2 = tier2Of(f);
+    expect(t2.confidence).toBe("low");
+    expect(t2.reason).toBe(
+      "Within 2% of market; latest price data is 8 days old.",
     );
   });
 
-  test("latestAgeDays: windowDays − the newest index, null for no rows", () => {
-    const rows = readWindow(
-      named("STALE8-20").market.history,
-      named("STALE8-20").market.asOf,
-      RECOMMENDATION_PARAMS.windowDays,
+  test("an unusable asOf row superseded by a later usable one refreshes it (last entry wins)", () => {
+    const f = stale8With(
+      { date: FIXTURE_AS_OF, priceCents: 0 },
+      { date: FIXTURE_AS_OF, priceCents: 8150 },
     );
-    expect(latestAgeDays(rows, RECOMMENDATION_PARAMS)).toBe(8);
-    expect(latestAgeDays([], RECOMMENDATION_PARAMS)).toBeNull();
+    expect(tier2Of(f).confidence).toBe("medium");
+  });
+
+  test("latestAgeDays: 0 with a real asOf row, else windowDays − the newest index, null for no rows", () => {
+    const { history, asOf } = named("STALE8-20").market;
+    const rows = readWindow(history, asOf, RECOMMENDATION_PARAMS.windowDays);
+    expect(latestAgeDays(history, asOf, rows, RECOMMENDATION_PARAMS)).toBe(8);
+    const withToday = [...history, { date: asOf, priceCents: 8150 }];
+    expect(latestAgeDays(withToday, asOf, rows, RECOMMENDATION_PARAMS)).toBe(0);
+    expect(
+      latestAgeDays(withToday, asOf, [], RECOMMENDATION_PARAMS),
+    ).toBeNull();
+    expect(latestAgeDays([], asOf, [], RECOMMENDATION_PARAMS)).toBeNull();
   });
 });
 

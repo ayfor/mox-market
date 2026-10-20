@@ -77,10 +77,11 @@ function confidenceFor(
   return "high";
 }
 
-/** Tier 1 and the window it was computed from. */
+/** Tier 1, the window it was computed from and the usable snapshot. */
 interface Tier1Result {
   readonly tier1: Recommendation;
   readonly windowSnapshots: readonly WindowSnapshot[];
+  readonly snapshot: Partial<MarketSnapshot>;
 }
 
 /** F1 W1: the Tier-1 recommendation, by S1.2's path unchanged. */
@@ -141,20 +142,25 @@ function computeTier1(
           : shockAnnotationOf(windowSnapshots, params),
     },
   };
-  return { tier1, windowSnapshots };
+  return { tier1, windowSnapshots, snapshot };
 }
 
 /**
  * Both tiers for one input (validated once). Tier 2 reads Tier 1's exact
  * 30-day slope, recomputed from the same window, only when Tier 1 has a
- * verdict and a trend, and the newest window row's age (S3.2d4).
+ * verdict and a trend, and the newest history row's age (S3.2d4, ADV
+ * SPEC-1).
  */
 function tiersFor(
   input: RecommendationInput,
   market: MarketSnapshot,
   params: RecommendationParams,
 ): TieredRecommendation {
-  const { tier1, windowSnapshots } = computeTier1(input, market, params);
+  const { tier1, windowSnapshots, snapshot } = computeTier1(
+    input,
+    market,
+    params,
+  );
   const slope30d =
     tier1.kind === "insufficient_data" || tier1.signals.slope30dPct === null
       ? null
@@ -164,7 +170,12 @@ function tiersFor(
     tier2: computeTier2(
       tier1,
       slope30d,
-      latestAgeDays(windowSnapshots, params),
+      latestAgeDays(
+        snapshot.history,
+        snapshot.asOf ?? "",
+        windowSnapshots,
+        params,
+      ),
       params,
     ),
   };

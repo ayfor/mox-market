@@ -407,6 +407,20 @@
   .mm-rec-panel {
     padding: 20px;
   }
+  /* The shock bubble anchors to the head's left edge and never outgrows it,
+     so .mm-app's overflow-x never clips the tooltip (S3.2 ADV UB-1). */
+  .mm-rec-head {
+    position: relative;
+  }
+  .mm-rec-shock {
+    position: static;
+  }
+  .mm-rec-shock::after {
+    left: 0;
+    box-sizing: border-box;
+    max-width: 100%;
+    transform: none;
+  }
   .mm-rec-tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

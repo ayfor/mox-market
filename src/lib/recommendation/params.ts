@@ -98,8 +98,8 @@ export interface RecommendationParams {
    */
   readonly lowConfidenceWidening: number;
   /**
-   * Tier 2 caps confidence at low when the newest window row is more than this many UTC days before asOf (liquidity is staleness).
-   * Unit: UTC days (7 → a row dated asOf − 8 or older is stale).
+   * Tier 2 caps confidence at low when the newest history row is more than this many UTC days before asOf (liquidity is staleness).
+   * Unit: UTC days (7 → a newest row dated asOf − 8 or older is stale).
    * Why: F3 and C1.12 = A, stale data earns a wider band and the stale caveat; density was dropped.
    */
   readonly staleDays: number;

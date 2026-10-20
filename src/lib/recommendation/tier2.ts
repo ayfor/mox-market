@@ -1,6 +1,6 @@
 // F3 Tier 2 (S3.1, S3.2). Pure: no React, Next, clock or randomness.
-// Staleness first: when the newest window row is more than staleDays before
-// asOf, Tier 2's confidence is low (S3.2d4). Then (F3; C1.34) widen the fair
+// Staleness first: when the newest history row is more than staleDays before
+// asOf, Tier 2's confidence is low (S3.2d4, ADV SPEC-1). Then (F3; C1.34) widen the fair
 // band by min(volWiden × confWiden, volatilityWideningCap) (C1.11 = A,
 // S3.2d3), apply the Buy-side asymmetry, and shift both thresholds by the
 // 30-day trend, clamped to ±the widened band and 0 inside the dead zone
@@ -17,7 +17,7 @@ import type { RecommendationParams } from "./params";
 import { buildReason, type TrendClause } from "./reason";
 import type { ExactRatio } from "./signals";
 import type { Confidence, Recommendation, TrendDirection } from "./types";
-import type { WindowSnapshot } from "./window";
+import { hasRealSnapshotOn, type WindowSnapshot } from "./window";
 
 /** What tier2Thresholds reads from Tier 1's result. */
 export interface Tier2ThresholdInput {
@@ -65,16 +65,25 @@ export function volatilityWiden(
 }
 
 /**
- * The newest real window row's age in UTC days, utcDay(asOf) − latest.date
- * (S3.2d4): windowDays − its index, since index windowDays − 1 is asOf − 1.
- * Null for an empty window. Never reads the clock.
+ * The newest real history row's age in UTC days, utcDay(asOf) − latest.date
+ * (F1: F3's stale clause uses the newest history date, C1.12; S3.2d4 as
+ * revised by ADV SPEC-1). The window ends at asOf − 1, so a real row dated
+ * asOf itself gives 0; otherwise the newest window row gives windowDays −
+ * its index, since index windowDays − 1 is asOf − 1. Rows after asOf never
+ * count. Null when the window is empty: Tier 1 is then insufficient_data
+ * and there is no Tier 2. Never reads the clock.
  */
 export function latestAgeDays(
+  history: unknown,
+  asOf: string,
   windowSnapshots: readonly WindowSnapshot[],
   params: RecommendationParams,
 ): number | null {
   const latest = windowSnapshots.at(-1);
-  return latest === undefined ? null : params.windowDays - latest.index;
+  if (latest === undefined) return null;
+  return hasRealSnapshotOn(history, asOf)
+    ? 0
+    : params.windowDays - latest.index;
 }
 
 /** A ratio times this is a percentage (the volatility clause's X). */
@@ -146,7 +155,7 @@ export function trendClauseX(
  * when the data is stale, else Tier 1's; every descriptive signal and the
  * shock annotation stay Tier 1's. Null when Tier 1 is insufficient_data
  * (C1.05 = B). slope30d is Tier 1's exact 30-day slope (null below the
- * trend minimum); ageDays is the newest window row's age (latestAgeDays).
+ * trend minimum); ageDays is the newest history row's age (latestAgeDays).
  */
 export function computeTier2(
   tier1: Recommendation,

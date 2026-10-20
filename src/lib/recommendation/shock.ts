@@ -5,7 +5,6 @@
 // compares exact integers, so a move of exactly ±shockMagnitudePct fires.
 // The annotation never feeds kind, confidence or reason (F3: verdict
 // unchanged).
-import { withoutNegativeZero } from "./bands";
 import type { RecommendationParams } from "./params";
 import type { ShockAnnotation } from "./types";
 import type { WindowSnapshot } from "./window";
@@ -35,11 +34,12 @@ export function shockAnnotationOf(
   if (absMove * scale * scale < threshold * BigInt(ref.priceCents)) {
     return null;
   }
+  // Integer cents: latest − ref is +0 when equal, never −0, and ref > 0,
+  // so the magnitude is never −0 (S3.2 ADV TC-1).
   return {
     detected: true,
-    magnitude: withoutNegativeZero(
+    magnitude:
       ((latest.priceCents - ref.priceCents) * PERCENT) / ref.priceCents,
-    ),
     window: params.shockWindowDays,
   };
 }
