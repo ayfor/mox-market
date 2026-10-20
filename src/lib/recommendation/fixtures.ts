@@ -168,3 +168,372 @@ export function canonicalFixture(name: string): CanonicalFixture {
   if (!found) throw new Error(`no canonical fixture named ${name}`);
   return found;
 }
+
+// --- S3.1: Tier-2 fixtures (F3 W1, W2; plan Test Manifest T1 to T10) --------
+
+/** What a fixture asserts about one tier. */
+export interface TierExpectation {
+  readonly kind: RecommendationKind;
+  readonly confidence: Confidence;
+  readonly reason: string;
+}
+
+/** Tier 2 also pins the adjusted band and thresholds (signals, in percent). */
+export interface Tier2Expectation extends TierExpectation {
+  readonly buyThresholdPct: number;
+  readonly waitThresholdPct: number;
+  readonly bandPct: number;
+  readonly wideningFactor: number;
+}
+
+export interface Tier2Fixture {
+  readonly name: string;
+  readonly input: RecommendationInput;
+  readonly market: MarketSnapshot;
+  readonly expected: {
+    readonly tier1: TierExpectation;
+    /** Null only when tier1 is insufficient_data (F3 Engine API). */
+    readonly tier2: Tier2Expectation | null;
+  };
+}
+
+/** A canonical fixture reused as is: its input, market and Tier-1 result. */
+function fromCanonical(
+  name: string,
+  tier2: Tier2Expectation | null,
+): Tier2Fixture {
+  const f = canonicalFixture(name);
+  const { kind, confidence, reason } = f.expected;
+  return {
+    name,
+    input: f.input,
+    market: f.market,
+    expected: { tier1: { kind, confidence, reason }, tier2 },
+  };
+}
+
+function tier2Fixture(
+  name: string,
+  asking: number,
+  market: number,
+  values: readonly number[],
+  tier1: TierExpectation,
+  tier2: Tier2Expectation | null,
+): Tier2Fixture {
+  return {
+    name,
+    input: fixtureInput(asking),
+    market: fixtureMarket(market, values),
+    expected: { tier1, tier2 },
+  };
+}
+
+/** Example C's re-pinned history: −0.6 %/day, falling 18% over 30 days. */
+const C_HISTORY = ramp(30, 8696, -48);
+/** A-rising's history: +0.6 %/day, rising 18% over 30 days. */
+const A_RISING_HISTORY = ramp(30, 7304, 48);
+
+/** Tier-2 band and thresholds at full history, shifted by a clamped +5 (rising). */
+const RISING_FULL = {
+  buyThresholdPct: -3.33,
+  waitThresholdPct: 10,
+  bandPct: 5,
+  wideningFactor: 1,
+} as const;
+/** The same, shifted by a clamped −5 (falling). */
+const FALLING_FULL = {
+  buyThresholdPct: -13.33,
+  waitThresholdPct: 0,
+  bandPct: 5,
+  wideningFactor: 1,
+} as const;
+/** No shift at full history: Tier 1's thresholds. */
+const UNSHIFTED_FULL = {
+  buyThresholdPct: -8.33,
+  waitThresholdPct: 5,
+  bandPct: 5,
+  wideningFactor: 1,
+} as const;
+/** Low confidence, no shift: the band widened 1.5×. */
+const UNSHIFTED_LOW = {
+  buyThresholdPct: -12.5,
+  waitThresholdPct: 7.5,
+  bandPct: 7.5,
+  wideningFactor: 1.5,
+} as const;
+
+/**
+ * S3.1's Tier-2 fixtures (plan T1 to T10), each with its exact Tier-1 and
+ * Tier-2 kind, confidence and reason, and Tier 2's band and thresholds. The
+ * canonical entries are reused from CANONICAL_FIXTURES, never copied. A param
+ * change that flips one updates it here, in the same PR (F1 W2); S3.2's
+ * volatility widening changes M's thresholds (CV 0.173).
+ */
+export const TIER2_FIXTURES: readonly Tier2Fixture[] = [
+  // T1, AC-1: C. The −9 shift clamps to −5.
+  fromCanonical("C", {
+    kind: "fair",
+    confidence: "high",
+    reason: "9% below market; 30-day trend is falling 18%.",
+    ...FALLING_FULL,
+  }),
+  // T2, AC-2: A-rising. The +9 shift clamps to +5.
+  fromCanonical("A-rising", {
+    kind: "buy",
+    confidence: "high",
+    reason: "5% below market; 30-day trend is rising 18%.",
+    ...RISING_FULL,
+  }),
+  // T3, AC-3(a): no Tier 2 without a verdict.
+  fromCanonical("D0", null),
+  fromCanonical("E", null),
+  // T4, AC-3(b): thin data inside the dead zone.
+  fromCanonical("D", {
+    kind: "wait",
+    confidence: "low",
+    reason: "19% above market; only 10 price snapshots.",
+    ...UNSHIFTED_LOW,
+  }),
+  fromCanonical("D-buy", {
+    kind: "buy",
+    confidence: "low",
+    reason: "14% below market; only 10 price snapshots.",
+    ...UNSHIFTED_LOW,
+  }),
+  tier2Fixture(
+    "Z10",
+    8000,
+    8000,
+    ramp(10, 7820, 40),
+    {
+      kind: "fair",
+      confidence: "low",
+      reason: "At market price; only 10 price snapshots.",
+    },
+    {
+      kind: "fair",
+      confidence: "low",
+      reason: "At market price; only 10 price snapshots.",
+      ...UNSHIFTED_LOW,
+    },
+  ),
+  ...[7, 13].map((n) =>
+    tier2Fixture(
+      `D-${n}`,
+      5000,
+      4200,
+      flat(n, 4200),
+      {
+        kind: "wait",
+        confidence: "low",
+        reason: `19% above market; only ${n} price snapshots.`,
+      },
+      {
+        kind: "wait",
+        confidence: "low",
+        reason: `19% above market; only ${n} price snapshots.`,
+        ...UNSHIFTED_LOW,
+      },
+    ),
+  ),
+  tier2Fixture(
+    "D-14",
+    5000,
+    4200,
+    flat(14, 4200),
+    { kind: "wait", confidence: "medium", reason: "19% above market." },
+    {
+      kind: "wait",
+      confidence: "medium",
+      reason: "19% above market.",
+      ...UNSHIFTED_FULL,
+    },
+  ),
+  // T5: widening flips the verdict; equality at a widened threshold is Fair.
+  ...(
+    [
+      [4500, "wait", "7% above market", "fair", "Within 7% of market"],
+      [4515, "wait", "8% above market", "fair", "Within 8% of market"],
+      [4516, "wait", "8% above market", "wait", "8% above market"],
+      [3675, "buy", "13% below market", "fair", "13% below market"],
+      [3674, "buy", "13% below market", "buy", "13% below market"],
+    ] as const
+  ).map(([asking, kind1, clause1, kind2, clause2]) =>
+    tier2Fixture(
+      `D-wide-${asking}`,
+      asking,
+      4200,
+      flat(10, 4200),
+      {
+        kind: kind1,
+        confidence: "low",
+        reason: `${clause1}; only 10 price snapshots.`,
+      },
+      {
+        kind: kind2,
+        confidence: "low",
+        reason: `${clause2}; only 10 price snapshots.`,
+        ...UNSHIFTED_LOW,
+      },
+    ),
+  ),
+  // T6: thin data with a trend: widen, then the asymmetry, then the clamped shift.
+  ...(
+    [
+      [7600, "Within 5% of market", "fair", "Within 5% of market"],
+      [7599, "5% below market", "buy", "5% below market"],
+    ] as const
+  ).map(([asking, clause1, kind2, clause2]) =>
+    tier2Fixture(
+      `D-rising-${asking}`,
+      asking,
+      8000,
+      ramp(10, 7784, 48),
+      {
+        kind: "fair",
+        confidence: "low",
+        reason: `${clause1}; only 10 price snapshots.`,
+      },
+      {
+        kind: kind2,
+        confidence: "low",
+        reason: `${clause2}; 30-day trend is rising 18%; only 10 price snapshots.`,
+        buyThresholdPct: -5,
+        waitThresholdPct: 15,
+        bandPct: 7.5,
+        wideningFactor: 1.5,
+      },
+    ),
+  ),
+  tier2Fixture(
+    "C7",
+    7400,
+    8150,
+    ramp(7, 8144, -48),
+    {
+      kind: "buy",
+      confidence: "low",
+      reason: "9% below market; only 7 price snapshots.",
+    },
+    {
+      kind: "fair",
+      confidence: "low",
+      reason:
+        "9% below market; 30-day trend is falling 18%; only 7 price snapshots.",
+      buyThresholdPct: -20,
+      waitThresholdPct: 0,
+      bandPct: 7.5,
+      wideningFactor: 1.5,
+    },
+  ),
+  // T7, AC-6: the strict rule holds after the shift (−1333 bp is Fair).
+  ...(
+    [
+      [26000, "fair"],
+      [25999, "buy"],
+    ] as const
+  ).map(([asking, kind2]) =>
+    tier2Fixture(
+      `C-30000-${asking}`,
+      asking,
+      30000,
+      C_HISTORY,
+      { kind: "buy", confidence: "high", reason: "13% below market." },
+      {
+        kind: kind2,
+        confidence: "high",
+        reason: "13% below market; 30-day trend is falling 18%.",
+        ...FALLING_FULL,
+      },
+    ),
+  ),
+  // T8, AC-6: the monster trend clamps; the reason cites the raw slope.
+  tier2Fixture(
+    "M",
+    7600,
+    8000,
+    ramp(30, 5680, 160),
+    { kind: "fair", confidence: "high", reason: "Within 5% of market." },
+    {
+      kind: "buy",
+      confidence: "high",
+      reason: "5% below market; 30-day trend is rising 60%.",
+      ...RISING_FULL,
+    },
+  ),
+  // T9: the dead-zone edge at full history (±0.5 %/day is flat).
+  ...(
+    [
+      ["Z30", ramp(30, 7420, 40)],
+      ["Z30-falling", ramp(30, 8580, -40)],
+    ] as const
+  ).map(([name, values]) =>
+    tier2Fixture(
+      name,
+      8000,
+      8000,
+      values,
+      { kind: "fair", confidence: "high", reason: "At market price." },
+      {
+        kind: "fair",
+        confidence: "high",
+        reason: "At market price.",
+        ...UNSHIFTED_FULL,
+      },
+    ),
+  ),
+  tier2Fixture(
+    "R41",
+    8000,
+    8000,
+    ramp(30, 7406, 41),
+    { kind: "fair", confidence: "high", reason: "At market price." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason: "At market price; 30-day trend is rising 15%.",
+      ...RISING_FULL,
+    },
+  ),
+  // T10: the fair frames Tier 2 makes reachable.
+  tier2Fixture(
+    "A-rising-8560",
+    8560,
+    8000,
+    A_RISING_HISTORY,
+    { kind: "wait", confidence: "high", reason: "7% above market." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason: "7% above market; 30-day trend is rising 18%.",
+      ...RISING_FULL,
+    },
+  ),
+  ...(
+    [
+      [8150, "fair", "At market price"],
+      [8151, "wait", "0% above market"],
+    ] as const
+  ).map(([asking, kind2, clause2]) =>
+    tier2Fixture(
+      `C-${asking}`,
+      asking,
+      8150,
+      C_HISTORY,
+      { kind: "fair", confidence: "high", reason: "At market price." },
+      {
+        kind: kind2,
+        confidence: "high",
+        reason: `${clause2}; 30-day trend is falling 18%.`,
+        ...FALLING_FULL,
+      },
+    ),
+  ),
+];
+
+/** One Tier-2 fixture by name; throws on an unknown name. */
+export function tier2FixtureNamed(name: string): Tier2Fixture {
+  const found = TIER2_FIXTURES.find((f) => f.name === name);
+  if (!found) throw new Error(`no Tier-2 fixture named ${name}`);
+  return found;
+}
