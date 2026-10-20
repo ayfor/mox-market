@@ -5,7 +5,12 @@
 // 97b4bba before any S3.1 engine edit, and no later commit touches it. CI
 // runs with the snapshot update mode none (S1.3 ADV-1), so a missing or
 // changed recording fails there. S3.1 T13 adds the flag: with TIER2_ENABLED
-// on, Tier 2 is served wherever it exists.
+// on, Tier 2 is served wherever it exists. The adversarial review (SPEC-2,
+// TC-2, TC-3) adds TIER2_DATA_EDGE_FIXTURES: the finish fallback, an unusable
+// applied finish, gapped, duplicated and out-of-window histories, and crashes.
+// Their S1.2 results live in a second recording,
+// __snapshots__/tiered-parity.s1.2-data-edges.json, written the same way from
+// the engine at 97b4bba (the first recording stays untouched, S3.1d10).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -19,6 +24,7 @@ import {
   fixtureInput,
   fixtureMarket,
   flat,
+  TIER2_DATA_EDGE_FIXTURES,
   TIER2_FIXTURES,
 } from "./fixtures";
 import { RECOMMENDATION_PARAMS } from "./params";
@@ -29,6 +35,8 @@ import type {
 } from "./types";
 
 const RECORDING = "./__snapshots__/tiered-parity.s1.2.json";
+const DATA_EDGE_RECORDING =
+  "./__snapshots__/tiered-parity.s1.2-data-edges.json";
 
 /** S1.2 T2's band edges (bands.test.ts EDGES): [asking, market], 30 flat rows. */
 const BAND_EDGES = [
@@ -70,31 +78,70 @@ const PARITY_MATRIX: readonly MatrixCase[] = [
   })),
 ];
 
-const recorded = (): Record<string, Recommendation> =>
-  JSON.parse(readFileSync(path.join(__dirname, RECORDING), "utf8"));
+/** Unhappy market data (S3.1 adversarial review), recorded separately. */
+const DATA_EDGE_MATRIX: readonly MatrixCase[] = TIER2_DATA_EDGE_FIXTURES.map(
+  (f) => ({ name: `data:${f.name}`, input: f.input, market: f.market }),
+);
+
+/** Every case AC-4 and T13 run over. */
+const FULL_MATRIX: readonly MatrixCase[] = [
+  ...PARITY_MATRIX,
+  ...DATA_EDGE_MATRIX,
+];
+
+const readRecording = (file: string): Record<string, Recommendation> =>
+  JSON.parse(readFileSync(path.join(__dirname, file), "utf8"));
+
+const recorded = (): Record<string, Recommendation> => ({
+  ...readRecording(RECORDING),
+  ...readRecording(DATA_EDGE_RECORDING),
+});
+
+const servedOver = (matrix: readonly MatrixCase[]) =>
+  Object.fromEntries(
+    matrix.map((c) => [c.name, computeRecommendation(c.input, c.market)]),
+  );
 
 describe("the S1.2 recording (T12, AC-4; S3.1d10)", () => {
   test("the matrix names are unique and cover every fixture", () => {
-    const names = PARITY_MATRIX.map((c) => c.name);
+    const names = FULL_MATRIX.map((c) => c.name);
     expect(new Set(names).size).toBe(names.length);
     expect(names).toHaveLength(
-      CANONICAL_FIXTURES.length + TIER2_FIXTURES.length + BAND_EDGES.length,
+      CANONICAL_FIXTURES.length +
+        TIER2_FIXTURES.length +
+        BAND_EDGES.length +
+        TIER2_DATA_EDGE_FIXTURES.length,
     );
+    // Every case has exactly one recorded S1.2 result.
+    expect(Object.keys(recorded()).sort()).toEqual([...names].sort());
   });
 
   test("computeRecommendation over the matrix matches the recording", async () => {
-    const results = Object.fromEntries(
-      PARITY_MATRIX.map((c) => [
-        c.name,
-        computeRecommendation(c.input, c.market),
-      ]),
+    await expect(
+      `${JSON.stringify(servedOver(PARITY_MATRIX), null, 2)}\n`,
+    ).toMatchFileSnapshot(RECORDING);
+  });
+
+  test("computeRecommendation over the data-edge matrix matches its recording", async () => {
+    await expect(
+      `${JSON.stringify(servedOver(DATA_EDGE_MATRIX), null, 2)}\n`,
+    ).toMatchFileSnapshot(DATA_EDGE_RECORDING);
+  });
+
+  test("the data-edge recording holds the finish fallback and an unusable finish (SPEC-2, TC-3)", () => {
+    const r = recorded();
+    expect(r["data:fallback-foil-C"].signals.fallbackNotice).toBe(true);
+    expect(r["data:fallback-etched-A-rising"].signals.fallbackNotice).toBe(
+      true,
     );
-    await expect(`${JSON.stringify(results, null, 2)}\n`).toMatchFileSnapshot(
-      RECORDING,
+    expect(r["data:applied-foil-C"].signals.fallbackNotice).toBe(false);
+    expect(r["data:unusable-etched-for-foil"].kind).toBe("insufficient_data");
+    expect(r["data:unusable-etched-for-foil"].signals.fallbackNotice).toBe(
+      false,
     );
   });
 
-  test.each(PARITY_MATRIX.map((c) => [c.name, c] as const))(
+  test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
     "%s: the served recommendation deep-equals the S1.2 result",
     (name, c) => {
       expect(computeRecommendation(c.input, c.market)).toStrictEqual(
@@ -105,7 +152,7 @@ describe("the S1.2 recording (T12, AC-4; S3.1d10)", () => {
 });
 
 describe("Tier 1 of the tiered call is the S1.2 result (T12, AC-4)", () => {
-  test.each(PARITY_MATRIX.map((c) => [c.name, c] as const))(
+  test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
     "%s: computeTieredRecommendation(...).tier1 deep-equals the recording",
     (name, c) => {
       const { tier1 } = computeTieredRecommendation(c.input, c.market);
@@ -135,7 +182,7 @@ const DESCRIPTIVE_SIGNALS = [
 describe("the flag (T13, AC-4; F3 Engine API)", () => {
   const ON = { ...RECOMMENDATION_PARAMS, TIER2_ENABLED: true };
 
-  test.each(PARITY_MATRIX.map((c) => [c.name, c] as const))(
+  test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
     "%s: with TIER2_ENABLED on, computeRecommendation serves tier2 when present, else tier1",
     (_name, c) => {
       const tiers = computeTieredRecommendation(c.input, c.market);
@@ -145,7 +192,7 @@ describe("the flag (T13, AC-4; F3 Engine API)", () => {
     },
   );
 
-  test.each(PARITY_MATRIX.map((c) => [c.name, c] as const))(
+  test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
     "%s: servedRecommendation under the shipped params is tier1",
     (_name, c) => {
       const tiers = computeTieredRecommendation(c.input, c.market);
@@ -156,7 +203,7 @@ describe("the flag (T13, AC-4; F3 Engine API)", () => {
     },
   );
 
-  test.each(PARITY_MATRIX.map((c) => [c.name, c] as const))(
+  test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
     "%s: tier1 and tier2 share every descriptive signal and the confidence",
     (_name, c) => {
       const { tier1, tier2 } = computeTieredRecommendation(c.input, c.market);
@@ -176,7 +223,7 @@ describe("the flag (T13, AC-4; F3 Engine API)", () => {
   });
 
   test("with the flag on, at least one matrix case is served a different kind (the flag is live)", () => {
-    const flipped = PARITY_MATRIX.filter(
+    const flipped = FULL_MATRIX.filter(
       (c) =>
         computeRecommendation(c.input, c.market, ON).kind !==
         computeRecommendation(c.input, c.market).kind,

@@ -64,6 +64,7 @@ vi.mock("@/lib/recommendation/engine", async (importOriginal) => {
   return {
     ...actual,
     computeTieredRecommendation: vi.fn(actual.computeTieredRecommendation),
+    servedRecommendation: vi.fn(actual.servedRecommendation),
   };
 });
 vi.mock("@/lib/throttle", async (importOriginal) => {
@@ -72,6 +73,7 @@ vi.mock("@/lib/throttle", async (importOriginal) => {
 });
 
 const computeSpy = vi.mocked(engine.computeTieredRecommendation);
+const servedSpy = vi.mocked(engine.servedRecommendation);
 const { computeRecommendation: realCompute } = await vi.importActual<
   typeof import("@/lib/recommendation/engine")
 >("@/lib/recommendation/engine");
@@ -139,6 +141,7 @@ const ok = (e: Evaluation) => {
 
 beforeEach(() => {
   computeSpy.mockClear();
+  servedSpy.mockClear();
 });
 
 describe("Scryfall failures → the error panel, nothing computed (T9, AC-4)", () => {
@@ -1266,6 +1269,30 @@ describe("the tiered server path (S3.1 T16; pivot S3.1d2, S3.1d9)", () => {
     expect(result.tiers.tier2?.reason).toMatch(/30-day trend is falling/);
     expect(result.recommendation.reason).not.toMatch(/trend/);
     expect(log).not.toHaveBeenCalled();
+  });
+
+  // S3.1 adversarial review TC-1: the served recommendation comes from
+  // servedRecommendation(tiers), so flipping TIER2_ENABLED reaches the panel.
+  // Flag off, served and tier1 are the same object, so only a served choice
+  // that differs from tier1 tells the wiring apart.
+  test("the panel serves whatever servedRecommendation picks (the flag flip reaches F2)", async () => {
+    servedSpy.mockImplementationOnce((t) => t.tier2 ?? t.tier1);
+    const falling = dailyHistory(AS_OF, ramp(30, 6331, -35));
+    const { deps, log } = depsWith({ reader: fixtureReader(falling) });
+    const result = ok(await buildEvaluation(query(5400), deps));
+    expect(servedSpy).toHaveBeenCalledExactlyOnceWith(result.tiers);
+    expect(result.tiers.tier2).not.toBeNull();
+    expect(result.recommendation).toBe(result.tiers.tier2);
+    expect(result.recommendation.reason).toMatch(/30-day trend is falling/);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  test("under the shipped params servedRecommendation is called once and serves tier1", async () => {
+    const { deps } = depsWith({});
+    const result = ok(await buildEvaluation(query(5400), deps));
+    expect(servedSpy).toHaveBeenCalledExactlyOnceWith(result.tiers);
+    expect(servedSpy.mock.results[0].value).toBe(result.tiers.tier1);
+    expect(result.recommendation).toBe(result.tiers.tier1);
   });
 
   test("an insufficient_data evaluation carries tier2 null", async () => {

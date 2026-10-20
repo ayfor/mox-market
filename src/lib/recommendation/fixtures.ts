@@ -531,6 +531,237 @@ export const TIER2_FIXTURES: readonly Tier2Fixture[] = [
   ),
 ];
 
+// --- S3.1 adversarial review: unhappy market data (ADV SPEC-2, TC-2, TC-3,
+// UB-1) ---------------------------------------------------------------------
+
+/** A Tier-2 fixture with its own input and market (any finish or history). */
+function dataEdgeFixture(
+  name: string,
+  input: RecommendationInput,
+  market: MarketSnapshot,
+  tier1: TierExpectation,
+  tier2: Tier2Expectation | null,
+): Tier2Fixture {
+  return { name, input, market, expected: { tier1, tier2 } };
+}
+
+/** The window's 30 indexes, oldest first, with the rows kept by keep(i). */
+function sparseHistory(
+  values: readonly number[],
+  keep: (index: number) => boolean,
+): PriceSnapshot[] {
+  return dailyHistory(FIXTURE_AS_OF, values).filter((_, i) => keep(i));
+}
+
+/** 14 real rows at window indexes 0..7 and 24..29, falling; gaps between. */
+const GAPPED_FALLING_VALUES = Array.from({ length: 30 }, (_, i) =>
+  i <= 7 ? 9000 - 20 * i : 7000 - 60 * (i - 24),
+);
+
+/** C's history behind superseded duplicates and rows outside the window. */
+function cWithNoise(): PriceSnapshot[] {
+  return [
+    // 40 dates ending asOf − 1: the oldest 10 sit before the window, the
+    // rest are superseded by the later entries for the same dates.
+    ...dailyHistory(FIXTURE_AS_OF, flat(40, 100)),
+    ...dailyHistory(FIXTURE_AS_OF, flat(30, 99999)),
+    ...dailyHistory(FIXTURE_AS_OF, C_HISTORY),
+    // asOf itself is outside the window (it ends at asOf − 1).
+    { date: FIXTURE_AS_OF, priceCents: 1 },
+  ];
+}
+
+/** Low confidence, the −7.5 shift at the widened band: −20 / 0. */
+const FALLING_LOW = {
+  buyThresholdPct: -20,
+  waitThresholdPct: 0,
+  bandPct: 7.5,
+  wideningFactor: 1.5,
+} as const;
+
+/**
+ * Unhappy market data through both tiers (S3.1 adversarial review): the
+ * finish fallback and an unusable applied finish (SPEC-2, TC-3), a gapped
+ * and a sparse history whose slope is interpolated (TC-2, F1 W1), duplicate
+ * and out-of-window rows, and crashes whose monthly trend passes −100%
+ * (UB-1, S3.1d16). The S1.2 results of these cases are recorded in
+ * __snapshots__/tiered-parity.s1.2-data-edges.json from the engine at
+ * 97b4bba. S3.2's volatility widening changes the crash and surge
+ * thresholds (their CV is far above 0.15); S3.2 updates them (F1 W2).
+ */
+export const TIER2_DATA_EDGE_FIXTURES: readonly Tier2Fixture[] = [
+  dataEdgeFixture(
+    "fallback-foil-A",
+    fixtureInput(7400, "foil"),
+    fixtureMarket(8150, flat(30, 8150)),
+    { kind: "buy", confidence: "high", reason: "9% below market." },
+    {
+      kind: "buy",
+      confidence: "high",
+      reason: "9% below market.",
+      ...UNSHIFTED_FULL,
+    },
+  ),
+  dataEdgeFixture(
+    "fallback-foil-C",
+    fixtureInput(7400, "foil"),
+    fixtureMarket(8150, C_HISTORY),
+    { kind: "buy", confidence: "high", reason: "9% below market." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason: "9% below market; 30-day trend is falling 18%.",
+      ...FALLING_FULL,
+    },
+  ),
+  dataEdgeFixture(
+    "fallback-etched-A-rising",
+    fixtureInput(7600, "etched"),
+    fixtureMarket(8000, A_RISING_HISTORY),
+    { kind: "fair", confidence: "high", reason: "Within 5% of market." },
+    {
+      kind: "buy",
+      confidence: "high",
+      reason: "5% below market; 30-day trend is rising 18%.",
+      ...RISING_FULL,
+    },
+  ),
+  dataEdgeFixture(
+    "fallback-foil-D",
+    fixtureInput(5000, "foil"),
+    fixtureMarket(4200, flat(10, 4200)),
+    {
+      kind: "wait",
+      confidence: "low",
+      reason: "19% above market; only 10 price snapshots.",
+    },
+    {
+      kind: "wait",
+      confidence: "low",
+      reason: "19% above market; only 10 price snapshots.",
+      ...UNSHIFTED_LOW,
+    },
+  ),
+  dataEdgeFixture(
+    "applied-foil-C",
+    fixtureInput(7400, "foil"),
+    fixtureMarket(8150, C_HISTORY, { appliedFinish: "foil" }),
+    { kind: "buy", confidence: "high", reason: "9% below market." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason: "9% below market; 30-day trend is falling 18%.",
+      ...FALLING_FULL,
+    },
+  ),
+  dataEdgeFixture(
+    "unusable-etched-for-foil",
+    fixtureInput(7400, "foil"),
+    fixtureMarket(8150, C_HISTORY, { appliedFinish: "etched" }),
+    {
+      kind: "insufficient_data",
+      confidence: "low",
+      reason: INSUFFICIENT_DATA_SENTENCE,
+    },
+    null,
+  ),
+  dataEdgeFixture(
+    "gap-falling-14",
+    fixtureInput(6500),
+    {
+      ...fixtureMarket(7000, []),
+      history: sparseHistory(GAPPED_FALLING_VALUES, (i) => i <= 7 || i >= 24),
+    },
+    { kind: "fair", confidence: "medium", reason: "7% below market." },
+    {
+      kind: "fair",
+      confidence: "medium",
+      reason: "7% below market; 30-day trend is falling 34%.",
+      ...FALLING_FULL,
+    },
+  ),
+  dataEdgeFixture(
+    "gap-C-sparse-20",
+    fixtureInput(7400),
+    {
+      ...fixtureMarket(8150, []),
+      history: sparseHistory(C_HISTORY, (i) => i % 3 !== 1),
+    },
+    { kind: "buy", confidence: "medium", reason: "9% below market." },
+    {
+      kind: "fair",
+      confidence: "medium",
+      reason: "9% below market; 30-day trend is falling 18%.",
+      ...FALLING_FULL,
+    },
+  ),
+  dataEdgeFixture(
+    "window-C-duplicates-outside",
+    fixtureInput(7400),
+    { ...fixtureMarket(8150, []), history: cWithNoise() },
+    { kind: "buy", confidence: "high", reason: "9% below market." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason: "9% below market; 30-day trend is falling 18%.",
+      ...FALLING_FULL,
+    },
+  ),
+  dataEdgeFixture(
+    "crash-ramp-30",
+    fixtureInput(450),
+    fixtureMarket(500, ramp(30, 5000, -155)),
+    { kind: "buy", confidence: "high", reason: "10% below market." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason: "10% below market; 30-day trend is falling 99%.",
+      ...FALLING_FULL,
+    },
+  ),
+  dataEdgeFixture(
+    "crash-step-30",
+    fixtureInput(450),
+    fixtureMarket(500, [...flat(20, 5000), ...flat(10, 500)]),
+    { kind: "buy", confidence: "high", reason: "10% below market." },
+    {
+      kind: "fair",
+      confidence: "high",
+      reason: "10% below market; 30-day trend is falling 99%.",
+      ...FALLING_FULL,
+    },
+  ),
+  dataEdgeFixture(
+    "crash-ramp-7",
+    fixtureInput(450),
+    fixtureMarket(500, ramp(7, 5000, -750)),
+    {
+      kind: "buy",
+      confidence: "low",
+      reason: "10% below market; only 7 price snapshots.",
+    },
+    {
+      kind: "fair",
+      confidence: "low",
+      reason:
+        "10% below market; 30-day trend is falling 99%; only 7 price snapshots.",
+      ...FALLING_LOW,
+    },
+  ),
+  dataEdgeFixture(
+    "surge-ramp-30",
+    fixtureInput(4800),
+    fixtureMarket(5000, ramp(30, 500, 155)),
+    { kind: "fair", confidence: "high", reason: "Within 4% of market." },
+    {
+      kind: "buy",
+      confidence: "high",
+      reason: "4% below market; 30-day trend is rising 169%.",
+      ...RISING_FULL,
+    },
+  ),
+];
+
 /** One Tier-2 fixture by name; throws on an unknown name. */
 export function tier2FixtureNamed(name: string): Tier2Fixture {
   const found = TIER2_FIXTURES.find((f) => f.name === name);

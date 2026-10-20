@@ -3,8 +3,9 @@
 // Buy-side asymmetry, then shift both thresholds by the 30-day trend,
 // clamped to ±the widened band and 0 inside the dead zone (C1.10 = A,
 // C1.11 = A). Each threshold is rounded once to whole bp before the strict
-// comparison, equality Fair (C1.41 = A; S3.1d5). Volatility widening, its
-// 2.0 cap, staleness and the shock annotation are S3.2's.
+// comparison, equality Fair (C1.41 = A; S3.1d5). The volatility factor and
+// its cap value, staleness and the shock annotation are S3.2's; the cap rule
+// itself is here (S3.1 ADV SPEC-1).
 import {
   BP_PER_PCT,
   bandKind,
@@ -23,8 +24,21 @@ export interface Tier2ThresholdInput {
   readonly slope30dPct: number | null;
 }
 
+/**
+ * The volatility widening S3.2 supplies: its factor (volWiden) and the cap
+ * on the whole widening factor (volatilityWideningCap). One object, so a
+ * caller cannot pass a volatility factor without the cap (S3.1 ADV SPEC-1).
+ */
+export interface VolatilityWidening {
+  readonly widen: number;
+  readonly cap: number;
+}
+
 export interface Tier2Thresholds extends ThresholdsBp {
-  /** volWiden × confWiden (1 or lowConfidenceWidening at S3.1). */
+  /**
+   * min(volWiden × confWiden, cap) (F3; C1.11 = A). At S3.1 no volatility is
+   * passed, so it is 1 or lowConfidenceWidening.
+   */
   readonly wideningFactor: number;
   /** fairBandPct × wideningFactor, in percent. */
   readonly bandPct: number;
@@ -39,18 +53,23 @@ const isTrending = (
   direction === "rising" || direction === "falling";
 
 /**
- * Tier 2's band and thresholds (S3.1d5). volWiden is the seam S3.2 fills
- * with the volatility factor; at S3.1 it is always 1, so the 2.0 cap cannot
- * bind and lands with S3.2.
+ * Tier 2's band and thresholds (S3.1d5). volatility is the seam S3.2 fills
+ * with volWiden and volatilityWideningCap; the factor is capped whenever it
+ * is given (F3: wideningFactor = min(volWiden × confWiden, 2.0)). At S3.1
+ * nothing passes it, volWiden is 1 and the factor is confWiden (S3.1 ADV
+ * SPEC-1).
  */
 export function tier2Thresholds(
   signals: Tier2ThresholdInput,
   params: RecommendationParams,
-  volWiden = 1,
+  volatility?: VolatilityWidening,
 ): Tier2Thresholds {
   const confWiden =
     signals.confidence === "low" ? params.lowConfidenceWidening : 1;
-  const wideningFactor = volWiden * confWiden;
+  const wideningFactor =
+    volatility === undefined
+      ? confWiden
+      : Math.min(volatility.widen * confWiden, volatility.cap);
   const bandPct = params.fairBandPct * wideningFactor;
   const rawShift =
     isTrending(signals.trendDirection) && signals.slope30dPct !== null

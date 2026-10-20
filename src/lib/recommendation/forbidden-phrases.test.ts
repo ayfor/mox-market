@@ -9,7 +9,11 @@ import { describe, expect, test } from "vitest";
 import * as copyModule from "./copy";
 import { CLAUSE_SEPARATOR, REASON_COPY, SENTENCE_END } from "./copy";
 import { computeRecommendation, computeTieredRecommendation } from "./engine";
-import { CANONICAL_FIXTURES, TIER2_FIXTURES } from "./fixtures";
+import {
+  CANONICAL_FIXTURES,
+  TIER2_DATA_EDGE_FIXTURES,
+  TIER2_FIXTURES,
+} from "./fixtures";
 import { findForbiddenPhrases, FORBIDDEN_PHRASES } from "./forbidden-phrases";
 import { RECOMMENDATION_PARAMS } from "./params";
 import { buildReason } from "./reason";
@@ -641,7 +645,7 @@ describe("no Tier-2 reason holds a forbidden phrase (S3.1 T18)", () => {
   });
 
   test.each(
-    [...CANONICAL_FIXTURES, ...TIER2_FIXTURES].map(
+    [...CANONICAL_FIXTURES, ...TIER2_FIXTURES, ...TIER2_DATA_EDGE_FIXTURES].map(
       (f, i) => [`${i}:${f.name}`, f] as const,
     ),
   )("%s: tier2's reason is clean and grammatical", (_name, f) => {

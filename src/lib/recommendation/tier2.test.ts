@@ -7,6 +7,7 @@ import { computeRecommendation, computeTieredRecommendation } from "./engine";
 import {
   canonicalFixture,
   INSUFFICIENT_DATA_SENTENCE,
+  TIER2_DATA_EDGE_FIXTURES,
   TIER2_FIXTURES,
   tier2FixtureNamed,
   type Tier2Fixture,
@@ -28,36 +29,46 @@ function tier2Of(f: Pick<Tier2Fixture, "input" | "market">): Recommendation {
 
 const named = tier2FixtureNamed;
 
-describe("every Tier-2 fixture (T1 to T10)", () => {
-  test.each(TIER2_FIXTURES.map((f) => [f.name, f] as const))(
-    "%s: tier1 and tier2 match their expectations exactly",
-    (_name, f) => {
-      const { tier1, tier2 } = tiersOf(f);
-      expect({
-        kind: tier1.kind,
-        confidence: tier1.confidence,
-        reason: tier1.reason,
-      }).toEqual(f.expected.tier1);
-      if (f.expected.tier2 === null) {
-        expect(tier2).toBeNull();
-        return;
-      }
-      expect(tier2).not.toBeNull();
-      const t2 = tier2 as Recommendation;
-      expect({
-        kind: t2.kind,
-        confidence: t2.confidence,
-        reason: t2.reason,
-        buyThresholdPct: t2.signals.buyThresholdPct,
-        waitThresholdPct: t2.signals.waitThresholdPct,
-        bandPct: t2.signals.bandPct,
-        wideningFactor: t2.signals.wideningFactor,
-      }).toEqual(f.expected.tier2);
-    },
-  );
+/** One data-edge fixture by name (S3.1 adversarial review). */
+function dataEdge(name: string): Tier2Fixture {
+  const found = TIER2_DATA_EDGE_FIXTURES.find((f) => f.name === name);
+  if (!found) throw new Error(`no data-edge fixture named ${name}`);
+  return found;
+}
+
+describe("every Tier-2 fixture (T1 to T10, and the review's data edges)", () => {
+  test.each(
+    [...TIER2_FIXTURES, ...TIER2_DATA_EDGE_FIXTURES].map(
+      (f) => [f.name, f] as const,
+    ),
+  )("%s: tier1 and tier2 match their expectations exactly", (_name, f) => {
+    const { tier1, tier2 } = tiersOf(f);
+    expect({
+      kind: tier1.kind,
+      confidence: tier1.confidence,
+      reason: tier1.reason,
+    }).toEqual(f.expected.tier1);
+    if (f.expected.tier2 === null) {
+      expect(tier2).toBeNull();
+      return;
+    }
+    expect(tier2).not.toBeNull();
+    const t2 = tier2 as Recommendation;
+    expect({
+      kind: t2.kind,
+      confidence: t2.confidence,
+      reason: t2.reason,
+      buyThresholdPct: t2.signals.buyThresholdPct,
+      waitThresholdPct: t2.signals.waitThresholdPct,
+      bandPct: t2.signals.bandPct,
+      wideningFactor: t2.signals.wideningFactor,
+    }).toEqual(f.expected.tier2);
+  });
 
   test("the fixture names are unique", () => {
-    const names = TIER2_FIXTURES.map((f) => f.name);
+    const names = [...TIER2_FIXTURES, ...TIER2_DATA_EDGE_FIXTURES].map(
+      (f) => f.name,
+    );
     expect(new Set(names).size).toBe(names.length);
   });
 
@@ -412,6 +423,9 @@ describe("the fair frames Tier 2 makes reachable (T10, C1.25; S3.1d12)", () => {
   });
 });
 
+/** F3's volatilityWideningCap (2.0×); the param itself lands with S3.2. */
+const VOL_CAP = 2;
+
 describe("tier2Thresholds on its own (T11; the S3.2 seam)", () => {
   test.each([
     [1, -833, 500],
@@ -422,7 +436,7 @@ describe("tier2Thresholds on its own (T11; the S3.2 seam)", () => {
     const t = tier2Thresholds(
       { confidence: "high", trendDirection: "flat", slope30dPct: 0 },
       RECOMMENDATION_PARAMS,
-      factor,
+      { widen: factor, cap: VOL_CAP },
     );
     expect(t.wideningFactor).toBe(factor);
     expect(t.buyBp).toBe(buyBp);
@@ -442,7 +456,7 @@ describe("tier2Thresholds on its own (T11; the S3.2 seam)", () => {
     const t = tier2Thresholds(
       { confidence: "high", trendDirection: "rising", slope30dPct: 0.6 },
       RECOMMENDATION_PARAMS,
-      2,
+      { widen: 2, cap: VOL_CAP },
     );
     expect(t.shiftPct).toBeCloseTo(9, 12);
     expect(t.buyBp).toBe(-767);
@@ -453,7 +467,7 @@ describe("tier2Thresholds on its own (T11; the S3.2 seam)", () => {
     const t = tier2Thresholds(
       { confidence: "high", trendDirection: "falling", slope30dPct: -0.6 },
       RECOMMENDATION_PARAMS,
-      2,
+      { widen: 2, cap: VOL_CAP },
     );
     expect(t.shiftPct).toBeCloseTo(-9, 12);
     expect(t.buyBp).toBe(-2567);
@@ -473,7 +487,7 @@ describe("tier2Thresholds on its own (T11; the S3.2 seam)", () => {
           const t = tier2Thresholds(
             { confidence, trendDirection, slope30dPct },
             RECOMMENDATION_PARAMS,
-            factor,
+            { widen: factor, cap: VOL_CAP },
           );
           for (const v of [t.buyBp, t.waitBp, t.shiftPct]) {
             expect(Object.is(v, -0)).toBe(false);
@@ -481,6 +495,42 @@ describe("tier2Thresholds on its own (T11; the S3.2 seam)", () => {
         }
       }
     }
+  });
+
+  // S3.1 adversarial review SPEC-1: F3's wideningFactor is
+  // min(volWiden × confWiden, 2.0) (C1.11 = A). The cap is part of the seam,
+  // so S3.2 only supplies volWiden and volatilityWideningCap.
+  test.each([
+    // [volWiden, confidence, wideningFactor, bandPct, buyBp, waitBp]
+    [2, "low", 2, 10, -1667, 1000],
+    [1.5, "low", 2, 10, -1667, 1000],
+    [1, "low", 1.5, 7.5, -1250, 750],
+    [2, "high", 2, 10, -1667, 1000],
+  ] as const)(
+    "volWiden %d at %s confidence: wideningFactor %d (capped at 2.0), band %d, buy %i, wait %i",
+    (widen, confidence, factor, bandPct, buyBp, waitBp) => {
+      const t = tier2Thresholds(
+        { confidence, trendDirection: "flat", slope30dPct: 0 },
+        RECOMMENDATION_PARAMS,
+        { widen, cap: VOL_CAP },
+      );
+      expect(t.wideningFactor).toBe(factor);
+      expect(t.bandPct).toBe(bandPct);
+      expect(t.buyBp).toBe(buyBp);
+      expect(t.waitBp).toBe(waitBp);
+    },
+  );
+
+  test("the capped band also caps the trend clamp: low, volWiden 2, rising 0.6 → shift +9 inside ±10", () => {
+    const t = tier2Thresholds(
+      { confidence: "low", trendDirection: "rising", slope30dPct: 0.6 },
+      RECOMMENDATION_PARAMS,
+      { widen: 2, cap: VOL_CAP },
+    );
+    expect(t.wideningFactor).toBe(2);
+    expect(t.shiftPct).toBeCloseTo(9, 12);
+    expect(t.buyBp).toBe(-767);
+    expect(t.waitBp).toBe(1900);
   });
 
   test("a rising trend with a null slope never shifts (defensive)", () => {
@@ -520,9 +570,73 @@ describe("trendClauseX (S3.1d7)", () => {
   });
 });
 
+describe("a crash never states a fall of 100% or more (S3.1 adversarial review UB-1; S3.1d16)", () => {
+  test.each(["crash-ramp-30", "crash-step-30", "crash-ramp-7"])(
+    "%s: the raw monthly trend passes −100%, the clause states 99%",
+    (name) => {
+      const { tier1, tier2 } = tiersOf(dataEdge(name));
+      const slope = tier1.signals.slope30dPct as number;
+      expect(slope * RECOMMENDATION_PARAMS.windowDays).toBeLessThan(-100);
+      expect(tier2?.reason).toMatch(/; 30-day trend is falling 99%[;.]/);
+    },
+  );
+
+  test("a surge is never capped: rising 169%", () => {
+    const { tier1, tier2 } = tiersOf(dataEdge("surge-ramp-30"));
+    const X = Math.round(
+      Math.abs(
+        (tier1.signals.slope30dPct as number) *
+          RECOMMENDATION_PARAMS.windowDays,
+      ),
+    );
+    expect(X).toBe(169);
+    expect(tier2?.reason).toBe("4% below market; 30-day trend is rising 169%.");
+  });
+});
+
+describe("an interpolated slope: the clause cites signals.slope30dPct (S3.1 adversarial review TC-2; F1 W1)", () => {
+  test.each(["gap-falling-14", "gap-C-sparse-20"])(
+    "%s: X = round(|slope30dPct × windowDays|) of Tier 1's interpolated slope",
+    (name) => {
+      const { tier1, tier2 } = tiersOf(dataEdge(name));
+      const slope = tier1.signals.slope30dPct as number;
+      const X = Math.round(Math.abs(slope * RECOMMENDATION_PARAMS.windowDays));
+      expect(tier2?.reason).toContain(`30-day trend is falling ${X}%`);
+    },
+  );
+
+  test("gap-falling-14: 14 real rows, slope −1.14208… %/day, falling 34%", () => {
+    const { tier1, tier2 } = tiersOf(dataEdge("gap-falling-14"));
+    expect(tier1.signals.snapshotCount30d).toBe(14);
+    expect(tier1.signals.slope30dPct).toBeCloseTo(-1.1420814985863594, 12);
+    expect(tier2?.reason).toBe("7% below market; 30-day trend is falling 34%.");
+  });
+});
+
+describe("the finish fallback reaches Tier 2 unchanged (S3.1 adversarial review TC-3)", () => {
+  test.each([
+    ["fallback-foil-A", true],
+    ["fallback-foil-C", true],
+    ["fallback-etched-A-rising", true],
+    ["fallback-foil-D", true],
+    ["applied-foil-C", false],
+  ] as const)("%s: fallbackNotice %s on both tiers", (name, notice) => {
+    const { tier1, tier2 } = tiersOf(dataEdge(name));
+    expect(tier1.signals.fallbackNotice).toBe(notice);
+    expect(tier2?.signals.fallbackNotice).toBe(notice);
+  });
+
+  test("an unusable applied finish: insufficient_data, fallbackNotice false, tier2 null", () => {
+    const { tier1, tier2 } = tiersOf(dataEdge("unusable-etched-for-foil"));
+    expect(tier1.kind).toBe("insufficient_data");
+    expect(tier1.signals.fallbackNotice).toBe(false);
+    expect(tier2).toBeNull();
+  });
+});
+
 describe("tier2 copies tier1 except the adjusted fields (S3.1d8)", () => {
   test("only kind, reason, bandPct, wideningFactor and the two thresholds differ", () => {
-    for (const f of TIER2_FIXTURES) {
+    for (const f of [...TIER2_FIXTURES, ...TIER2_DATA_EDGE_FIXTURES]) {
       const { tier1, tier2 } = tiersOf(f);
       if (tier2 === null) continue;
       expect(
