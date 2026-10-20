@@ -14,7 +14,10 @@ import {
 } from "@/lib/__fixtures__/esper-sentinel-prints";
 import { LOADING_LABEL } from "@/lib/copy/result-labels";
 import type { Evaluation } from "@/lib/evaluation/build-evaluation";
-import { computeRecommendation } from "@/lib/recommendation/engine";
+import {
+  computeTieredRecommendation,
+  servedRecommendation,
+} from "@/lib/recommendation/engine";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Suspense, use } from "react";
@@ -313,7 +316,7 @@ const MH2_328 = scryfallCard({ id: MH2_328_ID, collector_number: "328" });
 function okEvaluation(
   syncStale: boolean,
 ): Extract<Evaluation, { status: "ok" }> {
-  const recommendation = computeRecommendation(
+  const tiers = computeTieredRecommendation(
     { askingPriceCents: 5400, cardId: MH2_12_ID, finish: "normal" },
     {
       appliedFinish: "normal",
@@ -324,6 +327,7 @@ function okEvaluation(
       latestSnapshotAt: null,
     },
   );
+  const recommendation = servedRecommendation(tiers);
   const option = (p: typeof MH2_12) => ({
     id: p.id,
     set: p.set,
@@ -342,6 +346,7 @@ function okEvaluation(
     requestedFinish: "normal",
     appliedFinish: "normal",
     recommendation,
+    tiers,
     latestSnapshotAt: null,
     historyUnavailable: false,
     syncStale,

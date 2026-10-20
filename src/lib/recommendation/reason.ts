@@ -1,7 +1,9 @@
 // Tier-1 reason sentence from F1's locked copy table (S1.2d9; C1.24, C1.41 = A).
 // Observed facts only. X = Math.round(Math.abs(deltaBp) / 100); fair with X 0
 // reads "At market price", and a below clause reads at most 99% (D8). A low confidence adds the thin-data caveat on buy,
-// fair and wait alike (Josh's sequence review ruling, 2026-10-08).
+// fair and wait alike (Josh's sequence review ruling, 2026-10-08). Tier 2 may
+// add one trend clause, after the primary clause and before the caveat
+// (F1 composition rule; S3.1d7); Tier 1 never passes one.
 import { BP_PER_PCT } from "./bands";
 import {
   CLAUSE_SEPARATOR,
@@ -9,7 +11,14 @@ import {
   REASON_COPY,
   SENTENCE_END,
 } from "./copy";
-import type { Confidence, RecommendationKind } from "./types";
+import type { Confidence, RecommendationKind, TrendDirection } from "./types";
+
+/** F3's trend clause: a rising or falling 30-day trend of X percent. */
+export interface TrendClause {
+  readonly direction: Exclude<TrendDirection, "flat">;
+  /** Math.round(|slope30dPct × windowDays|), from the raw (unclamped) slope. */
+  readonly X: number;
+}
 
 export interface ReasonInput {
   readonly kind: RecommendationKind;
@@ -19,6 +28,8 @@ export interface ReasonInput {
   readonly bandPct: number;
   readonly confidence: Confidence;
   readonly snapshotCount30d: number;
+  /** Tier 2 only (S3.1d7); absent on every Tier-1 reason. */
+  readonly trend?: TrendClause;
 }
 
 /** 100%: the whole market price. */
@@ -55,6 +66,9 @@ export function buildReason(input: ReasonInput): string {
     return REASON_COPY.insufficientData;
   }
   const clauses = [primaryClause(input.kind, input.deltaBp, input.bandPct)];
+  if (input.trend !== undefined) {
+    clauses.push(fillTemplate(REASON_COPY.trend, input.trend));
+  }
   if (input.confidence === "low") {
     clauses.push(
       fillTemplate(REASON_COPY.thinData, { n: input.snapshotCount30d }),

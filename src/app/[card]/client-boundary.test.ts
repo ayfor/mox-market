@@ -123,6 +123,8 @@ function resolve(from: string, spec: string, fs: SourceFs): string | null {
 /** The engine's logic modules, which no client module may reach. */
 const ENGINE_LOGIC = [
   "engine",
+  // S3.1 T18: Tier 2 is engine logic.
+  "tier2",
   "bands",
   "reason",
   "signals",

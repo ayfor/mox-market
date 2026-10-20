@@ -4,11 +4,16 @@
 // __snapshots__/tiered-parity.s1.2.json was written once, from the engine at
 // 97b4bba before any S3.1 engine edit, and no later commit touches it. CI
 // runs with the snapshot update mode none (S1.3 ADV-1), so a missing or
-// changed recording fails there.
+// changed recording fails there. S3.1 T13 adds the flag: with TIER2_ENABLED
+// on, Tier 2 is served wherever it exists.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import { computeRecommendation } from "./engine";
+import {
+  computeRecommendation,
+  computeTieredRecommendation,
+  servedRecommendation,
+} from "./engine";
 import {
   CANONICAL_FIXTURES,
   fixtureInput,
@@ -16,6 +21,7 @@ import {
   flat,
   TIER2_FIXTURES,
 } from "./fixtures";
+import { RECOMMENDATION_PARAMS } from "./params";
 import type {
   MarketSnapshot,
   Recommendation,
@@ -96,4 +102,87 @@ describe("the S1.2 recording (T12, AC-4; S3.1d10)", () => {
       );
     },
   );
+});
+
+describe("Tier 1 of the tiered call is the S1.2 result (T12, AC-4)", () => {
+  test.each(PARITY_MATRIX.map((c) => [c.name, c] as const))(
+    "%s: computeTieredRecommendation(...).tier1 deep-equals the recording",
+    (name, c) => {
+      const { tier1 } = computeTieredRecommendation(c.input, c.market);
+      expect(tier1).toStrictEqual(recorded()[name]);
+      expect(tier1.signals.wideningFactor).toBe(1);
+      expect(tier1.signals.bandPct).toBe(5);
+    },
+  );
+});
+
+/** Every signal F1 owns: identical on both tiers (F3 Engine API). */
+const DESCRIPTIVE_SIGNALS = [
+  "deltaPct",
+  "deltaBp",
+  "marketPriceCents",
+  "median30dCents",
+  "range30dCents",
+  "rangePosition",
+  "slope7dPct",
+  "slope30dPct",
+  "volatility30d",
+  "snapshotCount30d",
+  "trendDirection",
+  "fallbackNotice",
+] as const;
+
+describe("the flag (T13, AC-4; F3 Engine API)", () => {
+  const ON = { ...RECOMMENDATION_PARAMS, TIER2_ENABLED: true };
+
+  test.each(PARITY_MATRIX.map((c) => [c.name, c] as const))(
+    "%s: with TIER2_ENABLED on, computeRecommendation serves tier2 when present, else tier1",
+    (_name, c) => {
+      const tiers = computeTieredRecommendation(c.input, c.market);
+      expect(computeRecommendation(c.input, c.market, ON)).toStrictEqual(
+        tiers.tier2 ?? tiers.tier1,
+      );
+    },
+  );
+
+  test.each(PARITY_MATRIX.map((c) => [c.name, c] as const))(
+    "%s: servedRecommendation under the shipped params is tier1",
+    (_name, c) => {
+      const tiers = computeTieredRecommendation(c.input, c.market);
+      expect(servedRecommendation(tiers)).toBe(tiers.tier1);
+      expect(computeRecommendation(c.input, c.market)).toStrictEqual(
+        tiers.tier1,
+      );
+    },
+  );
+
+  test.each(PARITY_MATRIX.map((c) => [c.name, c] as const))(
+    "%s: tier1 and tier2 share every descriptive signal and the confidence",
+    (_name, c) => {
+      const { tier1, tier2 } = computeTieredRecommendation(c.input, c.market);
+      if (tier2 === null) {
+        expect(tier1.kind).toBe("insufficient_data");
+        return;
+      }
+      expect(tier2.confidence).toBe(tier1.confidence);
+      for (const key of DESCRIPTIVE_SIGNALS) {
+        expect(tier2.signals[key], key).toStrictEqual(tier1.signals[key]);
+      }
+    },
+  );
+
+  test("the shipped params keep Tier 2 dark", () => {
+    expect(RECOMMENDATION_PARAMS.TIER2_ENABLED).toBe(false);
+  });
+
+  test("with the flag on, at least one matrix case is served a different kind (the flag is live)", () => {
+    const flipped = PARITY_MATRIX.filter(
+      (c) =>
+        computeRecommendation(c.input, c.market, ON).kind !==
+        computeRecommendation(c.input, c.market).kind,
+    ).map((c) => c.name);
+    expect(flipped).toEqual(
+      expect.arrayContaining(["canonical:C", "canonical:A-rising"]),
+    );
+  });
 });

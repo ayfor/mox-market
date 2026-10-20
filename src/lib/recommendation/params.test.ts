@@ -1,6 +1,8 @@
 // T3, T4 (S1.1 AC-2): F1's eleven params at design values, and PARAMS_VERSION.
 // S1.3 T11 (AC-4) pins values and version in one inline snapshot; S1.3 T13
-// checks each param's JSDoc.
+// checks each param's JSDoc. S3.1 T14 (S3.1d4; F1 W2, C3.7 = B):
+// TIER2_ENABLED and the two F3 params S3.1 reads join, and the version moves
+// from 46ec1cd7 to 208c90c2; S3.2's five params are still absent.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -28,22 +30,33 @@ const F1_PARAMS = {
   shortSlopeDays: 7,
 };
 
+/** F3's params S3.1 reads, and the flag (S3.1d4). */
+const S3_1_PARAMS = {
+  TIER2_ENABLED: false,
+  trendShiftFactor: 0.5,
+  lowConfidenceWidening: 1.5,
+};
+
+const SHIPPED_PARAMS = { ...F1_PARAMS, ...S3_1_PARAMS };
+
 describe("RECOMMENDATION_PARAMS (T3)", () => {
-  test("deep-equals exactly F1's eleven params at design values", () => {
-    expect(RECOMMENDATION_PARAMS).toStrictEqual(F1_PARAMS);
+  test("deep-equals F1's eleven params plus S3.1's three, at design values (S3.1 T14)", () => {
+    expect(RECOMMENDATION_PARAMS).toStrictEqual(SHIPPED_PARAMS);
     expect(Object.keys(RECOMMENDATION_PARAMS).sort()).toEqual(
-      Object.keys(F1_PARAMS).sort(),
+      Object.keys(SHIPPED_PARAMS).sort(),
     );
+    expect(Object.keys(RECOMMENDATION_PARAMS)).toHaveLength(14);
   });
 
-  test("holds no F3 params or TIER2_ENABLED yet (S1.1d8, C3.7 = B)", () => {
+  test("ships with Tier 2 off (F3 dark launch, C1.37)", () => {
+    expect(RECOMMENDATION_PARAMS.TIER2_ENABLED).toBe(false);
+  });
+
+  test("holds none of S3.2's params yet (S3.1d4)", () => {
     for (const key of [
-      "TIER2_ENABLED",
       "staleDays",
-      "trendShiftFactor",
       "volatileCV",
       "volatilityWideningCap",
-      "lowConfidenceWidening",
       "shockWindowDays",
       "shockMagnitudePct",
     ]) {
@@ -62,7 +75,7 @@ describe("RECOMMENDATION_PARAMS (T3)", () => {
 
 describe("PARAMS_VERSION (T4)", () => {
   test("is the first 8 hex chars of SHA-256 over sorted-key JSON", () => {
-    const p = F1_PARAMS as Record<string, unknown>;
+    const p = SHIPPED_PARAMS as Record<string, unknown>;
     const expected = createHash("sha256")
       .update(JSON.stringify(p, Object.keys(p).sort()))
       .digest("hex")
@@ -76,16 +89,24 @@ describe("PARAMS_VERSION (T4)", () => {
     const reversed = Object.fromEntries(
       Object.entries(RECOMMENDATION_PARAMS).reverse(),
     ) as unknown as RecommendationParams;
-    expect(Object.keys(reversed)[0]).toBe("shortSlopeDays");
+    expect(Object.keys(reversed)[0]).toBe("lowConfidenceWidening");
     expect(paramsVersionOf(reversed)).toBe(PARAMS_VERSION);
   });
 
-  test.each(Object.keys(F1_PARAMS))("changes when %s changes", (key) => {
+  test.each(Object.keys(SHIPPED_PARAMS))("changes when %s changes", (key) => {
+    const value = RECOMMENDATION_PARAMS[key as keyof RecommendationParams];
     const bumped = {
       ...RECOMMENDATION_PARAMS,
-      [key]: RECOMMENDATION_PARAMS[key as keyof RecommendationParams] + 1,
+      // The flag flips; every number is bumped.
+      [key]: typeof value === "boolean" ? !value : value + 1,
     };
     expect(paramsVersionOf(bumped)).not.toBe(PARAMS_VERSION);
+  });
+
+  test("flipping TIER2_ENABLED alone changes the version (C1.61)", () => {
+    expect(
+      paramsVersionOf({ ...RECOMMENDATION_PARAMS, TIER2_ENABLED: true }),
+    ).not.toBe(PARAMS_VERSION);
   });
 
   test("canonicalJson sorts keys at every level", () => {
@@ -143,17 +164,20 @@ describe("params guardrail (S1.3 T11, AC-4; C1.58)", () => {
   test("RECOMMENDATION_PARAMS and PARAMS_VERSION match the inline snapshot", () => {
     expect({ PARAMS_VERSION, RECOMMENDATION_PARAMS }).toMatchInlineSnapshot(`
       {
-        "PARAMS_VERSION": "46ec1cd7",
+        "PARAMS_VERSION": "208c90c2",
         "RECOMMENDATION_PARAMS": {
+          "TIER2_ENABLED": false,
           "buyThresholdAsymmetry": 0.6,
           "fairBandPct": 5,
           "highConfidenceSnapshotCount": 28,
           "lowConfidenceSnapshotCount": 14,
+          "lowConfidenceWidening": 1.5,
           "minSnapshotsForRange": 14,
           "minSnapshotsForTrend": 7,
           "minSnapshotsForVerdict": 7,
           "minSnapshotsForVolatility": 14,
           "shortSlopeDays": 7,
+          "trendShiftFactor": 0.5,
           "trendThresholdPct": 0.5,
           "windowDays": 30,
         },

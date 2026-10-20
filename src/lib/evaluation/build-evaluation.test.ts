@@ -5,7 +5,9 @@
 // adds T6 (AC-1, AC-3: the default selection), T7 (AC-9: an explicit
 // printing), T8 (AC-2: pagination) and T9 (AC-7, AC-8: never blended); its
 // adversarial review adds the finishes-list fallback (ADV-3) and the option
-// round trip (ADV-5).
+// round trip (ADV-5). S3.1 T16 (pivot; F3 Engine API): the spy moves to
+// computeTieredRecommendation, the served result is unchanged, the ok
+// Evaluation carries both tiers, and a success logs nothing.
 import {
   ESPER_PRINTS_PAGE_1,
   ESPER_PRINTS_PAGE_2,
@@ -29,7 +31,8 @@ import {
 } from "@/lib/__fixtures__/keyed-history";
 import { offeredFinishes, selectablePrintings } from "@/lib/printings";
 import * as engine from "@/lib/recommendation/engine";
-import { dailyHistory } from "@/lib/recommendation/fixtures";
+import { InvalidRecommendationInputError } from "@/lib/recommendation/errors";
+import { dailyHistory, ramp } from "@/lib/recommendation/fixtures";
 import type { RecommendationInput } from "@/lib/recommendation/types";
 import {
   getAllPrintings,
@@ -60,7 +63,7 @@ vi.mock("@/lib/recommendation/engine", async (importOriginal) => {
     await importOriginal<typeof import("@/lib/recommendation/engine")>();
   return {
     ...actual,
-    computeRecommendation: vi.fn(actual.computeRecommendation),
+    computeTieredRecommendation: vi.fn(actual.computeTieredRecommendation),
   };
 });
 vi.mock("@/lib/throttle", async (importOriginal) => {
@@ -68,7 +71,7 @@ vi.mock("@/lib/throttle", async (importOriginal) => {
   return { ...actual, throttle: vi.fn(() => Promise.resolve()) };
 });
 
-const computeSpy = vi.mocked(engine.computeRecommendation);
+const computeSpy = vi.mocked(engine.computeTieredRecommendation);
 const { computeRecommendation: realCompute } = await vi.importActual<
   typeof import("@/lib/recommendation/engine")
 >("@/lib/recommendation/engine");
@@ -1228,5 +1231,58 @@ describe("every offered option round-trips through the URL to itself (ADV-5)", (
       expect(result.printing.id, option.id).toBe(option.id);
       expect(result.selection.printingId).toBe(option.id);
     }
+  });
+});
+
+describe("the tiered server path (S3.1 T16; pivot S3.1d2, S3.1d9)", () => {
+  test.each([
+    [5400, "buy", "9% below market."],
+    [5900, "fair", "At market price."],
+    [6500, "wait", "10% above market."],
+  ])(
+    "asking %i: one two-argument tiered call; served %s unchanged; tiers carried; nothing logged",
+    async (cents, kind, reason) => {
+      const { deps, log } = depsWith({});
+      const result = ok(await buildEvaluation(query(cents), deps));
+      expect(computeSpy).toHaveBeenCalledOnce();
+      expect(computeSpy.mock.calls[0]).toHaveLength(2);
+      expect(result.recommendation.kind).toBe(kind);
+      expect(result.recommendation.reason).toBe(reason);
+      expect(result.tiers.tier1).toStrictEqual(result.recommendation);
+      expect(result.tiers).toStrictEqual(computeSpy.mock.results[0].value);
+      expect(result.tiers.tier2).not.toBeNull();
+      // No log write and no console fallback on a successful evaluation.
+      expect(log).not.toHaveBeenCalled();
+    },
+  );
+
+  test("a trending history: tier2 differs, yet the served recommendation is tier1", async () => {
+    // C's re-pinned shape at this card's price: falling 0.6 %/day.
+    const falling = dailyHistory(AS_OF, ramp(30, 6331, -35));
+    const { deps, log } = depsWith({ reader: fixtureReader(falling) });
+    const result = ok(await buildEvaluation(query(5400), deps));
+    expect(result.recommendation).toBe(result.tiers.tier1);
+    expect(result.tiers.tier1.signals.trendDirection).toBe("falling");
+    expect(result.tiers.tier2?.reason).toMatch(/30-day trend is falling/);
+    expect(result.recommendation.reason).not.toMatch(/trend/);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  test("an insufficient_data evaluation carries tier2 null", async () => {
+    const { deps } = depsWith({ reader: emptyHistoryReader });
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.recommendation.kind).toBe("insufficient_data");
+    expect(result.tiers.tier2).toBeNull();
+  });
+
+  test("InvalidRecommendationInputError from the tiered call → invalid, nothing logged", async () => {
+    computeSpy.mockImplementationOnce(() => {
+      throw new InvalidRecommendationInputError("askingPriceCents", "bad");
+    });
+    const { deps, log } = depsWith({});
+    await expect(buildEvaluation(query(7499), deps)).resolves.toEqual({
+      status: "invalid",
+    });
+    expect(log).not.toHaveBeenCalled();
   });
 });

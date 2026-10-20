@@ -8,8 +8,8 @@ import ts from "typescript";
 import { describe, expect, test } from "vitest";
 import * as copyModule from "./copy";
 import { CLAUSE_SEPARATOR, REASON_COPY, SENTENCE_END } from "./copy";
-import { computeRecommendation } from "./engine";
-import { CANONICAL_FIXTURES } from "./fixtures";
+import { computeRecommendation, computeTieredRecommendation } from "./engine";
+import { CANONICAL_FIXTURES, TIER2_FIXTURES } from "./fixtures";
 import { findForbiddenPhrases, FORBIDDEN_PHRASES } from "./forbidden-phrases";
 import { RECOMMENDATION_PARAMS } from "./params";
 import { buildReason } from "./reason";
@@ -594,5 +594,60 @@ describe("no assembled reason holds a forbidden phrase (T7)", () => {
     expect(insufficient).toMatch(TIER1_REASON);
     expect(calls).toBe(2 * (9167 + 1334 + 9501));
     expect(bad).toEqual([]);
+  });
+});
+
+// --- S3.1 T18: every Tier-2 reason in the matrix ----------------------------
+/**
+ * A Tier-2 reason: one primary clause (X may be 0 on a shifted wait, S3.1d12),
+ * at most one trend clause, then at most one thin-data caveat.
+ */
+const TIER2_REASON = new RegExp(
+  `^(?:${[
+    REASON_COPY.atMarket,
+    REASON_COPY.within,
+    REASON_COPY.below,
+    REASON_COPY.above,
+  ]
+    .map((t) => escape(t).replace(/\\\{X\\\}/g, "\\d+"))
+    .join("|")})(?:${escape(CLAUSE_SEPARATOR)}${escape(REASON_COPY.trend)
+    .replace(/\\\{direction\\\}/, "(?:rising|falling)")
+    .replace(/\\\{X\\\}/, "\\d+")})?(?:${escape(CLAUSE_SEPARATOR)}${clause(
+    REASON_COPY.thinData,
+  )})?${escape(SENTENCE_END)}$`,
+);
+
+describe("no Tier-2 reason holds a forbidden phrase (S3.1 T18)", () => {
+  test("self-test: the pattern takes one trend clause before the caveat, never after", () => {
+    expect(
+      TIER2_REASON.test("9% below market; 30-day trend is falling 18%."),
+    ).toBe(true);
+    expect(
+      TIER2_REASON.test(
+        "Within 5% of market; 30-day trend is rising 18%; only 10 price snapshots.",
+      ),
+    ).toBe(true);
+    expect(
+      TIER2_REASON.test("0% above market; 30-day trend is falling 18%."),
+    ).toBe(true);
+    expect(
+      TIER2_REASON.test(
+        "9% below market; only 7 price snapshots; 30-day trend is falling 18%.",
+      ),
+    ).toBe(false);
+    expect(TIER2_REASON.test("9% below market; 30-day trend is flat 0%.")).toBe(
+      false,
+    );
+  });
+
+  test.each(
+    [...CANONICAL_FIXTURES, ...TIER2_FIXTURES].map(
+      (f, i) => [`${i}:${f.name}`, f] as const,
+    ),
+  )("%s: tier2's reason is clean and grammatical", (_name, f) => {
+    const { tier2 } = computeTieredRecommendation(f.input, f.market);
+    if (tier2 === null) return;
+    expect(findForbiddenPhrases(tier2.reason)).toEqual([]);
+    expect(tier2.reason).toMatch(TIER2_REASON);
   });
 });

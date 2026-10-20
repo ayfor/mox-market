@@ -115,6 +115,8 @@ describe("featureOf", () => {
     ["scripts/MTGJson-load.test.ts", "F0 · Price History"],
     ["src/lib/price-sync/run.test.ts", "F0 · Price History"],
     ["src/lib/recommendation/tier2.test.ts", "F3 · Market Adjustments"],
+    // S3.1d14 (T19): this story's new test files map to F3.
+    ["src/lib/recommendation/tiered-parity.test.ts", "F3 · Market Adjustments"],
     ["src/lib/recommendation/volatility.test.ts", "F3 · Market Adjustments"],
     ["src/lib/recommendation/shock.test.ts", "F3 · Market Adjustments"],
     ["src/lib/classification/rules.test.ts", "F4 · Card Classification"],
