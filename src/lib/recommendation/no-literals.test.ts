@@ -73,6 +73,8 @@ describe("no thresholds as literals in engine logic (T8)", () => {
       // S1.3 T21: the UI copy and the forbidden-phrase list.
       "ui-copy.ts",
       "forbidden-phrases.ts",
+      // S3.1 T18: Tier 2.
+      "tier2.ts",
     ]) {
       expect(files).toContain(name);
     }
@@ -88,7 +90,14 @@ describe("no thresholds as literals in engine logic (T8)", () => {
   });
 
   test("no RECOMMENDATION_PARAMS value is in the allowlist, so a param literal is always caught", () => {
-    for (const [key, value] of Object.entries(RECOMMENDATION_PARAMS)) {
+    // S3.1 T18: TIER2_ENABLED is a boolean, never a numeric literal, so the
+    // check covers the numeric params only.
+    const numeric = Object.entries(RECOMMENDATION_PARAMS).filter(
+      (entry): entry is [string, number] => typeof entry[1] === "number",
+    );
+    expect(numeric.map(([key]) => key)).not.toContain("TIER2_ENABLED");
+    expect(numeric).toHaveLength(Object.keys(RECOMMENDATION_PARAMS).length - 1);
+    for (const [key, value] of numeric) {
       expect(ALLOWED.has(value), key).toBe(false);
     }
   });

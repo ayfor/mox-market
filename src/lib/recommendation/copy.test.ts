@@ -255,6 +255,8 @@ describe("the engine's logic modules hold no copy (T4)", () => {
         "signals.ts",
         "window.ts",
         "types.ts",
+        // S3.1 T18: Tier 2 is scanned with no allowlist change.
+        "tier2.ts",
       ]),
     );
     expect(LOGIC_MODULES.length + COPY_SCAN_EXEMPT.size).toBe(all.length);

@@ -648,7 +648,7 @@ describe("tuning without logic changes (T20, F1 W2)", () => {
     expect(RECOMMENDATION_PARAMS.windowDays).toBe(30);
     expect(RECOMMENDATION_PARAMS.highConfidenceSnapshotCount).toBe(28);
     expect(RECOMMENDATION_PARAMS.trendThresholdPct).toBe(0.5);
-    expect(PARAMS_VERSION).toBe("46ec1cd7");
+    expect(PARAMS_VERSION).toBe("208c90c2");
   });
 });
 

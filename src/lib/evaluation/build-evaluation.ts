@@ -10,9 +10,16 @@ import {
   selectDefaultPrinting,
   withOfferedPrices,
 } from "@/lib/printings";
-import { computeRecommendation } from "@/lib/recommendation/engine";
+import {
+  computeTieredRecommendation,
+  servedRecommendation,
+} from "@/lib/recommendation/engine";
 import { InvalidRecommendationInputError } from "@/lib/recommendation/errors";
-import type { Finish, Recommendation } from "@/lib/recommendation/types";
+import type {
+  Finish,
+  Recommendation,
+  TieredRecommendation,
+} from "@/lib/recommendation/types";
 import type { ShownFinish } from "@/lib/recommendation/ui-copy";
 import { getAllPrintings, getCardByName } from "@/lib/scryfall";
 import type { ScryfallCard } from "@/types/scryfall";
@@ -97,7 +104,13 @@ export type Evaluation =
       readonly selection: EvaluationSelection;
       readonly requestedFinish: ShownFinish;
       readonly appliedFinish: Finish;
+      /** The served tier (Tier 1 while TIER2_ENABLED is false); the panel renders this. */
       readonly recommendation: Recommendation;
+      /**
+       * Both tiers from the one engine call, kept for S5.1's log (S3.1d9). No
+       * component reads them and they never cross the client boundary.
+       */
+      readonly tiers: TieredRecommendation;
       readonly latestSnapshotAt: Date | null;
       readonly historyUnavailable: boolean;
       readonly syncStale: boolean;
@@ -242,9 +255,12 @@ async function evaluate(
     log: deps.log,
   });
 
-  let recommendation: Recommendation;
+  // One tiered call (F3 W1, S3.1d9): Tier 1 and Tier 2 together, the served
+  // one picked under the shipped params. No log write and no console
+  // fallback here: S5.1 logs the tiers (pivot, S3.1d2).
+  let tiers: TieredRecommendation;
   try {
-    recommendation = computeRecommendation(
+    tiers = computeTieredRecommendation(
       {
         askingPriceCents: query.askingPriceCents,
         cardId: printing.id,
@@ -270,7 +286,8 @@ async function evaluate(
     },
     requestedFinish: query.finish,
     appliedFinish: snapshot.market.appliedFinish,
-    recommendation,
+    recommendation: servedRecommendation(tiers),
+    tiers,
     latestSnapshotAt: snapshot.market.latestSnapshotAt,
     historyUnavailable: snapshot.historyUnavailable,
     syncStale: snapshot.syncStale,

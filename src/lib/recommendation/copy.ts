@@ -21,11 +21,14 @@ export const REASON_COPY = Object.freeze({
   above: "{X}% above market",
   /** The thin-data caveat, whenever confidence is low; n = snapshotCount30d. */
   thinData: "only {n} price snapshots",
-  /** F3 caveat (C1.12 = A): no caller until S3.1 (S1.3d2). */
+  /** F3 caveat (C1.12 = A): no caller until S3.2 (S1.3d2, S3.1d1). */
   stale: "latest price data is {d} days old",
-  /** F3 trend clause, direction "rising" or "falling": no caller until S3.1. */
+  /**
+   * F3 trend clause, Tier 2 only, direction "rising" or "falling" and
+   * X = Math.round(|slope30dPct × windowDays|); called from reason.ts (S3.1d7).
+   */
   trend: "30-day trend is {direction} {X}%",
-  /** F3 caveat, X = Math.round(volatility30d × 100): no caller until S3.1. */
+  /** F3 caveat, X = Math.round(volatility30d × 100): no caller until S3.2. */
   volatility: "price has been volatile (±{X}%)",
 } as const);
 
@@ -36,7 +39,7 @@ export const REASON_COPY = Object.freeze({
 export const FALLBACK_NOTICE =
   "This printing has no {finish} price — showing Normal pricing.";
 
-/** F3 shock tooltip, signedX like "+12" or "−12": no caller until S3.1. */
+/** F3 shock tooltip, signedX like "+12" or "−12": no caller until S3.2. */
 export const SHOCK_TOOLTIP = "Price moved {signedX}% over the last 7 days.";
 
 /** Joins the primary clause and the caveat. */

@@ -145,6 +145,46 @@ describe("extreme deltas (ADV-4, D8)", () => {
   );
 });
 
+describe("extreme trends (S3.1 adversarial review UB-1; S3.1d16)", () => {
+  const withTrend = (
+    direction: "rising" | "falling",
+    X: number,
+    confidence: Confidence = "high",
+  ) =>
+    buildReason({
+      kind: "fair",
+      deltaBp: -1000,
+      bandPct: 5,
+      confidence,
+      snapshotCount30d: confidence === "low" ? 7 : 30,
+      trend: { direction, X },
+    });
+
+  test("a falling trend clause never reads 100% or more: X is at most 99", () => {
+    expect(withTrend("falling", 98)).toBe(
+      "10% below market; 30-day trend is falling 98%.",
+    );
+    expect(withTrend("falling", 99)).toBe(
+      "10% below market; 30-day trend is falling 99%.",
+    );
+    expect(withTrend("falling", 100)).toBe(
+      "10% below market; 30-day trend is falling 99%.",
+    );
+    expect(withTrend("falling", 818, "low")).toBe(
+      "10% below market; 30-day trend is falling 99%; only 7 price snapshots.",
+    );
+  });
+
+  test("a rising trend clause is not capped", () => {
+    expect(withTrend("rising", 100)).toBe(
+      "10% below market; 30-day trend is rising 100%.",
+    );
+    expect(withTrend("rising", 169)).toBe(
+      "10% below market; 30-day trend is rising 169%.",
+    );
+  });
+});
+
 describe("fillTemplate", () => {
   test("fills known placeholders and leaves unknown ones", () => {
     expect(fillTemplate("{X}% of {n}", { X: 9, n: 3 })).toBe("9% of 3");

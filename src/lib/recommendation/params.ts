@@ -1,11 +1,13 @@
 // F1 tunables (S1.1, AC-2). Every tunable lives here; tuning never needs a
 // logic change. Changing a value needs a plan-doc deviation and Josh's ruling.
-// F3's params and TIER2_ENABLED join at S3.1/S3.2 (S1.1d8, C3.7 = B).
+// TIER2_ENABLED and the two F3 params S3.1 reads joined at S3.1; S3.2 adds
+// the five it reads (S1.1d8, C3.7 = B; S3.1d4).
 // Server-side only (node:crypto); client-safe limits live in ./limits.
 import { createHash } from "node:crypto";
 
 /**
- * F1's eleven tunables. Each field's JSDoc gives its meaning, unit and
+ * F1's eleven tunables, then F3's (S3.1: TIER2_ENABLED, trendShiftFactor,
+ * lowConfidenceWidening). Each field's JSDoc gives its meaning, unit and
  * rationale (S1.3d9); params.test.ts checks every field has "Unit:" and
  * "Why:". Comments never change PARAMS_VERSION.
  */
@@ -76,6 +78,24 @@ export interface RecommendationParams {
    * Why: F1 (Signal definitions), a one-week slope beside the 30-day one.
    */
   readonly shortSlopeDays: number;
+  /**
+   * Serve Tier 2 (F3's adjusted thresholds and trend clause) instead of Tier 1. Off: Tier 2 is computed alongside and never served.
+   * Unit: boolean (false = Tier 1 served).
+   * Why: F3 dark launch (C1.37, C1.61; C3.7 = B), flipping it is a code change that changes PARAMS_VERSION.
+   */
+  readonly TIER2_ENABLED: boolean;
+  /**
+   * Tier 2 shifts both thresholds by slope30dPct × windowDays × trendShiftFactor, clamped to ±the fair band, and 0 when trendDirection is flat.
+   * Unit: ratio (dimensionless; 0.5 → half the 30-day trend).
+   * Why: F3, a half-strength lean on the observed trend; 0.3 vs 0.5 is F3's open calibration item.
+   */
+  readonly trendShiftFactor: number;
+  /**
+   * Tier 2 widens the fair band by this factor when confidence is low (before the asymmetry and the shift).
+   * Unit: ratio (dimensionless; 1.5 → a ±7.5% band at fairBandPct 5).
+   * Why: F3, thin data earns a wider band rather than a confident verdict (C1.34).
+   */
+  readonly lowConfidenceWidening: number;
 }
 
 export const RECOMMENDATION_PARAMS: RecommendationParams = Object.freeze({
@@ -90,6 +110,9 @@ export const RECOMMENDATION_PARAMS: RecommendationParams = Object.freeze({
   minSnapshotsForVolatility: 14,
   windowDays: 30,
   shortSlopeDays: 7,
+  TIER2_ENABLED: false,
+  trendShiftFactor: 0.5,
+  lowConfidenceWidening: 1.5,
 });
 
 /** JSON with object keys sorted at every level, so key order never matters. */

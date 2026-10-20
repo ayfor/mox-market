@@ -85,3 +85,13 @@ export interface Recommendation {
   reason: string;
   signals: RecommendationSignals;
 }
+
+/**
+ * F3 Engine API (S3.1d3): both tiers from one call. tier1 is F1's price-only
+ * result; tier2 applies F3's adjusted thresholds and is null only when tier1
+ * is insufficient_data. Which one is served follows TIER2_ENABLED.
+ */
+export interface TieredRecommendation {
+  tier1: Recommendation;
+  tier2: Recommendation | null;
+}

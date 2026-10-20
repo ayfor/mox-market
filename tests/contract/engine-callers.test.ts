@@ -3,7 +3,10 @@
 // argument exists for tests, so outside test files every call passes at most
 // two arguments, and the engine's param-taking helpers stay inside
 // src/lib/recommendation. Read from the TypeScript AST, so comments never
-// count. Tuning still happens only by editing RECOMMENDATION_PARAMS.
+// count. Tuning still happens only by editing RECOMMENDATION_PARAMS. S3.1
+// T17: computeTieredRecommendation follows the same two-argument rule,
+// servedRecommendation takes only the tiers, and Tier 2's param-taking
+// helpers stay inside the engine too.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -28,13 +31,25 @@ function filesUnder(dir: string): string[] {
 const isTest = (file: string) => /\.(test|spec)(-d)?\.[cm]?[jt]sx?$/.test(file);
 const isCode = (file: string) => /\.[cm]?[jt]sx?$/.test(file);
 
-const ENGINE_ENTRY = "computeRecommendation";
+/**
+ * The engine's public entries and the most arguments production code may
+ * pass each: the params argument exists for tests only.
+ */
+const ENGINE_ENTRIES: ReadonlyMap<string, number> = new Map([
+  ["computeRecommendation", 2],
+  ["computeTieredRecommendation", 2],
+  ["servedRecommendation", 1],
+]);
 /** The engine's helpers that take params or a band directly. */
 const PARAM_HELPERS = new Set([
   "buildReason",
   "computeHistorySignals",
   "thresholdsBp",
   "readWindow",
+  // S3.1 T17: Tier 2's helpers.
+  "tier2Thresholds",
+  "computeTier2",
+  "trendClauseX",
 ]);
 const ENGINE_DIR = "src/lib/recommendation/";
 
@@ -70,24 +85,28 @@ function overrides(file: string, source: string): string[] {
   };
   const outsideEngine = !file.startsWith(ENGINE_DIR);
   const visit = (node: ts.Node) => {
-    if (ts.isStringLiteral(node) && node.text === ENGINE_ENTRY) {
-      at(node, `"${ENGINE_ENTRY}" as a string (indirect access)`);
+    if (ts.isStringLiteral(node) && ENGINE_ENTRIES.has(node.text)) {
+      at(node, `"${node.text}" as a string (indirect access)`);
     }
-    if (ts.isIdentifier(node) && node.text === ENGINE_ENTRY) {
+    const maxArgs = ts.isIdentifier(node)
+      ? ENGINE_ENTRIES.get(node.text)
+      : undefined;
+    if (ts.isIdentifier(node) && maxArgs !== undefined) {
+      const entry = node.text;
       const parent = node.parent;
       const call = callOf(node);
       if (ts.isFunctionDeclaration(parent) && parent.name === node) {
         // The definition, in engine.ts.
       } else if (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent)) {
         if (parent.propertyName !== undefined) {
-          at(node, `${ENGINE_ENTRY} renamed on import or export`);
+          at(node, `${entry} renamed on import or export`);
         }
       } else if (call === null) {
-        at(node, `${ENGINE_ENTRY} used as a value, not called`);
+        at(node, `${entry} used as a value, not called`);
       } else if (call.arguments.some(ts.isSpreadElement)) {
-        at(node, `${ENGINE_ENTRY} called with a spread argument`);
-      } else if (call.arguments.length > 2) {
-        at(node, `${ENGINE_ENTRY} called with a params argument`);
+        at(node, `${entry} called with a spread argument`);
+      } else if (call.arguments.length > maxArgs) {
+        at(node, `${entry} called with a params argument`);
       }
     }
     if (
@@ -135,6 +154,36 @@ describe("production code computes only with RECOMMENDATION_PARAMS (S1.3 ADV-3)"
     ]);
   });
 
+  test("self-test (S3.1 T17): the tiered entry and the served selection follow the rule", () => {
+    const sample = [
+      'import { computeTieredRecommendation, servedRecommendation } from "@/lib/recommendation/engine";',
+      "export const t = computeTieredRecommendation(i, m);",
+      "export const s = servedRecommendation(t);",
+      "export const a = computeTieredRecommendation(i, m, p);",
+      "export const b = computeTieredRecommendation(...args);",
+      "const f = computeTieredRecommendation;",
+      'import { computeTieredRecommendation as tiered } from "./engine";',
+      "export const c = servedRecommendation(t, p);",
+      "export const d = servedRecommendation(...args);",
+      'export const e = engine["computeTieredRecommendation"](i, m, p);',
+      'import { tier2Thresholds, computeTier2, trendClauseX } from "@/lib/recommendation/tier2";',
+      "export const g = tier2Thresholds(s, p);",
+    ].join("\n");
+    expect(overrides("src/lib/evaluation/x.ts", sample)).toEqual([
+      "src/lib/evaluation/x.ts:4 computeTieredRecommendation called with a params argument",
+      "src/lib/evaluation/x.ts:5 computeTieredRecommendation called with a spread argument",
+      "src/lib/evaluation/x.ts:6 computeTieredRecommendation used as a value, not called",
+      "src/lib/evaluation/x.ts:7 computeTieredRecommendation renamed on import or export",
+      "src/lib/evaluation/x.ts:8 servedRecommendation called with a params argument",
+      "src/lib/evaluation/x.ts:9 servedRecommendation called with a spread argument",
+      'src/lib/evaluation/x.ts:10 "computeTieredRecommendation" as a string (indirect access)',
+      "src/lib/evaluation/x.ts:11 tier2Thresholds used outside src/lib/recommendation",
+      "src/lib/evaluation/x.ts:11 computeTier2 used outside src/lib/recommendation",
+      "src/lib/evaluation/x.ts:11 trendClauseX used outside src/lib/recommendation",
+      "src/lib/evaluation/x.ts:12 tier2Thresholds used outside src/lib/recommendation",
+    ]);
+  });
+
   test("the engine's own modules may use the helpers", () => {
     const sample = [
       'import { buildReason } from "./reason";',
@@ -150,6 +199,8 @@ describe("production code computes only with RECOMMENDATION_PARAMS (S1.3 ADV-3)"
     expect(files).toEqual(
       expect.arrayContaining([
         "src/lib/recommendation/engine.ts",
+        "src/lib/recommendation/tier2.ts",
+        "src/lib/evaluation/build-evaluation.ts",
         "src/app/page.tsx",
         "scripts/test-report.mjs",
       ]),

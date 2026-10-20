@@ -1,11 +1,18 @@
-// T19 (AC-1, AC-6; S1.2d2): computeRecommendation's signature.
+// T19 (AC-1, AC-6; S1.2d2): computeRecommendation's signature. S3.1 T15
+// (F3 Engine API): computeTieredRecommendation, servedRecommendation and the
+// flag's type.
 import { describe, expectTypeOf, test } from "vitest";
-import { computeRecommendation } from "./engine";
+import {
+  computeRecommendation,
+  computeTieredRecommendation,
+  servedRecommendation,
+} from "./engine";
 import type { RecommendationParams } from "./params";
 import type {
   MarketSnapshot,
   Recommendation,
   RecommendationInput,
+  TieredRecommendation,
 } from "./types";
 
 describe("computeRecommendation signature", () => {
@@ -46,5 +53,40 @@ describe("computeRecommendation signature", () => {
         latestSnapshotAt: null,
       });
     }).toBeFunction();
+  });
+});
+
+describe("the tiered API (S3.1 T15)", () => {
+  test("computeTieredRecommendation takes input, market and optional params; returns both tiers", () => {
+    expectTypeOf<
+      Parameters<typeof computeTieredRecommendation>
+    >().toEqualTypeOf<
+      [RecommendationInput, MarketSnapshot, RecommendationParams?]
+    >();
+    expectTypeOf<
+      ReturnType<typeof computeTieredRecommendation>
+    >().toEqualTypeOf<TieredRecommendation>();
+  });
+
+  test("TieredRecommendation is { tier1: Recommendation; tier2: Recommendation | null }", () => {
+    expectTypeOf<TieredRecommendation>().toEqualTypeOf<{
+      tier1: Recommendation;
+      tier2: Recommendation | null;
+    }>();
+  });
+
+  test("servedRecommendation takes exactly one TieredRecommendation (no params)", () => {
+    expectTypeOf<Parameters<typeof servedRecommendation>>().toEqualTypeOf<
+      [TieredRecommendation]
+    >();
+    expectTypeOf<
+      ReturnType<typeof servedRecommendation>
+    >().toEqualTypeOf<Recommendation>();
+  });
+
+  test("TIER2_ENABLED is a boolean", () => {
+    expectTypeOf<
+      RecommendationParams["TIER2_ENABLED"]
+    >().toEqualTypeOf<boolean>();
   });
 });

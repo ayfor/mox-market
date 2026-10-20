@@ -15,7 +15,10 @@ import type {
 import { EMPTY_TILE_VALUE } from "@/lib/evaluation/tiles";
 import { offeredFinishes, selectablePrintings } from "@/lib/printings";
 import { REASON_COPY } from "@/lib/recommendation/copy";
-import { computeRecommendation } from "@/lib/recommendation/engine";
+import {
+  computeTieredRecommendation,
+  servedRecommendation,
+} from "@/lib/recommendation/engine";
 import { dailyHistory } from "@/lib/recommendation/fixtures";
 import type { Finish, PriceSnapshot } from "@/lib/recommendation/types";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
@@ -70,7 +73,7 @@ function evaluation(
     options.latestSnapshotAt === undefined
       ? new Date(NOW.getTime() - 3 * HOUR)
       : options.latestSnapshotAt;
-  const recommendation = computeRecommendation(
+  const tiers = computeTieredRecommendation(
     {
       askingPriceCents: options.askingPriceCents ?? 5400,
       cardId: MH2_12_ID,
@@ -88,6 +91,7 @@ function evaluation(
       latestSnapshotAt,
     },
   );
+  const recommendation = servedRecommendation(tiers);
   const printing = options.printing ?? PRINTING;
   return {
     status: "ok",
@@ -108,6 +112,7 @@ function evaluation(
     requestedFinish,
     appliedFinish,
     recommendation,
+    tiers,
     latestSnapshotAt,
     historyUnavailable: options.historyUnavailable ?? false,
     syncStale: options.syncStale ?? false,

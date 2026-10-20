@@ -1,0 +1,341 @@
+{
+  "data:fallback-foil-A": {
+    "kind": "buy",
+    "confidence": "high",
+    "reason": "9% below market.",
+    "signals": {
+      "deltaPct": -9.2,
+      "deltaBp": -920,
+      "marketPriceCents": 8150,
+      "median30dCents": 8150,
+      "range30dCents": {
+        "low": 8150,
+        "high": 8150,
+        "avg": 8150
+      },
+      "rangePosition": null,
+      "slope7dPct": 0,
+      "slope30dPct": 0,
+      "volatility30d": 0,
+      "snapshotCount30d": 30,
+      "trendDirection": "flat",
+      "fallbackNotice": true,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:fallback-foil-C": {
+    "kind": "buy",
+    "confidence": "high",
+    "reason": "9% below market.",
+    "signals": {
+      "deltaPct": -9.2,
+      "deltaBp": -920,
+      "marketPriceCents": 8150,
+      "median30dCents": 7976,
+      "range30dCents": {
+        "low": 7304,
+        "high": 8696,
+        "avg": 8000
+      },
+      "rangePosition": 0.06896551724137931,
+      "slope7dPct": -0.644468313641246,
+      "slope30dPct": -0.6,
+      "volatility30d": 0.05193264869039514,
+      "snapshotCount30d": 30,
+      "trendDirection": "falling",
+      "fallbackNotice": true,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:fallback-etched-A-rising": {
+    "kind": "fair",
+    "confidence": "high",
+    "reason": "Within 5% of market.",
+    "signals": {
+      "deltaPct": -5,
+      "deltaBp": -500,
+      "marketPriceCents": 8000,
+      "median30dCents": 7976,
+      "range30dCents": {
+        "low": 7304,
+        "high": 8696,
+        "avg": 8000
+      },
+      "rangePosition": 0.21264367816091953,
+      "slope7dPct": 0.5612722170252572,
+      "slope30dPct": 0.6,
+      "volatility30d": 0.05193264869039514,
+      "snapshotCount30d": 30,
+      "trendDirection": "rising",
+      "fallbackNotice": true,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:fallback-foil-D": {
+    "kind": "wait",
+    "confidence": "low",
+    "reason": "19% above market; only 10 price snapshots.",
+    "signals": {
+      "deltaPct": 19.05,
+      "deltaBp": 1905,
+      "marketPriceCents": 4200,
+      "median30dCents": null,
+      "range30dCents": null,
+      "rangePosition": null,
+      "slope7dPct": 0,
+      "slope30dPct": 0,
+      "volatility30d": null,
+      "snapshotCount30d": 10,
+      "trendDirection": "flat",
+      "fallbackNotice": true,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:applied-foil-C": {
+    "kind": "buy",
+    "confidence": "high",
+    "reason": "9% below market.",
+    "signals": {
+      "deltaPct": -9.2,
+      "deltaBp": -920,
+      "marketPriceCents": 8150,
+      "median30dCents": 7976,
+      "range30dCents": {
+        "low": 7304,
+        "high": 8696,
+        "avg": 8000
+      },
+      "rangePosition": 0.06896551724137931,
+      "slope7dPct": -0.644468313641246,
+      "slope30dPct": -0.6,
+      "volatility30d": 0.05193264869039514,
+      "snapshotCount30d": 30,
+      "trendDirection": "falling",
+      "fallbackNotice": false,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:unusable-etched-for-foil": {
+    "kind": "insufficient_data",
+    "confidence": "low",
+    "reason": "We don't have enough pricing data on this printing to give a recommendation — try a different printing.",
+    "signals": {
+      "deltaPct": null,
+      "deltaBp": null,
+      "marketPriceCents": null,
+      "median30dCents": null,
+      "range30dCents": null,
+      "rangePosition": null,
+      "slope7dPct": null,
+      "slope30dPct": null,
+      "volatility30d": null,
+      "snapshotCount30d": 0,
+      "trendDirection": null,
+      "fallbackNotice": false,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:gap-falling-14": {
+    "kind": "fair",
+    "confidence": "medium",
+    "reason": "7% below market.",
+    "signals": {
+      "deltaPct": -7.14,
+      "deltaBp": -714,
+      "marketPriceCents": 7000,
+      "median30dCents": 8860,
+      "range30dCents": {
+        "low": 6700,
+        "high": 9000,
+        "avg": 8039
+      },
+      "rangePosition": 0,
+      "slope7dPct": -0.9480696959344038,
+      "slope30dPct": -1.1420814985863594,
+      "volatility30d": 0.1283932263093028,
+      "snapshotCount30d": 14,
+      "trendDirection": "falling",
+      "fallbackNotice": false,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:gap-C-sparse-20": {
+    "kind": "buy",
+    "confidence": "medium",
+    "reason": "9% below market.",
+    "signals": {
+      "deltaPct": -9.2,
+      "deltaBp": -920,
+      "marketPriceCents": 8150,
+      "median30dCents": 7976,
+      "range30dCents": {
+        "low": 7304,
+        "high": 8696,
+        "avg": 8000
+      },
+      "rangePosition": 0.06896551724137931,
+      "slope7dPct": -0.644468313641246,
+      "slope30dPct": -0.6,
+      "volatility30d": 0.052048054718692414,
+      "snapshotCount30d": 20,
+      "trendDirection": "falling",
+      "fallbackNotice": false,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:window-C-duplicates-outside": {
+    "kind": "buy",
+    "confidence": "high",
+    "reason": "9% below market.",
+    "signals": {
+      "deltaPct": -9.2,
+      "deltaBp": -920,
+      "marketPriceCents": 8150,
+      "median30dCents": 7976,
+      "range30dCents": {
+        "low": 7304,
+        "high": 8696,
+        "avg": 8000
+      },
+      "rangePosition": 0.06896551724137931,
+      "slope7dPct": -0.644468313641246,
+      "slope30dPct": -0.6,
+      "volatility30d": 0.05193264869039514,
+      "snapshotCount30d": 30,
+      "trendDirection": "falling",
+      "fallbackNotice": false,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:crash-ramp-30": {
+    "kind": "buy",
+    "confidence": "high",
+    "reason": "10% below market.",
+    "signals": {
+      "deltaPct": -10,
+      "deltaBp": -1000,
+      "marketPriceCents": 500,
+      "median30dCents": 2675,
+      "range30dCents": {
+        "low": 505,
+        "high": 5000,
+        "avg": 2753
+      },
+      "rangePosition": 0,
+      "slope7dPct": -15.97938144329897,
+      "slope30dPct": -5.631244323342416,
+      "volatility30d": 0.487409055223206,
+      "snapshotCount30d": 30,
+      "trendDirection": "falling",
+      "fallbackNotice": false,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:crash-step-30": {
+    "kind": "buy",
+    "confidence": "high",
+    "reason": "10% below market.",
+    "signals": {
+      "deltaPct": -10,
+      "deltaBp": -1000,
+      "marketPriceCents": 500,
+      "median30dCents": 5000,
+      "range30dCents": {
+        "low": 500,
+        "high": 5000,
+        "avg": 3500
+      },
+      "rangePosition": 0,
+      "slope7dPct": 0,
+      "slope30dPct": -5.720641983155888,
+      "volatility30d": 0.6060915267313265,
+      "snapshotCount30d": 30,
+      "trendDirection": "falling",
+      "fallbackNotice": false,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:crash-ramp-7": {
+    "kind": "buy",
+    "confidence": "low",
+    "reason": "10% below market; only 7 price snapshots.",
+    "signals": {
+      "deltaPct": -10,
+      "deltaBp": -1000,
+      "marketPriceCents": 500,
+      "median30dCents": null,
+      "range30dCents": null,
+      "rangePosition": null,
+      "slope7dPct": -27.272727272727273,
+      "slope30dPct": -27.272727272727273,
+      "volatility30d": null,
+      "snapshotCount30d": 7,
+      "trendDirection": "falling",
+      "fallbackNotice": false,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  },
+  "data:surge-ramp-30": {
+    "kind": "fair",
+    "confidence": "high",
+    "reason": "Within 4% of market.",
+    "signals": {
+      "deltaPct": -4,
+      "deltaBp": -400,
+      "marketPriceCents": 5000,
+      "median30dCents": 2670,
+      "range30dCents": {
+        "low": 500,
+        "high": 4995,
+        "avg": 2748
+      },
+      "rangePosition": 0.9566184649610678,
+      "slope7dPct": 3.4216335540838854,
+      "slope30dPct": 5.641492265696088,
+      "volatility30d": 0.4882960598732937,
+      "snapshotCount30d": 30,
+      "trendDirection": "rising",
+      "fallbackNotice": false,
+      "bandPct": 5,
+      "wideningFactor": 1,
+      "buyThresholdPct": -8.33,
+      "waitThresholdPct": 5
+    }
+  }
+}

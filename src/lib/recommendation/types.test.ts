@@ -163,6 +163,8 @@ describe("engine purity", () => {
       // S1.3 T21: the UI copy and the forbidden-phrase list.
       "ui-copy.ts",
       "forbidden-phrases.ts",
+      // S3.1 T18: Tier 2.
+      "tier2.ts",
     ]) {
       expect(names).toContain(name);
     }
