@@ -55,6 +55,26 @@ describe("@/lib/prisma", () => {
     );
   });
 
+  test("the missing-variable error carries a loggable code, so F2's log line names it", async () => {
+    vi.stubEnv("POSTGRES_PRISMA_URL", undefined);
+    const error = await import("@/lib/prisma").then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toMatchObject({ code: "POSTGRES_PRISMA_URL_UNSET" });
+    const { consoleLog } =
+      await import("@/lib/evaluation/load-market-snapshot");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      consoleLog("history_read_failed", error);
+      expect(spy.mock.calls).toEqual([
+        ["[evaluation] history_read_failed: Error [POSTGRES_PRISMA_URL_UNSET]"],
+      ]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("throws when the variable is empty", async () => {
     vi.stubEnv("POSTGRES_PRISMA_URL", "");
     await expect(import("@/lib/prisma")).rejects.toThrow(
