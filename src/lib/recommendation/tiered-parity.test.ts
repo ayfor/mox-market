@@ -24,6 +24,7 @@ import {
   fixtureInput,
   fixtureMarket,
   flat,
+  S3_2_FIXTURES,
   TIER2_DATA_EDGE_FIXTURES,
   TIER2_FIXTURES,
 } from "./fixtures";
@@ -37,6 +38,7 @@ import type {
 const RECORDING = "./__snapshots__/tiered-parity.s1.2.json";
 const DATA_EDGE_RECORDING =
   "./__snapshots__/tiered-parity.s1.2-data-edges.json";
+const S3_2_RECORDING = "./__snapshots__/tiered-parity.s3.2-fixtures.json";
 
 /** S1.2 T2's band edges (bands.test.ts EDGES): [asking, market], 30 flat rows. */
 const BAND_EDGES = [
@@ -83,6 +85,13 @@ const DATA_EDGE_MATRIX: readonly MatrixCase[] = TIER2_DATA_EDGE_FIXTURES.map(
   (f) => ({ name: `data:${f.name}`, input: f.input, market: f.market }),
 );
 
+/** S3.2's fixtures (S3.2d8), recorded in a third file. */
+const S3_2_MATRIX: readonly MatrixCase[] = S3_2_FIXTURES.map((f) => ({
+  name: `s3.2:${f.name}`,
+  input: f.input,
+  market: f.market,
+}));
+
 /** Every case AC-4 and T13 run over. */
 const FULL_MATRIX: readonly MatrixCase[] = [
   ...PARITY_MATRIX,
@@ -126,6 +135,12 @@ describe("the S1.2 recording (T12, AC-4; S3.1d10)", () => {
     await expect(
       `${JSON.stringify(servedOver(DATA_EDGE_MATRIX), null, 2)}\n`,
     ).toMatchFileSnapshot(DATA_EDGE_RECORDING);
+  });
+
+  test("computeRecommendation over the S3.2 fixtures matches their recording (S3.2d8)", async () => {
+    await expect(
+      `${JSON.stringify(servedOver(S3_2_MATRIX), null, 2)}\n`,
+    ).toMatchFileSnapshot(S3_2_RECORDING);
   });
 
   test("the data-edge recording holds the finish fallback and an unusable finish (SPEC-2, TC-3)", () => {
