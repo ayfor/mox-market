@@ -65,10 +65,18 @@
   align-items: start;
 }
 
-/* R3/R4: the card image sits beside the glass, uncropped and unfiltered. */
+/* R3/R4: the card image sits beside the glass, uncropped and unfiltered.
+   The radius matches a physical card's corners, as Scryfall's own site
+   rounds them, so an older black-bordered scan's square white corner fill
+   is clipped; nothing is cropped from the card, laid over it or filtered.
+   The skeleton's image slot takes the same corners. */
 .mm-card-art {
   width: 244px;
   aspect-ratio: 488 / 680;
+}
+.mm-card-image,
+.mm-card-art.mm-skeleton-block {
+  border-radius: 4.75% / 3.5%;
 }
 .mm-card-image {
   display: block;
@@ -126,7 +134,11 @@
   flex-direction: column;
   gap: 16px;
   padding: 28px 32px;
-  background: var(--glass-fill);
+  /* Denser than the other glass surfaces: the strong glass tint over an
+     Onyx base, so the page grain does not show through the decision. */
+  background:
+    linear-gradient(var(--glass-fill-strong), var(--glass-fill-strong)),
+    var(--panel-base);
   border: 1px solid var(--glass-stroke);
   border-radius: var(--mox-radius-xl);
   backdrop-filter: blur(var(--glass-blur));

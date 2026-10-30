@@ -328,3 +328,63 @@ describe("free text stays free under the keyboard (ADV-2, AC-20)", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
+
+describe("the landing form's options (UI patch 2026-10-30)", () => {
+  function Committing({ onCommit }: { onCommit: (card: string) => void }) {
+    const [value, setValue] = useState("");
+    return (
+      <CardCombobox
+        id="card"
+        name="card"
+        placeholder="Card name..."
+        ariaLabel="Card"
+        inputClassName="landing-form-input"
+        optionsClassName="mm-combobox-options mm-combobox-options--above"
+        value={value}
+        onChange={setValue}
+        onCommit={onCommit}
+      />
+    );
+  }
+
+  test("its own classes, name, placeholder and accessible name", async () => {
+    fetchMock.mockResolvedValue(ok(["Esper Sentinel"]));
+    render(<Committing onCommit={vi.fn()} />);
+    const field = screen.getByRole("combobox", { name: "Card" });
+    expect(field).toHaveClass("landing-form-input");
+    expect(field).not.toHaveClass("mm-input");
+    expect(field).toHaveAttribute("name", "card");
+    expect(field).toHaveAttribute("placeholder", "Card name...");
+    type("esper");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTOCOMPLETE_DEBOUNCE_MS);
+    });
+    await flush();
+    expect(screen.getByRole("listbox")).toHaveClass(
+      "mm-combobox-options",
+      "mm-combobox-options--above",
+    );
+  });
+
+  test("onCommit fires with the picked suggestion, and with the text on blur", async () => {
+    fetchMock.mockResolvedValue(ok(["Esper Sentinel", "Esper Charm"]));
+    const onCommit = vi.fn();
+    render(<Committing onCommit={onCommit} />);
+    type("esper");
+    expect(onCommit).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTOCOMPLETE_DEBOUNCE_MS);
+    });
+    await flush();
+    const options = screen.getAllByRole("option");
+    fireEvent.mouseDown(options[2]);
+    fireEvent.click(options[2]);
+    await flush();
+    expect(onCommit).toHaveBeenLastCalledWith("Esper Charm");
+    fireEvent.blur(input());
+    expect(onCommit).toHaveBeenLastCalledWith("Esper Charm");
+    type("Esper Sentinel");
+    fireEvent.blur(input());
+    expect(onCommit).toHaveBeenLastCalledWith("Esper Sentinel");
+  });
+});

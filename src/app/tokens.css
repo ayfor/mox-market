@@ -42,6 +42,9 @@
   --glass-stroke-strong: rgba(255, 255, 255, 0.15);
   --glass-stroke-soft:   rgba(255, 255, 255, 0.05);
   --glass-blur:        16px;
+  /* Dense base under a glass panel that carries body text: Onyx at 88%,
+     so the page grain no longer reads through the decision panel. */
+  --panel-base:        rgba(12, 12, 12, 0.88);
 
   /* --- Verdict palette --- */
   --verdict-buy:      var(--mox-emerald);   /* Buy / Good Deal */

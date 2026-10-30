@@ -1,0 +1,38 @@
+/* ─────────────────────────────────────────────────────────
+   Mox Market V2 — card combobox suggestion list (S2.1d15)
+   Moved from entry-form.css (UI patch 2026-10-30) so the landing
+   form, which does not load the entry form's styles, shares it.
+   The list opens below the field; --above opens it upward, for a
+   field near the bottom of a panel that clips its overflow.
+   ───────────────────────────────────────────────────────── */
+
+.mm-combobox-options {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--mox-onyx);
+  border: 1px solid var(--glass-stroke-strong);
+  border-radius: var(--mox-radius-md);
+  box-shadow: var(--shadow-panel);
+}
+.mm-combobox-option {
+  padding: 10px 12px;
+  border-radius: var(--mox-radius-sm);
+  font: var(--ts-body);
+  color: var(--fg-primary);
+  cursor: pointer;
+}
+.mm-combobox-option[data-focus] {
+  background: var(--glass-fill-strong);
+}
+.mm-combobox-options--above {
+  top: auto;
+  bottom: calc(100% + 6px);
+}

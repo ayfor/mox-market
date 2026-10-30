@@ -271,12 +271,20 @@ describe("an ambiguous miss offers suggestions on focus (ADV-7)", () => {
   const fetchMock = vi.fn<typeof fetch>();
   beforeEach(() => {
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue(
-      Response.json({ data: ["Jace Beleren", "Jace, the Mind Sculptor"] }),
+    // The Set picker looks the prefilled card's printings up on mount (UI
+    // patch review UI-3); these tests count the autocomplete route's calls.
+    fetchMock.mockImplementation(async (url) =>
+      String(url).startsWith("/api/cards/printings")
+        ? Response.json({ data: [] })
+        : Response.json({ data: ["Jace Beleren", "Jace, the Mind Sculptor"] }),
     );
     vi.stubGlobal("fetch", fetchMock);
     return () => vi.unstubAllGlobals();
   });
+  const autocompleteCalls = () =>
+    fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.startsWith("/api/cards/autocomplete"));
 
   test("focusing the card field fetches suggestions for the typed name and lists them", async () => {
     render(
@@ -284,7 +292,7 @@ describe("an ambiguous miss offers suggestions on focus (ADV-7)", () => {
         <ResultView evaluation={{ status: "ambiguous" }} />
       </Page>,
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(autocompleteCalls()).toEqual([]);
     fireEvent.focus(cardInput());
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual([
@@ -292,10 +300,7 @@ describe("an ambiguous miss offers suggestions on focus (ADV-7)", () => {
       "Jace Beleren",
       "Jace, the Mind Sculptor",
     ]);
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "/api/cards/autocomplete?q=jace",
-    );
+    expect(autocompleteCalls()).toEqual(["/api/cards/autocomplete?q=jace"]);
     fireEvent.mouseDown(options[2]);
     fireEvent.click(options[2]);
     expect(cardInput()).toHaveValue("Jace, the Mind Sculptor");
@@ -324,7 +329,7 @@ describe("an ambiguous miss offers suggestions on focus (ADV-7)", () => {
     );
     fireEvent.focus(cardInput());
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(autocompleteCalls()).toEqual([]);
     expect(screen.queryAllByRole("option")).toHaveLength(0);
   });
 });

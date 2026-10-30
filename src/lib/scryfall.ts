@@ -75,29 +75,43 @@ async function apiErrorOf(res: Response): Promise<ScryfallApiError> {
 }
 
 /**
+ * How a caller may limit its requests (UI patch PS-1): refuse at once when
+ * the throttle queue is deeper than `maxQueueMs`, and abort when `signal`
+ * aborts (a client that went away). The request's own timeout still applies.
+ */
+export interface RequestLimits {
+  readonly maxQueueMs?: number;
+  readonly signal?: AbortSignal;
+}
+
+/**
  * One throttled Scryfall request: a path under BASE_URL, or an absolute URL
  * that must already be on BASE_URL (the prints search and its next pages).
- * Unless the caller passes its own signal, the request aborts
+ * Unless the caller passes its own RequestInit signal, the request aborts
  * SCRYFALL_TIMEOUT_MS after it is made, its wait in the throttle queue and
  * its body included, so a hung or backed-up Scryfall is an error and never a
- * page that does not finish (S2.1d21, ADV-1). A request whose throttle slot
- * lies more than `maxQueueMs` away is refused at once (ThrottleBacklogError).
+ * page that does not finish (S2.1d21, ADV-1); a `limits.signal` aborts it
+ * earlier. A request whose throttle slot lies more than `maxQueueMs` away is
+ * refused at once (ThrottleBacklogError).
  */
 async function request<T>(
   pathOrUrl: string,
   options?: RequestInit,
-  { maxQueueMs = SCRYFALL_MAX_QUEUE_MS }: { maxQueueMs?: number } = {},
+  { maxQueueMs = SCRYFALL_MAX_QUEUE_MS, signal: caller }: RequestLimits = {},
 ): Promise<T> {
   const url = pathOrUrl.startsWith("/") ? `${BASE_URL}${pathOrUrl}` : pathOrUrl;
   if (!isScryfallUrl(url)) {
     throw new Error("refusing a request outside api.scryfall.com");
   }
+  if (caller?.aborted) throw caller.reason;
 
   const controller = options?.signal ? null : new AbortController();
   const signal = options?.signal ?? controller?.signal;
   const timer = controller
     ? setTimeout(() => controller.abort(), SCRYFALL_TIMEOUT_MS)
     : null;
+  const onCallerAbort = () => controller?.abort(caller?.reason);
+  caller?.addEventListener("abort", onCallerAbort, { once: true });
   try {
     await throttle({ signal: signal ?? undefined, maxWaitMs: maxQueueMs });
     const res = await fetch(url, {
@@ -115,6 +129,7 @@ async function request<T>(
     return (await res.json()) as T;
   } finally {
     if (timer !== null) clearTimeout(timer);
+    caller?.removeEventListener("abort", onCallerAbort);
   }
 }
 
@@ -163,15 +178,19 @@ export async function searchCards(
  * name matches several cards), so the caller tells an ambiguous name from an
  * unknown one and both from a failure. A 2xx body that is not an object
  * throws a TypeError. Network errors, aborts and a full throttle queue pass
- * through unchanged.
+ * through unchanged. `limits` caps the queue wait and adds a caller's
+ * abort signal (PS-1).
  */
 export async function getCardByName(
   name: string,
   fuzzy = false,
+  limits?: RequestLimits,
 ): Promise<ScryfallCard> {
   const param = fuzzy ? "fuzzy" : "exact";
   const card = await request<ScryfallCard | null>(
     `/cards/named?${param}=${encodeURIComponent(name)}`,
+    undefined,
+    limits,
   );
   if (card === null || typeof card !== "object") {
     throw new TypeError("malformed card payload");
@@ -234,9 +253,12 @@ export async function getPrintings(name: string): Promise<ScryfallCard[]> {
  * URLs on api.scryfall.com and stops with an error after MAX_PRINT_PAGES
  * pages. Any failed page, a missing prints_search_uri or a page without a
  * data array throws, so a caller never sees a partial list (S2.1d7).
+ * `limits` applies to every page, so an aborted caller stops the paging
+ * (PS-1).
  */
 export async function getAllPrintings(
   card: Pick<ScryfallCard, "prints_search_uri">,
+  limits?: RequestLimits,
 ): Promise<ScryfallCard[]> {
   if (typeof card.prints_search_uri !== "string" || !card.prints_search_uri) {
     throw new Error("card has no prints_search_uri");
@@ -250,8 +272,11 @@ export async function getAllPrintings(
     if (!isScryfallUrl(next)) {
       throw new Error("printings page is outside api.scryfall.com");
     }
-    const body: ScryfallSearchResponse =
-      await request<ScryfallSearchResponse>(next);
+    const body: ScryfallSearchResponse = await request<ScryfallSearchResponse>(
+      next,
+      undefined,
+      limits,
+    );
     if (!body || !Array.isArray(body.data)) {
       throw new Error("printings page has no data array");
     }
