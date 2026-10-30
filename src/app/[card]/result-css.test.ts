@@ -145,6 +145,97 @@ describe("the shock annotation's rules (S3.2 T16; S3.2d9)", () => {
   });
 });
 
+// --- UI patch (2026-10-30): card corners and the decision panel's density --
+describe("the card image's corners (R3/R4)", () => {
+  const RADIUS = "4.75% / 3.5%";
+  const baseDeclarations = (selector: string) =>
+    extractRules(RESULT_CSS)
+      .filter(
+        (r) =>
+          r.atRules.length === 0 &&
+          r.selector.split(",").some((s) => s.trim() === selector),
+      )
+      .flatMap((r) => r.declarations);
+
+  test("the image and the skeleton's image slot round to a physical card's corners", () => {
+    for (const selector of [
+      ".mm-card-image",
+      ".mm-card-art.mm-skeleton-block",
+    ]) {
+      expect(baseDeclarations(selector), selector).toEqual(
+        expect.arrayContaining([{ property: "border-radius", value: RADIUS }]),
+      );
+    }
+  });
+
+  test("the image stays uncropped and unfiltered: no object-fit, clip, mask, filter or overlay", () => {
+    const rules = extractRules(RESULT_CSS).filter((r) =>
+      /mm-card-(image|art)/.test(r.selector),
+    );
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) {
+      for (const { property } of rule.declarations) {
+        expect(
+          [
+            "object-fit",
+            "object-position",
+            "clip-path",
+            "mask",
+            "mask-image",
+            "filter",
+            "mix-blend-mode",
+            "opacity",
+          ],
+          `${rule.selector} { ${property} }`,
+        ).not.toContain(property);
+      }
+      expect(rule.selector).not.toMatch(/::(before|after)/);
+    }
+    expect(
+      baseDeclarations(".mm-card-image").find((d) => d.property === "height")
+        ?.value,
+    ).toBe("auto");
+  });
+});
+
+describe("the decision panel's density", () => {
+  const TOKENS_CSS = read("src/app/tokens.css");
+
+  test("tokens.css defines --panel-base as an Onyx tint", () => {
+    const root = extractRules(TOKENS_CSS)
+      .filter((r) => r.selector === ":root")
+      .flatMap((r) => r.declarations);
+    const base = root.find((d) => d.property === "--panel-base")?.value;
+    expect(base).toMatch(/^rgba\(12, 12, 12, 0\.\d+\)$/);
+    expect(
+      Number(/0\.\d+/.exec(base ?? "")?.[0] ?? "0"),
+    ).toBeGreaterThanOrEqual(0.8);
+  });
+
+  test(".mm-rec-panel layers the strong glass tint over --panel-base and keeps blur, stroke, radius and shadow", () => {
+    const panel = declarationsOf(RESULT_CSS, ".mm-rec-panel").reduce<
+      Record<string, string>
+    >((all, d) => ({ ...all, [d.property]: d.value }), {});
+    expect(panel.background).toBe(
+      "linear-gradient(var(--glass-fill-strong), var(--glass-fill-strong)), var(--panel-base)",
+    );
+    expect(panel["backdrop-filter"]).toBe("blur(var(--glass-blur))");
+    expect(panel.border).toBe("1px solid var(--glass-stroke)");
+    expect(panel["border-radius"]).toBe("var(--mox-radius-xl)");
+    expect(panel["box-shadow"]).toBe("var(--shadow-panel)");
+    expect(`background: ${panel.background}`).not.toMatch(LITERAL_COLOUR);
+  });
+
+  test("no other glass surface takes --panel-base", () => {
+    const users = extractRules(RESULT_CSS)
+      .filter((r) =>
+        r.declarations.some((d) => d.value.includes("--panel-base")),
+      )
+      .map((r) => r.selector);
+    expect(users).toEqual([".mm-rec-panel"]);
+  });
+});
+
 describe("result.css never reaches the site footer (T12)", () => {
   test("no selector names footer or the site footer's class", () => {
     const selectors = selectorsOf(RESULT_CSS);
