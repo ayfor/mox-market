@@ -140,6 +140,8 @@ function computeTier1(
         kind === "insufficient_data"
           ? null
           : shockAnnotationOf(windowSnapshots, params),
+      // F4: the engine has no card; buildEvaluation classifies (S4.1d6).
+      category: null,
     },
   };
   return { tier1, windowSnapshots, snapshot };

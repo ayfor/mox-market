@@ -648,7 +648,8 @@ describe("tuning without logic changes (T20, F1 W2)", () => {
     expect(RECOMMENDATION_PARAMS.windowDays).toBe(30);
     expect(RECOMMENDATION_PARAMS.highConfidenceSnapshotCount).toBe(28);
     expect(RECOMMENDATION_PARAMS.trendThresholdPct).toBe(0.5);
-    expect(PARAMS_VERSION).toBe("2d4067ed");
+    // S4.1 T9: F4's four params moved the pin from 2d4067ed (S4.1d2).
+    expect(PARAMS_VERSION).toBe("d722f7b5");
   });
 });
 

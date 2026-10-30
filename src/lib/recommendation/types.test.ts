@@ -5,8 +5,11 @@ import path from "node:path";
 import ts from "typescript";
 import { describe, expect, test } from "vitest";
 import {
+  CARD_AGES,
   CONFIDENCE_LEVELS,
   FINISHES,
+  FORMAT_PROFILES,
+  POPULARITY_BUCKETS,
   RECOMMENDATION_KINDS,
   TREND_DIRECTIONS,
 } from "./types";
@@ -89,6 +92,22 @@ describe("enum tuples", () => {
     expect(CONFIDENCE_LEVELS).toEqual(["high", "medium", "low"]);
     expect(TREND_DIRECTIONS).toEqual(["rising", "falling", "flat"]);
   });
+
+  test("F4's tuples equal its Fields-table values in order (S4.1d3)", () => {
+    expect(CARD_AGES).toEqual([
+      "recent",
+      "modern-era",
+      "vintage-era",
+      "unknown",
+    ]);
+    expect(POPULARITY_BUCKETS).toEqual([
+      "top1000",
+      "top5000",
+      "longtail",
+      "unranked",
+    ]);
+    expect(FORMAT_PROFILES).toEqual(["competitive", "edh", "casual"]);
+  });
 });
 
 describe("engine purity", () => {
@@ -167,6 +186,8 @@ describe("engine purity", () => {
       "tier2.ts",
       // S3.2 T16: the shock annotation.
       "shock.ts",
+      // S4.1 T12: F4's classifier.
+      "classify.ts",
     ]) {
       expect(names).toContain(name);
     }

@@ -7,7 +7,8 @@
 // T17: computeTieredRecommendation follows the same two-argument rule,
 // servedRecommendation takes only the tiers, and Tier 2's param-taking
 // helpers stay inside the engine too. S3.2 T16 adds volatilityWiden,
-// latestAgeDays and shockAnnotationOf.
+// latestAgeDays and shockAnnotationOf. S4.1 T12: F4's classify takes
+// (card, asOf) outside tests, never a params argument.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -40,6 +41,8 @@ const ENGINE_ENTRIES: ReadonlyMap<string, number> = new Map([
   ["computeRecommendation", 2],
   ["computeTieredRecommendation", 2],
   ["servedRecommendation", 1],
+  // S4.1 T12: F4's classifier (card, asOf); its params argument is for tests.
+  ["classify", 2],
 ]);
 /** The engine's helpers that take params or a band directly. */
 const PARAM_HELPERS = new Set([
@@ -194,6 +197,23 @@ describe("production code computes only with RECOMMENDATION_PARAMS (S1.3 ADV-3)"
     ]);
   });
 
+  test("self-test (S4.1 T12): classify follows the two-argument rule", () => {
+    const sample = [
+      'import { classify } from "@/lib/recommendation/classify";',
+      "export const ok = classify(card, asOf);",
+      "export const a = classify(card, asOf, p);",
+      "export const b = classify(...args);",
+      "const f = classify;",
+      'import { classify as c } from "./classify";',
+    ].join("\n");
+    expect(overrides("src/lib/evaluation/x.ts", sample)).toEqual([
+      "src/lib/evaluation/x.ts:3 classify called with a params argument",
+      "src/lib/evaluation/x.ts:4 classify called with a spread argument",
+      "src/lib/evaluation/x.ts:5 classify used as a value, not called",
+      "src/lib/evaluation/x.ts:6 classify renamed on import or export",
+    ]);
+  });
+
   test("the engine's own modules may use the helpers", () => {
     const sample = [
       'import { buildReason } from "./reason";',
@@ -213,6 +233,7 @@ describe("production code computes only with RECOMMENDATION_PARAMS (S1.3 ADV-3)"
         "src/lib/recommendation/shock.ts",
         "src/lib/evaluation/build-evaluation.ts",
         "src/lib/evaluation/shock-tooltip.ts",
+        "src/lib/recommendation/classify.ts",
         "src/app/page.tsx",
         "scripts/test-report.mjs",
       ]),

@@ -3,6 +3,7 @@
 // Every string comes from a copy module (C1.54). An ok panel, the
 // insufficient_data one included, carries the printing and finish selectors
 // (S2.3, AC-10); their option labels are built here, on the server.
+import { CategoryChips } from "@/components/category-chips";
 import {
   SelectionControls,
   type SelectionOption,
@@ -161,6 +162,7 @@ function OkView({ evaluation }: { evaluation: OkEvaluation }) {
           <div className="mm-card-heading">
             <h1 className="mm-card-name">{printing.name}</h1>
             <p className="mm-card-set">{printingLine(printing)}</p>
+            <CategoryChips category={signals.category} />
           </div>
           <SelectionControls
             options={selectorOptions(evaluation)}

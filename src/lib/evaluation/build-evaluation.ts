@@ -10,6 +10,7 @@ import {
   selectDefaultPrinting,
   withOfferedPrices,
 } from "@/lib/printings";
+import { classify, withCategory } from "@/lib/recommendation/classify";
 import {
   computeTieredRecommendation,
   servedRecommendation,
@@ -107,8 +108,9 @@ export type Evaluation =
       /** The served tier (Tier 1 while TIER2_ENABLED is false); the panel renders this. */
       readonly recommendation: Recommendation;
       /**
-       * Both tiers from the one engine call, kept for S5.1's log (S3.1d9). No
-       * component reads them and they never cross the client boundary.
+       * Both tiers from the one engine call, kept for S5.1's log (S3.1d9),
+       * each carrying F4's signals.category (S4.1d6). No component reads
+       * them and they never cross the client boundary.
        */
       readonly tiers: TieredRecommendation;
       readonly latestSnapshotAt: Date | null;
@@ -276,6 +278,15 @@ async function evaluate(
     return { status: "error" };
   }
 
+  // F4 W1 (S4.1d6): classify the printing being priced, the object already
+  // in hand (never re-fetched, AC-6), at the market's asOf, then set the
+  // category on both tiers before serving, so the served result, the tiers
+  // and the panel agree. Display only: nothing else changes (S4.1d7).
+  const classified = withCategory(
+    tiers,
+    classify(printing, snapshot.market.asOf),
+  );
+
   return {
     status: "ok",
     printing,
@@ -286,8 +297,8 @@ async function evaluate(
     },
     requestedFinish: query.finish,
     appliedFinish: snapshot.market.appliedFinish,
-    recommendation: servedRecommendation(tiers),
-    tiers,
+    recommendation: servedRecommendation(classified),
+    tiers: classified,
     latestSnapshotAt: snapshot.market.latestSnapshotAt,
     historyUnavailable: snapshot.historyUnavailable,
     syncStale: snapshot.syncStale,

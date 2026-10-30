@@ -4,6 +4,9 @@
 // TIER2_ENABLED and the two F3 params S3.1 reads join, and the version moves
 // from 46ec1cd7 to 208c90c2. S3.2 T13 (S3.2d2): the five params S3.2 reads
 // join (nineteen keys), and the version moves from 208c90c2 to 2d4067ed.
+// S4.1 T9 (S4.1d2): F4's four classification thresholds join (twenty-three
+// keys, modernEraStart the first string), and the version moves from
+// 2d4067ed to d722f7b5.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -47,15 +50,50 @@ const S3_2_PARAMS = {
   shockMagnitudePct: 35,
 };
 
-const SHIPPED_PARAMS = { ...F1_PARAMS, ...S3_1_PARAMS, ...S3_2_PARAMS };
+/** F4's classification thresholds, at F4's Decisions values (S4.1d2). */
+const S4_1_PARAMS = {
+  recentPrintingDays: 183,
+  edhrecTop1Rank: 1000,
+  edhrecTop2Rank: 5000,
+  modernEraStart: "2003-07-28",
+};
+
+const SHIPPED_PARAMS = {
+  ...F1_PARAMS,
+  ...S3_1_PARAMS,
+  ...S3_2_PARAMS,
+  ...S4_1_PARAMS,
+};
 
 describe("RECOMMENDATION_PARAMS (T3)", () => {
-  test("deep-equals F1's eleven params, S3.1's three and S3.2's five, at design values (S3.2 T13)", () => {
+  test("deep-equals F1's eleven params, S3.1's three, S3.2's five and S4.1's four, at design values (S4.1 T9)", () => {
     expect(RECOMMENDATION_PARAMS).toStrictEqual(SHIPPED_PARAMS);
     expect(Object.keys(RECOMMENDATION_PARAMS).sort()).toEqual(
       Object.keys(SHIPPED_PARAMS).sort(),
     );
-    expect(Object.keys(RECOMMENDATION_PARAMS)).toHaveLength(19);
+    expect(Object.keys(RECOMMENDATION_PARAMS)).toHaveLength(23);
+  });
+
+  test("holds S4.1's four params at F4's values (S4.1d2)", () => {
+    for (const [key, value] of Object.entries(S4_1_PARAMS)) {
+      expect(RECOMMENDATION_PARAMS).toHaveProperty(key, value);
+    }
+  });
+
+  test("modernEraStart is a real UTC calendar date and the EDHREC bounds are ordered (S4.1 T9)", () => {
+    const { modernEraStart, edhrecTop1Rank, edhrecTop2Rank } =
+      RECOMMENDATION_PARAMS;
+    expect(modernEraStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(new Date(`${modernEraStart}T00:00:00Z`).toISOString()).toBe(
+      `${modernEraStart}T00:00:00.000Z`,
+    );
+    expect(Number.isSafeInteger(edhrecTop1Rank)).toBe(true);
+    expect(Number.isSafeInteger(edhrecTop2Rank)).toBe(true);
+    expect(edhrecTop1Rank).toBeGreaterThan(0);
+    expect(edhrecTop1Rank).toBeLessThan(edhrecTop2Rank);
+    expect(Number.isSafeInteger(RECOMMENDATION_PARAMS.recentPrintingDays)).toBe(
+      true,
+    );
   });
 
   test("ships with Tier 2 off (F3 dark launch, C1.37)", () => {
@@ -93,17 +131,22 @@ describe("PARAMS_VERSION (T4)", () => {
     const reversed = Object.fromEntries(
       Object.entries(RECOMMENDATION_PARAMS).reverse(),
     ) as unknown as RecommendationParams;
-    expect(Object.keys(reversed)[0]).toBe("shockMagnitudePct");
+    expect(Object.keys(reversed)[0]).toBe("modernEraStart");
     expect(paramsVersionOf(reversed)).toBe(PARAMS_VERSION);
   });
 
   test.each(Object.keys(SHIPPED_PARAMS))("changes when %s changes", (key) => {
     const value = RECOMMENDATION_PARAMS[key as keyof RecommendationParams];
-    const bumped = {
-      ...RECOMMENDATION_PARAMS,
-      // The flag flips; every number is bumped.
-      [key]: typeof value === "boolean" ? !value : value + 1,
-    };
+    // The flag flips, every number is bumped, and the one string param
+    // (modernEraStart) moves to another valid date (S4.1 T9).
+    const changed =
+      typeof value === "boolean"
+        ? !value
+        : typeof value === "string"
+          ? "2003-07-29"
+          : value + 1;
+    expect(changed).not.toBe(value);
+    const bumped = { ...RECOMMENDATION_PARAMS, [key]: changed };
     expect(paramsVersionOf(bumped)).not.toBe(PARAMS_VERSION);
   });
 
@@ -168,10 +211,12 @@ describe("params guardrail (S1.3 T11, AC-4; C1.58)", () => {
   test("RECOMMENDATION_PARAMS and PARAMS_VERSION match the inline snapshot", () => {
     expect({ PARAMS_VERSION, RECOMMENDATION_PARAMS }).toMatchInlineSnapshot(`
       {
-        "PARAMS_VERSION": "2d4067ed",
+        "PARAMS_VERSION": "d722f7b5",
         "RECOMMENDATION_PARAMS": {
           "TIER2_ENABLED": false,
           "buyThresholdAsymmetry": 0.6,
+          "edhrecTop1Rank": 1000,
+          "edhrecTop2Rank": 5000,
           "fairBandPct": 5,
           "highConfidenceSnapshotCount": 28,
           "lowConfidenceSnapshotCount": 14,
@@ -180,6 +225,8 @@ describe("params guardrail (S1.3 T11, AC-4; C1.58)", () => {
           "minSnapshotsForTrend": 7,
           "minSnapshotsForVerdict": 7,
           "minSnapshotsForVolatility": 14,
+          "modernEraStart": "2003-07-28",
+          "recentPrintingDays": 183,
           "shockMagnitudePct": 35,
           "shockWindowDays": 7,
           "shortSlopeDays": 7,

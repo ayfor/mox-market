@@ -18,9 +18,15 @@
 // engine at 5c150b4 before any S3.2 engine edit; the S3.1 recordings stay
 // untouched. With the flag on, the served annotation equals the flag-off
 // one, and Tier 2's confidence is Tier 1's except on stale data (S3.2d4).
+// S4.1 T7 (S4.1d6, S4.1d7): F4's signals.category postdates all three
+// recordings, so every comparison also removes it, beside shockAnnotation;
+// no recording is rewritten. The engine's own category is always null, and
+// withCategory changes nothing but the category, for every case and every
+// classification fixture.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
+import { withCategory } from "./classify";
 import {
   computeRecommendation,
   computeTieredRecommendation,
@@ -28,6 +34,7 @@ import {
 } from "./engine";
 import {
   CANONICAL_FIXTURES,
+  CLASSIFY_FIXTURES,
   fixtureInput,
   fixtureMarket,
   flat,
@@ -40,6 +47,7 @@ import type {
   MarketSnapshot,
   Recommendation,
   RecommendationInput,
+  TieredRecommendation,
 } from "./types";
 
 const RECORDING = "./__snapshots__/tiered-parity.s1.2.json";
@@ -117,16 +125,21 @@ const recorded = (): Record<string, Recommendation> => ({
 
 /**
  * A result without signals.shockAnnotation, the field AC-6 exempts from the
- * deep-equal (C1.47 = A). Its key order matches the recordings.
+ * deep-equal (C1.47 = A), and without signals.category, which postdates the
+ * recordings (S4.1d7). Its key order matches the recordings.
  */
 function withoutShock(r: Recommendation): Omit<Recommendation, "signals"> & {
-  signals: Omit<Recommendation["signals"], "shockAnnotation">;
+  signals: Omit<Recommendation["signals"], "shockAnnotation" | "category">;
 } {
   const signals: Partial<Recommendation["signals"]> = { ...r.signals };
   delete signals.shockAnnotation;
+  delete signals.category;
   return {
     ...r,
-    signals: signals as Omit<Recommendation["signals"], "shockAnnotation">,
+    signals: signals as Omit<
+      Recommendation["signals"],
+      "shockAnnotation" | "category"
+    >,
   };
 }
 
@@ -185,10 +198,11 @@ describe("the S1.2 recording (T12, AC-4; S3.1d10)", () => {
   });
 
   test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
-    "%s: the served recommendation, shockAnnotation removed, deep-equals the S1.2 result",
+    "%s: the served recommendation, shockAnnotation and category removed, deep-equals the S1.2 result",
     (name, c) => {
       const served = computeRecommendation(c.input, c.market);
       expect(served.signals).toHaveProperty("shockAnnotation");
+      expect(served.signals).toHaveProperty("category", null);
       expect(withoutShock(served)).toStrictEqual(recorded()[name]);
     },
   );
@@ -196,7 +210,7 @@ describe("the S1.2 recording (T12, AC-4; S3.1d10)", () => {
 
 describe("Tier 1 of the tiered call is the S1.2 result (T12, AC-4; S3.2 T7)", () => {
   test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
-    "%s: computeTieredRecommendation(...).tier1, shockAnnotation removed, deep-equals the recording",
+    "%s: computeTieredRecommendation(...).tier1, shockAnnotation and category removed, deep-equals the recording",
     (name, c) => {
       const { tier1 } = computeTieredRecommendation(c.input, c.market);
       expect(withoutShock(tier1)).toStrictEqual(recorded()[name]);
@@ -327,4 +341,73 @@ describe("the flag (T13, AC-4; F3 Engine API)", () => {
       expect.arrayContaining(["canonical:C", "canonical:A-rising"]),
     );
   });
+});
+
+/** Deep-freezes a value in place, so any mutation throws in strict mode. */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+
+/** A recommendation without signals.category, for the withCategory checks. */
+function withoutCategory(r: Recommendation) {
+  const signals: Partial<Recommendation["signals"]> = { ...r.signals };
+  delete signals.category;
+  return { ...r, signals };
+}
+
+describe("classification changes nothing else (S4.1 T7; S4.1d6, S4.1d7)", () => {
+  test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
+    "%s: the engine's signals.category is null on tier1, tier2 and the served result",
+    (_name, c) => {
+      const tiers = computeTieredRecommendation(c.input, c.market);
+      expect(tiers.tier1.signals.category).toBeNull();
+      if (tiers.tier2 !== null) expect(tiers.tier2.signals.category).toBeNull();
+      expect(servedRecommendation(tiers).signals.category).toBeNull();
+      expect(computeRecommendation(c.input, c.market).signals.category).toBe(
+        null,
+      );
+    },
+  );
+
+  test("the classify fixtures hold nine non-default categories and the default", () => {
+    expect(CLASSIFY_FIXTURES).toHaveLength(10);
+  });
+
+  test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
+    "%s: withCategory sets only signals.category, on every tier, for every fixture category, and mutates nothing",
+    (_name, c) => {
+      const tiers: TieredRecommendation = deepFreeze(
+        computeTieredRecommendation(c.input, c.market),
+      );
+      const before = structuredClone(tiers);
+      for (const { expected: category } of CLASSIFY_FIXTURES) {
+        const classified = withCategory(tiers, category);
+        expect(classified.tier1.signals.category).toBe(category);
+        expect(withoutCategory(classified.tier1)).toStrictEqual(
+          withoutCategory(tiers.tier1),
+        );
+        expect(classified.tier1.kind).toBe(tiers.tier1.kind);
+        expect(classified.tier1.confidence).toBe(tiers.tier1.confidence);
+        expect(classified.tier1.reason).toBe(tiers.tier1.reason);
+        if (tiers.tier2 === null) {
+          expect(classified.tier2).toBeNull();
+        } else {
+          expect(classified.tier2?.signals.category).toBe(category);
+          expect(withoutCategory(classified.tier2!)).toStrictEqual(
+            withoutCategory(tiers.tier2),
+          );
+        }
+        const served = servedRecommendation(classified);
+        expect(served.signals.category).toBe(category);
+        expect(withoutCategory(served)).toStrictEqual(
+          withoutCategory(servedRecommendation(tiers)),
+        );
+      }
+      expect(tiers).toStrictEqual(before);
+    },
+  );
 });

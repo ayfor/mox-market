@@ -11,12 +11,31 @@ export const RECOMMENDATION_KINDS = [
 ] as const;
 export const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
 export const TREND_DIRECTIONS = ["rising", "falling", "flat"] as const;
+/** F4's age buckets, spelled as its Fields table (S4.1d3). */
+export const CARD_AGES = [
+  "recent",
+  "modern-era",
+  "vintage-era",
+  "unknown",
+] as const;
+/** F4's EDHREC popularity buckets (S4.1d3). */
+export const POPULARITY_BUCKETS = [
+  "top1000",
+  "top5000",
+  "longtail",
+  "unranked",
+] as const;
+/** F4's format profiles (S4.1d3). */
+export const FORMAT_PROFILES = ["competitive", "edh", "casual"] as const;
 
 export type Finish = (typeof FINISHES)[number];
 export type RecommendationKind = (typeof RECOMMENDATION_KINDS)[number];
 export type Confidence = (typeof CONFIDENCE_LEVELS)[number];
 export type TrendDirection = (typeof TREND_DIRECTIONS)[number];
 export type MarketSource = "scryfall";
+export type CardAge = (typeof CARD_AGES)[number];
+export type Popularity = (typeof POPULARITY_BUCKETS)[number];
+export type FormatProfile = (typeof FORMAT_PROFILES)[number];
 
 /** One daily price point for a single (scryfall_id, finish). */
 export interface PriceSnapshot {
@@ -69,6 +88,41 @@ export interface ShockAnnotation {
   readonly window: number;
 }
 
+/**
+ * F4's card classification (S4.1d3): display only, so no band, kind,
+ * confidence or reason reads it. Every field is explicit; there is no
+ * "unclassified" sentinel, and the defaults are DEFAULT_CARD_CATEGORY.
+ */
+export interface CardCategory {
+  readonly reservedList: boolean;
+  readonly age: CardAge;
+  readonly popularity: Popularity;
+  readonly formatProfile: FormatProfile;
+  readonly digital: boolean;
+}
+
+/** F4's Fields-table defaults: what a card with none of the five fields gets. */
+export const DEFAULT_CARD_CATEGORY: CardCategory = Object.freeze({
+  reservedList: false,
+  age: "unknown",
+  popularity: "unranked",
+  formatProfile: "casual",
+  digital: false,
+});
+
+/**
+ * The Scryfall fields classify reads, each optional and unknown, because
+ * Scryfall's JSON is cast, never validated, and the engine may not import
+ * @/types/scryfall (S4.1d3). ScryfallCard is assignable to it.
+ */
+export interface ClassifiableCard {
+  readonly reserved?: unknown;
+  readonly released_at?: unknown;
+  readonly edhrec_rank?: unknown;
+  readonly legalities?: unknown;
+  readonly digital?: unknown;
+}
+
 export interface RecommendationSignals {
   deltaPct: number | null;
   deltaBp: number | null;
@@ -92,6 +146,12 @@ export interface RecommendationSignals {
    * insufficient_data.
    */
   shockAnnotation: ShockAnnotation | null;
+  /**
+   * F4 (S4.1d6): the classification of the printing being priced. The
+   * engine has no card, so it is null on every engine result; the server
+   * path sets it on both tiers with withCategory before serving.
+   */
+  category: CardCategory | null;
 }
 
 export interface Recommendation {

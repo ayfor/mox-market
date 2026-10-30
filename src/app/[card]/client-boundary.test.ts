@@ -3,7 +3,9 @@
 // No client module reaches the engine or a server-only module, no S2.1 file
 // touches Prisma or V1's price_snapshots, and no source uses Math.random.
 // S2.3's T16 (AC-5, AC-11): the selectors are seen by the scan, and their
-// closure holds no engine or template code.
+// closure holds no engine or template code. S4.1 T12: F4's classifier is
+// engine logic, and the chip row is a server component whose closure holds
+// none of it.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -127,6 +129,8 @@ const ENGINE_LOGIC = [
   "tier2",
   // S3.2 T16: the shock annotation is engine logic.
   "shock",
+  // S4.1 T12: F4's classifier is engine logic.
+  "classify",
   "bands",
   "reason",
   "signals",
@@ -255,6 +259,35 @@ describe("client modules never reach the engine or a server-only module (T24)", 
     expect(files.filter((f) => f.startsWith("src/lib/evaluation/"))).toEqual(
       [],
     );
+  });
+
+  test("the chip row is a server component whose import closure holds no engine logic (S4.1 T12)", () => {
+    const entry = "src/components/category-chips.tsx";
+    expect(isClientModule(parse(entry, diskFs.read(entry)!))).toBe(false);
+    const seen = new Set<string>();
+    const queue = [entry];
+    while (queue.length > 0) {
+      const file = queue.shift()!;
+      if (seen.has(file)) continue;
+      seen.add(file);
+      const text = diskFs.read(file);
+      if (text === undefined || !isCode(file)) continue;
+      for (const spec of runtimeSpecifiers(parse(file, text))) {
+        const target = resolve(file, spec, diskFs);
+        if (target !== null) queue.push(target);
+      }
+    }
+    const files = [...seen];
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "src/lib/evaluation/category-chips.ts",
+        "src/lib/copy/category.ts",
+      ]),
+    );
+    expect(files.filter((f) => ENGINE_LOGIC.includes(f))).toEqual([]);
+    expect(
+      files.filter((f) => f.startsWith("src/lib/recommendation/")),
+    ).toEqual([]);
   });
 
   test("no client module under src/ crosses the boundary", () => {

@@ -2,6 +2,8 @@
 // T15 (AC-6), T16 (AC-7, AC-14), T20 (AC-11, C1.02) and T25 (AC-17, D2).
 // S2.3 adds its T13 (AC-8, AC-10): the selectors in every ok panel. S3.2 T5
 // (AC-4; S3.2d9): F3's shock annotation as a ⚠️ beside the confidence chip.
+// S4.1 T4 (AC-4, display half; S4.1d8, S4.1d11): F4's chip row in the card
+// heading, after the set line.
 import {
   ESPER_SENTINEL_PRINTS,
   MH2_12_ID,
@@ -15,6 +17,7 @@ import type {
 } from "@/lib/evaluation/build-evaluation";
 import { EMPTY_TILE_VALUE } from "@/lib/evaluation/tiles";
 import { offeredFinishes, selectablePrintings } from "@/lib/printings";
+import { withCategory } from "@/lib/recommendation/classify";
 import { REASON_COPY } from "@/lib/recommendation/copy";
 import {
   computeRecommendation,
@@ -23,6 +26,7 @@ import {
 } from "@/lib/recommendation/engine";
 import {
   alt,
+  classifyFixtureNamed,
   dailyHistory,
   flat,
   s32FixtureNamed,
@@ -31,7 +35,12 @@ import {
   RECOMMENDATION_PARAMS,
   type RecommendationParams,
 } from "@/lib/recommendation/params";
-import type { Finish, PriceSnapshot } from "@/lib/recommendation/types";
+import {
+  DEFAULT_CARD_CATEGORY,
+  type CardCategory,
+  type Finish,
+  type PriceSnapshot,
+} from "@/lib/recommendation/types";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import type { ScryfallCard } from "@/types/scryfall";
 import { fireEvent, render, screen, within } from "@testing-library/react";
@@ -775,5 +784,126 @@ describe("F3's shock annotation (S3.2 T5, AC-4; S3.2d9)", () => {
     const { container } = render(<ResultView evaluation={make()} />);
     expect(container.querySelector(".mm-rec-shock")).toBeNull();
     expect(screen.queryByRole("img", { name: /Price moved/ })).toBeNull();
+  });
+});
+
+describe("F4's chip row (S4.1 T4, AC-4 display half; S4.1d8, S4.1d11)", () => {
+  /** An ok evaluation whose tiers and served result carry `category`, as buildEvaluation sets it. */
+  function categorized(
+    category: CardCategory | null,
+    options: Options = {},
+  ): Extract<Evaluation, { status: "ok" }> {
+    const e = evaluation(options);
+    if (category === null) return e;
+    const tiers = withCategory(e.tiers, category);
+    return { ...e, tiers, recommendation: servedRecommendation(tiers) };
+  }
+  const chipsIn = (container: HTMLElement) =>
+    [...container.querySelectorAll(".mm-category-chip")].map(
+      (c) => c.textContent,
+    );
+
+  const RESERVED = classifyFixtureNamed("CL-RESERVED").expected;
+  const RESERVED_TOOLTIPS = [
+    "On the Reserved List as of the last Scryfall fetch",
+    "This printing was released before 2003-07-28, the 8th Edition release date",
+    "EDHREC rank 1001 to 5000 as of the last Scryfall fetch",
+    "Legal in Commander but not in Standard, Pioneer or Modern as of the last Scryfall fetch",
+  ];
+
+  test("CL-RESERVED: inside .mm-card-heading after the set line, four chips with their exact tooltips", () => {
+    const { container } = render(
+      <ResultView evaluation={categorized(RESERVED)} />,
+    );
+    const heading = container.querySelector(".mm-card-heading")!;
+    const row = heading.querySelector(".mm-category-chips")!;
+    expect(row).not.toBeNull();
+    expect(row.tagName).toBe("UL");
+    expect(row.previousElementSibling).toHaveClass("mm-card-set");
+    const items = within(row as HTMLElement).getAllByRole("listitem");
+    expect(
+      items.map((li) => li.querySelector(".mm-category-chip")?.textContent),
+    ).toEqual([
+      "Reserved List",
+      "Vintage-era print",
+      "EDH top-5000",
+      "Commander-legal",
+    ]);
+    const chips = [...row.querySelectorAll<HTMLElement>(".mm-category-chip")];
+    expect(chips.map((c) => c.getAttribute("title"))).toEqual(
+      RESERVED_TOOLTIPS,
+    );
+    expect(chips.map((c) => c.dataset.tooltip)).toEqual(RESERVED_TOOLTIPS);
+    chips.forEach((chip, i) =>
+      expect(chip).toHaveAccessibleDescription(RESERVED_TOOLTIPS[i]),
+    );
+  });
+
+  test("CL-RECENT with edhrec_rank 10: Recent print, EDH top-1000, Competitive-format legal with F4's tooltip", () => {
+    const category: CardCategory = {
+      ...classifyFixtureNamed("CL-RECENT").expected,
+      popularity: "top1000",
+    };
+    const { container } = render(
+      <ResultView evaluation={categorized(category)} />,
+    );
+    expect(chipsIn(container)).toEqual([
+      "Recent print (<6mo)",
+      "EDH top-1000",
+      "Competitive-format legal",
+    ]);
+    expect(
+      screen.getByText("Competitive-format legal"),
+    ).toHaveAccessibleDescription(
+      "Legal in Standard, Pioneer or Modern as of the last Scryfall fetch",
+    );
+  });
+
+  test("CL-DIGITAL: Modern-era print and Digital", () => {
+    const { container } = render(
+      <ResultView
+        evaluation={categorized(classifyFixtureNamed("CL-DIGITAL").expected)}
+      />,
+    );
+    expect(chipsIn(container)).toEqual(["Modern-era print", "Digital"]);
+  });
+
+  test.each([
+    ["DEFAULT_CARD_CATEGORY", DEFAULT_CARD_CATEGORY],
+    ["category null", null],
+  ])(
+    "%s: no .mm-category-chips element and no chip; the panel renders",
+    (_label, category) => {
+      const { container } = render(
+        <ResultView evaluation={categorized(category)} />,
+      );
+      expect(container.querySelector(".mm-category-chips")).toBeNull();
+      expect(container.querySelector(".mm-category-chip")).toBeNull();
+      expect(container.querySelector(".mm-card-heading")).not.toBeNull();
+      expect(container.querySelector(".mm-rec-badge")).not.toBeNull();
+      expect(container.querySelector('[data-status="error"]')).toBeNull();
+    },
+  );
+
+  test("an insufficient_data evaluation with CL-RESERVED's category still renders its four chips", () => {
+    const e = categorized(RESERVED, { history: [], latestSnapshotAt: null });
+    expect(e.recommendation.kind).toBe("insufficient_data");
+    const { container } = render(<ResultView evaluation={e} />);
+    expect(chipsIn(container)).toEqual([
+      "Reserved List",
+      "Vintage-era print",
+      "EDH top-5000",
+      "Commander-legal",
+    ]);
+  });
+
+  test("the chips change nothing else in the panel: badge, chip and reason are the uncategorized ones", () => {
+    const plain = render(<ResultView evaluation={evaluation(KINDS.buy)} />);
+    const plainPanel = panelOf(plain.container).outerHTML;
+    plain.unmount();
+    const { container } = render(
+      <ResultView evaluation={categorized(RESERVED, KINDS.buy)} />,
+    );
+    expect(panelOf(container).outerHTML).toBe(plainPanel);
   });
 });

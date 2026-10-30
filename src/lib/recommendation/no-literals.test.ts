@@ -85,6 +85,8 @@ describe("no thresholds as literals in engine logic (T8)", () => {
       "tier2.ts",
       // S3.2 T16: the shock annotation.
       "shock.ts",
+      // S4.1 T12: F4's classifier.
+      "classify.ts",
     ]) {
       expect(files).toContain(name);
     }
@@ -101,12 +103,15 @@ describe("no thresholds as literals in engine logic (T8)", () => {
 
   test("no RECOMMENDATION_PARAMS value is in the allowlist, so a param literal is always caught", () => {
     // S3.1 T18: TIER2_ENABLED is a boolean, never a numeric literal, so the
-    // check covers the numeric params only.
+    // check covers the numeric params only. S4.1 T12: modernEraStart is a
+    // date string, so a literal date in classify.ts is not a numeric literal;
+    // classify.test.ts moves it and checks the era boundary moves too.
     const numeric = Object.entries(RECOMMENDATION_PARAMS).filter(
       (entry): entry is [string, number] => typeof entry[1] === "number",
     );
     expect(numeric.map(([key]) => key)).not.toContain("TIER2_ENABLED");
-    expect(numeric).toHaveLength(Object.keys(RECOMMENDATION_PARAMS).length - 1);
+    expect(numeric.map(([key]) => key)).not.toContain("modernEraStart");
+    expect(numeric).toHaveLength(Object.keys(RECOMMENDATION_PARAMS).length - 2);
     for (const [key, value] of numeric) {
       if (CAUGHT_BY_BEHAVIOUR.has(key)) continue;
       expect(ALLOWED.has(value), key).toBe(false);
