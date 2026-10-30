@@ -36,6 +36,17 @@
 .mm-field--btn {
   flex: 0 0 auto;
 }
+/* The optional Set picker (UI patch 2026-10-30), at the row's 48 px. It
+   anchors its own list. */
+.mm-field--set {
+  position: relative;
+  width: 200px;
+  flex: 0 0 200px;
+  min-width: 0;
+}
+.mm-field--set .mm-selector-button.mm-set-button {
+  height: 48px;
+}
 .mm-field-label {
   font: 700 9px/1 var(--font-sans);
   letter-spacing: 0.16em;
@@ -122,29 +133,25 @@
 .mm-field--grow {
   position: relative;
 }
-.mm-combobox-options {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 20;
-  max-height: 280px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 6px;
-  list-style: none;
-  background: var(--mox-onyx);
-  border: 1px solid var(--glass-stroke-strong);
-  border-radius: var(--mox-radius-md);
-  box-shadow: var(--shadow-panel);
-}
-.mm-combobox-option {
-  padding: 10px 12px;
-  border-radius: var(--mox-radius-sm);
-  font: var(--ts-body);
-  color: var(--fg-primary);
-  cursor: pointer;
-}
-.mm-combobox-option[data-focus] {
-  background: var(--glass-fill-strong);
+
+/* ─────────── NARROW SCREENS ─────────── */
+
+/* With the Set picker the row no longer fits a phone: the card and the
+   set each take a full line, then the price and the button share one. */
+@media (max-width: 760px) {
+  .mm-form-panel {
+    padding: 20px;
+  }
+  .mm-form-row {
+    flex-wrap: wrap;
+  }
+  .mm-field--grow,
+  .mm-field--set {
+    flex: 1 1 100%;
+    width: auto;
+  }
+  .mm-field--price {
+    flex: 1 1 auto;
+    width: auto;
+  }
 }

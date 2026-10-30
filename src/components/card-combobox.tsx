@@ -15,6 +15,12 @@
 // After an ambiguous miss the form sets suggestOnFocus (S2.4 ADV-7): focusing
 // the field searches for the text already in it and opens the list, so "Pick
 // from the suggestions" has suggestions to pick from without a keystroke.
+//
+// The landing form uses it too (UI patch 2026-10-30): it passes its own
+// input and list classes (whole strings), a name, placeholder and
+// accessible name in place of a visible label. onCommit tells either form that the field settled on a name, when
+// a suggestion is picked or the field loses focus, so the Set picker can
+// look that name's printings up.
 import {
   AUTOCOMPLETE_DEBOUNCE_MS,
   AUTOCOMPLETE_MIN_CHARS,
@@ -27,6 +33,7 @@ import {
   ComboboxOptions,
 } from "@headlessui/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import "./card-combobox.css";
 
 export interface CardComboboxProps {
   readonly id: string;
@@ -38,6 +45,16 @@ export interface CardComboboxProps {
   readonly errorMessageId?: string;
   /** Search for the current text on focus and open the list (ADV-7). */
   readonly suggestOnFocus?: boolean;
+  /** The input's whole class string. */
+  readonly inputClassName?: string;
+  /** The suggestion list's whole class string. */
+  readonly optionsClassName?: string;
+  readonly name?: string;
+  readonly placeholder?: string;
+  /** The accessible name, for a form with no visible label. */
+  readonly ariaLabel?: string;
+  /** The field settled on `card`: a suggestion was picked, or it blurred. */
+  readonly onCommit?: (card: string) => void;
 }
 
 /** The route's names, or [] for anything that is not a string array. */
@@ -56,6 +73,12 @@ export function CardCombobox({
   invalid = false,
   errorMessageId,
   suggestOnFocus = false,
+  inputClassName = "mm-input",
+  optionsClassName = "mm-combobox-options",
+  name,
+  placeholder,
+  ariaLabel,
+  onCommit,
 }: CardComboboxProps) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -112,13 +135,17 @@ export function CardCombobox({
         cancel();
         setSuggestions([]);
         onChange(picked);
+        onCommit?.(picked);
       }}
     >
       {({ open, activeOption }: { open: boolean; activeOption: unknown }) => (
         <>
           <ComboboxInput
             id={id}
-            className="mm-input"
+            className={inputClassName}
+            name={name}
+            placeholder={placeholder}
+            aria-label={ariaLabel}
             autoComplete="off"
             autoFocus={autoFocus}
             maxLength={CARD_PARAM_MAX_CHARS}
@@ -134,6 +161,7 @@ export function CardCombobox({
             onFocus={() => {
               if (suggestOnFocus && suggestions.length === 0) search(value);
             }}
+            onBlur={(event) => onCommit?.(event.currentTarget.value)}
             onKeyDown={(event) => {
               // Runs before Headless UI's handler, which then closes the list
               // and cancels the browser's own submit, so the form submits once.
@@ -145,7 +173,7 @@ export function CardCombobox({
             }}
           />
           {options.length > 0 && (
-            <ComboboxOptions className="mm-combobox-options">
+            <ComboboxOptions className={optionsClassName}>
               {options.map((name, index) => (
                 <ComboboxOption
                   key={index === 0 && name === value ? ":typed" : name}

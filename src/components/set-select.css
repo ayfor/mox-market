@@ -1,0 +1,25 @@
+/* ─────────────────────────────────────────────────────────
+   Mox Market V2 — the entry forms' optional Set picker
+   (UI patch 2026-10-30). The result page's selector button, list
+   and options (selection-controls.css), at a 44 px target. The
+   wrapper and label classes come from each form, so the picker
+   sits in that form's row; the wrapper anchors the list. Two
+   classes per selector, so the order the stylesheets load in
+   never matters.
+   ───────────────────────────────────────────────────────── */
+
+.mm-selector-button.mm-set-button {
+  height: 44px;
+}
+
+/* Wide enough for a set name, code and number on one or two lines. */
+.mm-selector-options.mm-set-options {
+  min-width: max(100%, 280px);
+}
+
+/* A list that opens upward, for a picker near the bottom of a panel
+   that clips its overflow (the landing form). */
+.mm-selector-options.mm-set-options--above {
+  top: auto;
+  bottom: calc(100% + 4px);
+}

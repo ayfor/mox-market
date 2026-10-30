@@ -12,6 +12,10 @@
 // the result page's ResultField it tells the slot when the card field no
 // longer holds the URL's card (a miss message hides, S2.4 ADV-4), and after
 // an ambiguous miss the card field offers suggestions on focus (S2.4 ADV-7).
+// The optional Set picker (UI patch 2026-10-30) sits beside the card field:
+// a chosen set adds its printing to the href, and it defaults to "Any set",
+// since the result page's own Printing selector governs the shown result. A
+// selector switch resets it.
 import { FORM_LABELS } from "@/lib/copy/result-labels";
 import {
   checkEntry,
@@ -32,6 +36,12 @@ import { CardCombobox } from "./card-combobox";
 import "./entry-form.css";
 import { useResultField } from "./result-field";
 import { useResultNavigation } from "./result-navigation";
+import {
+  chosenPrinting,
+  SetSelect,
+  useCardPrintings,
+  type SetChoice,
+} from "./set-select";
 
 export interface EntryFormProps {
   readonly initialCard?: string;
@@ -81,9 +91,15 @@ export function EntryForm({
     error: initialError,
   });
   const [seenSwitches, setSeenSwitches] = useState(navigation.switches);
+  const printings = useCardPrintings();
+  const [setChoice, setSetChoice] = useState<SetChoice>({
+    card: "",
+    printing: "",
+  });
   const lastHref = useRef<string | null>(null);
   const id = useId();
   const cardId = `${id}-card`;
+  const setId = `${id}-set`;
   const priceId = `${id}-price`;
   const helperId = `${id}-helper`;
   const errorId = `${id}-error`;
@@ -126,7 +142,12 @@ export function EntryForm({
     setError(initialError);
     setCardError(false);
     setBaseline({ card: initialCard, price: initialPrice });
+    setSetChoice({ card: "", printing: "" });
   }
+
+  // "Any set" whenever the card text differs from the one the set was
+  // chosen under.
+  const printing = chosenPrinting(setChoice, card);
 
   // Never builds an href during render, so no typed text can throw here (ADV-2).
   const empty = isEntryEmpty(card, price);
@@ -140,7 +161,7 @@ export function EntryForm({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const entry = checkEntry(card, price);
+    const entry = checkEntry(card, price, printing);
     if (entry.status === "empty") return;
     if (entry.status === "bad_card") {
       setCardError(true);
@@ -177,13 +198,24 @@ export function EntryForm({
             onChange={(next) => {
               setCard(next);
               setCardError(false);
+              setSetChoice({ card: "", printing: "" });
             }}
             autoFocus={autoFocus}
             invalid={cardError}
             errorMessageId={cardErrorId}
             suggestOnFocus={miss === "ambiguous"}
+            onCommit={printings.request}
           />
         </div>
+        <SetSelect
+          id={setId}
+          card={card}
+          lookup={printings.lookup}
+          value={printing}
+          onChange={(next) => setSetChoice({ card, printing: next })}
+          className="mm-field mm-field--set"
+          labelClassName="mm-field-label"
+        />
         <div className="mm-field mm-field--price">
           <label className="mm-field-label" htmlFor={priceId}>
             {FORM_LABELS.price}

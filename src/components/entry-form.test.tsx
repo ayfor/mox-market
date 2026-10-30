@@ -276,3 +276,77 @@ describe("keyboard free text through the form (ADV-2, AC-20)", () => {
     );
   });
 });
+
+describe("the optional Set picker (UI patch 2026-10-30)", () => {
+  const MH2 = {
+    id: "f3537373-ef54-4578-9d05-6216420ee349",
+    setName: "Modern Horizons 2",
+    setCode: "MH2",
+    collectorNumber: "12",
+    label: "Modern Horizons 2 (MH2) · #12",
+  };
+  // While the card's list is open Headless UI hides the rest of the form.
+  const setButton = () =>
+    screen.getByRole("button", { name: /^Set/, hidden: true });
+  /**
+   * The printings route lists MH2; the autocomplete route suggests nothing,
+   * so no open list hides the rest of the form.
+   */
+  const routes = () =>
+    fetchMock.mockImplementation(async (url) =>
+      String(url).startsWith("/api/cards/printings")
+        ? Response.json({ data: [MH2] })
+        : Response.json({ data: [] }),
+    );
+  const chooseMh2 = async () => {
+    await vi.waitFor(() => expect(setButton()).toBeEnabled());
+    setButton().focus();
+    await act(async () => {
+      fireEvent.keyDown(setButton(), { key: "ArrowDown" });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: MH2.label }));
+    });
+  };
+
+  test("defaults to Any set, disabled, with nothing fetched; a submit adds no printing", () => {
+    render(<EntryForm initialCard="Esper Sentinel" initialPrice="74.99" />);
+    expect(setButton()).toHaveTextContent("Any set");
+    expect(setButton()).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/Esper%20Sentinel?price=74.99",
+    );
+  });
+
+  test("leaving the card field lists its sets; a chosen set adds printing= to the pushed href", async () => {
+    routes();
+    render(<EntryForm />);
+    fill("Esper Sentinel", "74.99");
+    fireEvent.blur(cardInput());
+    await chooseMh2();
+    expect(setButton()).toHaveTextContent(MH2.label);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      "/api/cards/printings?name=Esper%20Sentinel",
+    );
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      `/Esper%20Sentinel?price=74.99&printing=${MH2.id}`,
+    );
+  });
+
+  test("changing the card text resets the set to Any set", async () => {
+    routes();
+    render(<EntryForm />);
+    fill("Esper Sentinel", "74.99");
+    fireEvent.blur(cardInput());
+    await chooseMh2();
+    fireEvent.change(cardInput(), { target: { value: "Esper Charm" } });
+    expect(setButton()).toHaveTextContent("Any set");
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/Esper%20Charm?price=74.99",
+    );
+  });
+});

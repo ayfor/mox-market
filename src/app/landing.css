@@ -366,6 +366,39 @@
 .landing-form-input.price {
   flex: 0 0 110px;
 }
+
+/* UI patch (2026-10-30): the card combobox fills its own flex slot, which
+   anchors its suggestion list; the list opens upward (card-combobox.css). */
+.landing-form-card {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.landing-form-card .landing-form-input {
+  width: 100%;
+}
+
+/* The optional Set picker: the result page's selector look on the dark
+   section, 44 px tall, its visible label above it, out of the flex row so
+   the designed row never moves. */
+.landing-form {
+  align-items: center;
+}
+.landing-form-set {
+  position: relative;
+  flex: 0 0 150px;
+  min-width: 0;
+}
+.landing-form-set-label {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  font: var(--ts-label);
+  line-height: 12px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
 .landing-form-submit {
   height: 42px;
   width: 88px;
@@ -428,3 +461,18 @@
    Internal content stays in design coordinates; below ~660px width,
    internal text/layout is not pixel-perfect — TODO when V2 mobile
    spec exists. */
+
+/* On a phone the row wraps: the card takes a full line, then the set, the
+   price and the button share the next, with room for the set's label. */
+@media (max-width: 768px) {
+  .landing-form {
+    flex-wrap: wrap;
+    row-gap: 26px;
+  }
+  .landing-form-card {
+    flex: 1 1 100%;
+  }
+  .landing-form-set {
+    flex: 1 1 0;
+  }
+}

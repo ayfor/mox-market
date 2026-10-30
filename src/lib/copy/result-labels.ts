@@ -54,6 +54,18 @@ export const FORM_LABELS = Object.freeze({
   retry: "Retry",
 } as const);
 
+/**
+ * The entry forms' optional Set picker (UI patch 2026-10-30): its label, the
+ * default option (no printing chosen), and the default option's text while
+ * the card's sets load or when they could not be fetched.
+ */
+export const SET_PICKER_LABELS = Object.freeze({
+  label: "Set",
+  any: "Any set",
+  loading: "Loading sets",
+  unavailable: "Sets unavailable",
+} as const);
+
 /** The skeleton's accessible name while a recommendation loads. */
 export const LOADING_LABEL = "Loading recommendation";
 
