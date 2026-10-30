@@ -11,6 +11,10 @@ import {
   ESPER_SENTINEL_PRINTS,
   scryfallCard,
 } from "@/lib/__fixtures__/esper-sentinel-prints";
+import {
+  AUTOCOMPLETE_MAX_QUEUE_MS,
+  PRINTINGS_MAX_QUEUE_MS,
+} from "@/lib/evaluation/consts";
 import { printingLine } from "@/lib/evaluation/printing-line";
 import { selectablePrintings } from "@/lib/printings";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -108,6 +112,14 @@ describe("invalid names", () => {
     ["142 code points", `?name=${"x".repeat(142)}`],
     ["a repeated name", "?name=a&name=b"],
     ["a control character", "?name=Esp%00er"],
+    ["DEL (U+007F)", "?name=Esp%7Fer"],
+    ["NEL (U+0085)", "?name=Esp%C2%85er"],
+    ["142 emoji", `?name=${encodeURIComponent("\u{1F0A1}".repeat(142))}`],
+    ["a dot segment", "?name=.."],
+    // PS-1: only `name`, so a cache buster never reaches Scryfall.
+    ["a cache buster", "?name=Esper%20Sentinel&cb=1"],
+    ["any other parameter", "?cb=1&name=Esper%20Sentinel"],
+    ["an empty extra key", "?name=Esper%20Sentinel&="],
   ])(
     "name %s → 400 invalid_name, no-store, 0 upstream calls",
     async (_name, query) => {
@@ -118,6 +130,88 @@ describe("invalid names", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("name length counts code points (T5)", () => {
+  test.each([
+    ["141 x", "x".repeat(141), "x".repeat(141)],
+    [
+      "141 U+1F0A1 (282 UTF-16 units)",
+      encodeURIComponent("\u{1F0A1}".repeat(141)),
+      "\u{1F0A1}".repeat(141),
+    ],
+  ])("%s → accepted and sent upstream", async (_name, query, name) => {
+    fetchMock.mockResolvedValueOnce(
+      json(
+        { object: "error", code: "not_found", status: 404, details: "x" },
+        404,
+      ),
+    );
+    const res = await get(`?name=${query}`);
+    expect(res.status).toBe(404);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(name)}`,
+    );
+  });
+});
+
+describe("Scryfall priority and client aborts (PS-1)", () => {
+  test("the route's Scryfall calls wait at most PRINTINGS_MAX_QUEUE_MS and carry the request's signal", async () => {
+    vi.resetModules();
+    const throttle = vi.fn(() => Promise.resolve());
+    vi.doMock("@/lib/throttle", () => ({ throttle }));
+    try {
+      const fresh = await import("./route");
+      answerAll();
+      const controller = new AbortController();
+      const res = await fresh.GET(
+        new Request("http://localhost/api/cards/printings?name=Esper", {
+          signal: controller.signal,
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(throttle).toHaveBeenCalledTimes(3);
+      for (const [options] of throttle.mock.calls as unknown as [
+        { maxWaitMs: number },
+      ][]) {
+        expect(options.maxWaitMs).toBe(PRINTINGS_MAX_QUEUE_MS);
+      }
+      expect(PRINTINGS_MAX_QUEUE_MS).toBe(AUTOCOMPLETE_MAX_QUEUE_MS);
+    } finally {
+      vi.doUnmock("@/lib/throttle");
+      vi.resetModules();
+    }
+  });
+
+  test("a client abort mid-paging stops the paging: no further page is fetched", async () => {
+    const controller = new AbortController();
+    fetchMock
+      .mockResolvedValueOnce(json(NAMED))
+      .mockImplementationOnce(async () => {
+        controller.abort();
+        return json(ESPER_PRINTS_PAGE_1);
+      });
+    const res = await GET(
+      new Request("http://localhost/api/cards/printings?name=Esper", {
+        signal: controller.signal,
+      }),
+    );
+    expect(res.status).toBe(502);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("an already aborted client reaches no Scryfall at all", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const res = await GET(
+      new Request("http://localhost/api/cards/printings?name=Esper", {
+        signal: controller.signal,
+      }),
+    );
+    expect(res.status).toBe(502);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("misses and failures", () => {
