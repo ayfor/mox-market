@@ -12,6 +12,12 @@
 // the result page's ResultField it tells the slot when the card field no
 // longer holds the URL's card (a miss message hides, S2.4 ADV-4), and after
 // an ambiguous miss the card field offers suggestions on focus (S2.4 ADV-7).
+// The optional Set picker (UI patch 2026-10-30) sits beside the card field:
+// a chosen set adds its printing to the href. On the result page it starts
+// at the URL's printing (review UI-4), so a price-only resubmit keeps the
+// shown printing, and a selector switch moves it to the new URL printing;
+// with no printing in the URL it reads "Any set". The prefilled card's sets
+// are looked up once on mount when it is a valid name (UI-3).
 import { FORM_LABELS } from "@/lib/copy/result-labels";
 import {
   checkEntry,
@@ -32,12 +38,22 @@ import { CardCombobox } from "./card-combobox";
 import "./entry-form.css";
 import { useResultField } from "./result-field";
 import { useResultNavigation } from "./result-navigation";
+import {
+  ANY_SET,
+  chosenPrinting,
+  setChoiceFor,
+  SetSelect,
+  useCardPrintings,
+  type SetChoice,
+} from "./set-select";
 
 export interface EntryFormProps {
   readonly initialCard?: string;
   readonly initialPrice?: string;
   /** The server rejected the price or finish: show the validation string. */
   readonly initialError?: boolean;
+  /** The URL's printing (a Scryfall id), or "" for the default printing. */
+  readonly initialPrinting?: string;
   readonly autoFocus?: boolean;
 }
 
@@ -56,12 +72,14 @@ const ArrowRightIcon = (p: SVGProps<SVGSVGElement>) => (
 interface FieldValues {
   readonly card: string;
   readonly price: string;
+  readonly printing: string;
 }
 
 export function EntryForm({
   initialCard = "",
   initialPrice = "",
   initialError = false,
+  initialPrinting = "",
   autoFocus = false,
 }: EntryFormProps) {
   const navigation = useResultNavigation();
@@ -74,13 +92,21 @@ export function EntryForm({
   const [baseline, setBaseline] = useState<FieldValues>({
     card: initialCard,
     price: initialPrice,
+    printing: initialPrinting,
   });
   const [fromUrl, setFromUrl] = useState({
     card: initialCard,
     price: initialPrice,
     error: initialError,
+    printing: initialPrinting,
   });
   const [seenSwitches, setSeenSwitches] = useState(navigation.switches);
+  const printings = useCardPrintings();
+  const { request: requestPrintings } = printings;
+  const [setChoice, setSetChoice] = useState<SetChoice>(() =>
+    setChoiceFor(initialCard, initialPrinting),
+  );
+  const mountCard = useRef(initialCard);
   const lastHref = useRef<string | null>(null);
   const id = useId();
   const cardId = `${id}-card`;
@@ -96,15 +122,25 @@ export function EntryForm({
   if (
     fromUrl.card !== initialCard ||
     fromUrl.price !== initialPrice ||
-    fromUrl.error !== initialError
+    fromUrl.error !== initialError ||
+    fromUrl.printing !== initialPrinting
   ) {
-    setFromUrl({ card: initialCard, price: initialPrice, error: initialError });
+    setFromUrl({
+      card: initialCard,
+      price: initialPrice,
+      error: initialError,
+      printing: initialPrinting,
+    });
     const cardClean = card === baseline.card;
     const priceClean = price === baseline.price;
+    // The set follows the URL with the card, unless it was changed since.
+    const setClean =
+      cardClean && chosenPrinting(setChoice, card) === baseline.printing;
     if (cardClean) {
       setCard(initialCard);
       setCardError(false);
     }
+    if (setClean) setSetChoice(setChoiceFor(initialCard, initialPrinting));
     if (priceClean) {
       setPrice(initialPrice);
       setError(initialError);
@@ -112,6 +148,7 @@ export function EntryForm({
     setBaseline({
       card: cardClean ? initialCard : baseline.card,
       price: priceClean ? initialPrice : baseline.price,
+      printing: setClean ? initialPrinting : baseline.printing,
     });
   }
 
@@ -125,8 +162,24 @@ export function EntryForm({
     setPrice(initialPrice);
     setError(initialError);
     setCardError(false);
-    setBaseline({ card: initialCard, price: initialPrice });
+    setBaseline({
+      card: initialCard,
+      price: initialPrice,
+      printing: initialPrinting,
+    });
+    // The switch's printing, not "Any set", so the two never disagree (UI-4).
+    setSetChoice(setChoiceFor(initialCard, initialPrinting));
   }
+
+  // "Any set" whenever the trimmed card text differs from the one the set
+  // was chosen under.
+  const printing = chosenPrinting(setChoice, card);
+
+  // The prefilled card's sets, once (UI-3). request() sends only a name the
+  // card guard accepts, and nothing for an empty field.
+  useEffect(() => {
+    requestPrintings(mountCard.current);
+  }, [requestPrintings]);
 
   // Never builds an href during render, so no typed text can throw here (ADV-2).
   const empty = isEntryEmpty(card, price);
@@ -140,7 +193,7 @@ export function EntryForm({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const entry = checkEntry(card, price);
+    const entry = checkEntry(card, price, printing);
     if (entry.status === "empty") return;
     if (entry.status === "bad_card") {
       setCardError(true);
@@ -158,7 +211,7 @@ export function EntryForm({
     if (superseded === href) return;
     if (superseded !== null) clearSubmitMarker(superseded);
     lastHref.current = href;
-    setBaseline({ card, price });
+    setBaseline({ card, price, printing });
     // The marker first, so S5.1 finds it on the page the push lands on.
     markSubmit(href);
     navigation.navigate(href);
@@ -177,13 +230,24 @@ export function EntryForm({
             onChange={(next) => {
               setCard(next);
               setCardError(false);
+              if (next.trim() !== card.trim()) setSetChoice(ANY_SET);
             }}
             autoFocus={autoFocus}
             invalid={cardError}
             errorMessageId={cardErrorId}
             suggestOnFocus={miss === "ambiguous"}
+            onCommit={requestPrintings}
           />
         </div>
+        <SetSelect
+          card={card}
+          lookup={printings.lookup}
+          value={printing}
+          onChange={(next) => setSetChoice(setChoiceFor(card, next))}
+          onRequest={() => requestPrintings(card)}
+          className="mm-field mm-field--set"
+          labelClassName="mm-field-label"
+        />
         <div className="mm-field mm-field--price">
           <label className="mm-field-label" htmlFor={priceId}>
             {FORM_LABELS.price}

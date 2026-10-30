@@ -3,7 +3,7 @@
 // own, so the root layout's title.default applies, and its description is
 // the copy module's.
 import { LANDING_COPY } from "@/lib/copy/entry-points";
-import { FORM_LABELS } from "@/lib/copy/result-labels";
+import { FORM_LABELS, SET_PICKER_LABELS } from "@/lib/copy/result-labels";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import { render, screen } from "@testing-library/react";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
@@ -65,7 +65,7 @@ describe("the landing page (T6, AC-2, AC-10)", () => {
     const prompt = container.querySelector(".landing-prompt")!;
     expect(linesOf(prompt)).toEqual([...LANDING_COPY.prompt]);
     expect(
-      screen.getByRole("textbox", { name: FORM_LABELS.card }),
+      screen.getByRole("combobox", { name: FORM_LABELS.card }),
     ).toHaveAttribute("placeholder", LANDING_COPY.cardPlaceholder);
     expect(
       screen.getByRole("textbox", { name: FORM_LABELS.price }),
@@ -81,6 +81,8 @@ describe("the landing page (T6, AC-2, AC-10)", () => {
       LANDING_COPY.tagline,
       ["Should", "you buy", "it?"].join(""),
       LANDING_COPY.prompt.join(""),
+      SET_PICKER_LABELS.label,
+      SET_PICKER_LABELS.any,
       FORM_LABELS.submit,
       UI_COPY.submitHelper,
       "+",

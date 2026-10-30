@@ -19,6 +19,7 @@ import type {
   Evaluation,
 } from "@/lib/evaluation/build-evaluation";
 import { STALENESS_FLAG_HOURS } from "@/lib/evaluation/consts";
+import { printingLine } from "@/lib/evaluation/printing-line";
 import { shockTooltip } from "@/lib/evaluation/shock-tooltip";
 import { isHistoryStale, relativeTime } from "@/lib/evaluation/staleness";
 import { signalTiles } from "@/lib/evaluation/tiles";
@@ -36,16 +37,7 @@ const CARD_IMAGE_HEIGHT = 680;
 
 type OkEvaluation = Extract<Evaluation, { status: "ok" }>;
 
-/** "Modern Horizons 2 (MH2) · #12", one string everywhere (S2.1d13). */
-export function printingLine(
-  printing: Pick<EvaluatedPrinting, "set" | "set_name" | "collector_number">,
-): string {
-  return fillTemplate(UI_COPY.printingOption, {
-    set_name: printing.set_name,
-    SET: printing.set.toUpperCase(),
-    collector_number: printing.collector_number,
-  });
-}
+export { printingLine };
 
 /** The D2 card header's image, beside the glass panel, never under it (R3, R4). */
 function CardArt({ printing }: { printing: EvaluatedPrinting }) {

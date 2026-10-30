@@ -7,11 +7,18 @@ import { normalisePrice } from "@/lib/evaluation/result-params";
 /**
  * `/{card}?price={price}`: the card trimmed and encoded as one path segment,
  * the price normalised (`$`, whitespace and thousands commas stripped). No
- * `finish`, so the route defaults to normal. It validates nothing: callers
+ * `finish`, so the route defaults to normal. A non-empty `printing` (the Set
+ * picker's Scryfall id, UI patch 2026-10-30) adds `&printing={id}`, which
+ * the result route already reads (S2.3d2). It validates nothing: callers
  * run checkEntry first, so it never sees an empty or dot-segment card.
  */
-export function resultHref(card: string, price: string): string {
-  return `/${encodeURIComponent(card.trim())}?price=${encodeURIComponent(normalisePrice(price))}`;
+export function resultHref(
+  card: string,
+  price: string,
+  printing?: string,
+): string {
+  const href = `/${encodeURIComponent(card.trim())}?price=${encodeURIComponent(normalisePrice(price))}`;
+  return printing ? `${href}&printing=${encodeURIComponent(printing)}` : href;
 }
 
 /**

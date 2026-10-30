@@ -83,6 +83,25 @@ describe("checkEntry (T3, AC-2, AC-3)", () => {
     },
   );
 
+  test("a Set picker printing joins the href only when it is one Scryfall id (UI patch)", () => {
+    const id = "f3537373-ef54-4578-9d05-6216420ee349";
+    expect(checkEntry("Esper Sentinel", "74.99", id)).toEqual({
+      status: "ok",
+      href: `/Esper%20Sentinel?price=74.99&printing=${id}`,
+    });
+    for (const printing of [undefined, "", "not-an-id", id.toUpperCase()]) {
+      expect(checkEntry("Esper Sentinel", "74.99", printing)).toEqual({
+        status: "ok",
+        href: "/Esper%20Sentinel?price=74.99",
+      });
+    }
+    // A printing never rescues a rejected card or price.
+    expect(checkEntry("..", "5", id)).toEqual({ status: "bad_card" });
+    expect(checkEntry("Esper Sentinel", "0", id)).toEqual({
+      status: "bad_price",
+    });
+  });
+
   test("empty wins over a bad card, and a bad card over a bad price", () => {
     expect(checkEntry("..", "")).toEqual({ status: "empty" });
     expect(checkEntry("..", "74.999")).toEqual({ status: "bad_card" });

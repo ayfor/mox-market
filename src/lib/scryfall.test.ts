@@ -423,3 +423,67 @@ describe("request timeout (T4, S2.1d21)", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+describe("caller limits (review PS-1)", () => {
+  /** A fetch that never answers but rejects when its signal aborts. */
+  const hangingFetch = (_url: RequestInfo | URL, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () =>
+        reject(new DOMException("aborted", "AbortError")),
+      );
+    });
+
+  test.each([
+    [
+      "getCardByName",
+      (signal: AbortSignal) => getCardByName("Esper", false, { signal }),
+    ],
+    [
+      "getAllPrintings",
+      (signal: AbortSignal) =>
+        getAllPrintings({ prints_search_uri: ESPER_PRINTS_URI }, { signal }),
+    ],
+  ])("%s: the caller's abort aborts the in-flight fetch", async (_n, call) => {
+    fetchMock.mockImplementation(hangingFetch);
+    const controller = new AbortController();
+    const outcome = call(controller.signal).then(
+      () => "resolved",
+      (error: unknown) => (error as Error).name,
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const signal = (fetchMock.mock.calls[0][1] as RequestInit).signal!;
+    expect(signal.aborted).toBe(false);
+    controller.abort();
+    expect(signal.aborted).toBe(true);
+    await expect(outcome).resolves.toBe("AbortError");
+  });
+
+  test("an aborted caller makes no request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      getCardByName("Esper", false, { signal: controller.signal }),
+    ).rejects.toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("maxQueueMs reaches the throttle", async () => {
+    vi.resetModules();
+    const throttle = vi.fn(() => Promise.resolve());
+    vi.doMock("./throttle", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("./throttle")>()),
+      throttle,
+    }));
+    try {
+      const fresh = await import("./scryfall");
+      fetchMock.mockResolvedValueOnce(json({ object: "card" }));
+      await fresh.getCardByName("Esper", false, { maxQueueMs: 1_000 });
+      expect(throttle).toHaveBeenCalledWith(
+        expect.objectContaining({ maxWaitMs: 1_000 }),
+      );
+    } finally {
+      vi.doUnmock("./throttle");
+      vi.resetModules();
+    }
+  });
+});

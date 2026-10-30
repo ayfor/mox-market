@@ -59,7 +59,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const cardInput = () => screen.getByRole("textbox", { name: "Card" });
+const cardInput = () => screen.getByRole("combobox", { name: "Card" });
 const priceInput = () => screen.getByRole("textbox", { name: "Your price" });
 const submit = () => screen.getByRole("button", { name: "Evaluate" });
 const form = () => submit().closest("form")!;
@@ -293,5 +293,165 @@ describe("rejected input (T5, AC-2)", () => {
     expect(screen.queryByText(UI_COPY.cardNotFound)).toBeNull();
     send();
     expect(router.push).toHaveBeenCalledExactlyOnceWith("/...?price=5");
+  });
+});
+
+describe("autocomplete and the optional Set picker (UI patch 2026-10-30)", () => {
+  const MH2 = {
+    id: "f3537373-ef54-4578-9d05-6216420ee349",
+    setName: "Modern Horizons 2",
+    setCode: "MH2",
+    collectorNumber: "12",
+    label: "Modern Horizons 2 (MH2) · #12",
+  };
+  const fetchMock = vi.fn<typeof fetch>();
+  // While the card's list is open Headless UI hides the rest of the form.
+  const setButton = () =>
+    screen.getByRole("button", { name: /^Set/, hidden: true });
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (url) =>
+      String(url).startsWith("/api/cards/printings")
+        ? Response.json({ data: [MH2] })
+        : Response.json({ data: ["Esper Sentinel", "Esper Charm"] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("the card field is the combobox: typing lists suggestions that open upward", async () => {
+    render(<LandingForm />);
+    fireEvent.change(cardInput(), { target: { value: "esper" } });
+    const listbox = await screen.findByRole("listbox");
+    expect(listbox).toHaveClass(
+      "mm-combobox-options",
+      "mm-combobox-options--above",
+    );
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "esper",
+      "Esper Sentinel",
+      "Esper Charm",
+    ]);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "/api/cards/autocomplete?q=esper",
+    );
+    expect(cardInput()).toHaveClass("landing-form-input");
+  });
+
+  test("the Set picker starts aria-disabled (still focusable) at Any set with a visible label", () => {
+    render(<LandingForm />);
+    expect(screen.getByText("Set")).toBeVisible();
+    expect(setButton()).toHaveAttribute("aria-disabled", "true");
+    expect(setButton()).not.toBeDisabled();
+    expect(setButton()).toHaveTextContent("Any set");
+  });
+
+  test("picking a suggestion looks its sets up; a chosen set adds printing= to the push", async () => {
+    render(<LandingForm />);
+    fireEvent.change(priceInput(), { target: { value: "74.99" } });
+    fireEvent.change(cardInput(), { target: { value: "esper" } });
+    await screen.findByRole("listbox");
+    const suggestion = screen.getByRole("option", { name: "Esper Sentinel" });
+    await act(async () => {
+      // Headless UI selects an option on mousedown.
+      fireEvent.mouseDown(suggestion);
+      fireEvent.click(suggestion);
+    });
+    expect(cardInput()).toHaveValue("Esper Sentinel");
+    await vi.waitFor(() =>
+      expect(setButton()).not.toHaveAttribute("aria-disabled"),
+    );
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      "/api/cards/printings?name=Esper%20Sentinel",
+    );
+    setButton().focus();
+    await act(async () => {
+      fireEvent.keyDown(setButton(), { key: "ArrowDown" });
+    });
+    const list = screen.getByRole("listbox");
+    expect(list).toHaveClass("mm-set-options--above");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: MH2.label }));
+    });
+    expect(setButton()).toHaveTextContent(MH2.label);
+    send();
+    const href = `/Esper%20Sentinel?price=74.99&printing=${MH2.id}`;
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(href);
+    expect(events).toEqual([`mark ${submitMarkerKey(href)}`, `push ${href}`]);
+  });
+
+  test("changing the card text resets the set to Any set", async () => {
+    // No suggestions, so no open list hides the rest of the form.
+    fetchMock.mockImplementation(async (url) =>
+      String(url).startsWith("/api/cards/printings")
+        ? Response.json({ data: [MH2] })
+        : Response.json({ data: [] }),
+    );
+    render(<LandingForm />);
+    fill("Esper Sentinel", "74.99");
+    fireEvent.blur(cardInput());
+    await vi.waitFor(() =>
+      expect(setButton()).not.toHaveAttribute("aria-disabled"),
+    );
+    setButton().focus();
+    await act(async () => {
+      fireEvent.keyDown(setButton(), { key: "ArrowDown" });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: MH2.label }));
+    });
+    fireEvent.change(cardInput(), { target: { value: "Esper Charm" } });
+    expect(setButton()).toHaveTextContent("Any set");
+    expect(setButton()).toHaveAttribute("aria-disabled", "true");
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/Esper%20Charm?price=74.99",
+    );
+  });
+
+  test("a set chosen, the card changed and changed back: the submit has no printing (T4)", async () => {
+    fetchMock.mockImplementation(async (url) =>
+      String(url).startsWith("/api/cards/printings")
+        ? Response.json({ data: [MH2] })
+        : Response.json({ data: [] }),
+    );
+    render(<LandingForm />);
+    fill("Esper Sentinel", "74.99");
+    fireEvent.blur(cardInput());
+    await vi.waitFor(() =>
+      expect(setButton()).not.toHaveAttribute("aria-disabled"),
+    );
+    setButton().focus();
+    await act(async () => {
+      fireEvent.keyDown(setButton(), { key: "ArrowDown" });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: MH2.label }));
+    });
+    expect(setButton()).toHaveTextContent(MH2.label);
+    fireEvent.change(cardInput(), { target: { value: "Esper Charm" } });
+    fireEvent.change(cardInput(), { target: { value: "Esper Sentinel" } });
+    expect(setButton()).toHaveTextContent("Any set");
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/Esper%20Sentinel?price=74.99",
+    );
+  });
+
+  test("the form is the field and the card error its description (UI-5)", () => {
+    render(<LandingForm />);
+    fill("..", "5");
+    send();
+    const error = screen.getByText(UI_COPY.cardNotFound);
+    expect(cardInput().getAttribute("aria-describedby")?.split(" ")).toContain(
+      error.id,
+    );
+    expect(cardInput()).toHaveAccessibleDescription(UI_COPY.cardNotFound);
+    fireEvent.change(cardInput(), { target: { value: "Esper" } });
+    expect(cardInput()).not.toHaveAttribute("aria-describedby");
   });
 });

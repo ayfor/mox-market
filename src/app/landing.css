@@ -366,6 +366,39 @@
 .landing-form-input.price {
   flex: 0 0 110px;
 }
+
+/* UI patch (2026-10-30): the card combobox fills its own flex slot, which
+   anchors its suggestion list; the list opens upward (card-combobox.css). */
+.landing-form-card {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.landing-form-card .landing-form-input {
+  width: 100%;
+}
+
+/* The optional Set picker: the result page's selector look on the dark
+   section, 44 px tall, its visible label above it, out of the flex row so
+   the designed row never moves. */
+.landing-form {
+  align-items: center;
+}
+.landing-form-set {
+  position: relative;
+  flex: 0 0 150px;
+  min-width: 0;
+}
+.landing-form-set-label {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  font: var(--ts-label);
+  line-height: 12px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+}
 .landing-form-submit {
   height: 42px;
   width: 88px;
@@ -428,3 +461,60 @@
    Internal content stays in design coordinates; below ~660px width,
    internal text/layout is not pixel-perfect — TODO when V2 mobile
    spec exists. */
+
+/* Narrow screens (review UI-1). The panel keeps its 660 × 804 aspect but
+   not its scale, so the dark section under the ruby band shrinks with the
+   viewport. Up to 768 px the row wraps: the card on its own line, the Set
+   picker on its own full-width line under it (with room for its label),
+   then the price and the button. */
+@media (max-width: 768px) {
+  /* The panel's content is taller than the panel here, and focusing the
+     card field scrolled the overflow: hidden panel by about 17 px, which
+     pushed the suggestion list past its top edge. clip cannot scroll. */
+  .landing-panel {
+    overflow: clip;
+  }
+  .landing-form {
+    flex-wrap: wrap;
+    row-gap: 26px;
+  }
+  .landing-form-card,
+  .landing-form-set {
+    flex: 1 1 100%;
+  }
+  .landing-form-input.price {
+    flex: 1 1 auto;
+  }
+}
+
+/* Below 480 px three lines would climb into the ruby band, so the Set
+   picker is hidden and the form keeps main's one line; the result page's
+   form still offers it. The card field keeps at least 72 px (on main it
+   reached 0 px at 320 px wide), the price and the button giving way first.
+   The suggestion list, which opens upward, is capped to the room between
+   the field and the panel's top edge: the panel is (100vw - 32px) × 804 /
+   660 tall, the field's top sits 85 px above its bottom (measured at 320
+   and 390 px), and the list keeps its 6 px gap, with 5 px to spare. */
+@media (max-width: 480px) {
+  .landing-form {
+    flex-wrap: nowrap;
+  }
+  .landing-form-set {
+    display: none;
+  }
+  .landing-form-card {
+    flex: 1 1 0;
+    min-width: 72px;
+  }
+  .landing-form-input.price {
+    flex: 0 1 110px;
+    min-width: 64px;
+  }
+  .landing-form-submit {
+    flex: 0 1 88px;
+    min-width: 72px;
+  }
+  .landing-form .mm-combobox-options--above {
+    max-height: min(280px, calc((100vw - 32px) * 804 / 660 - 96px));
+  }
+}
