@@ -37,12 +37,12 @@
   flex: 0 0 auto;
 }
 /* The optional Set picker (UI patch 2026-10-30), at the row's 48 px. It
-   anchors its own list. */
+   anchors its own list, and gives way before the card field does: it
+   shrinks from 200 px towards 140 px (review UI-2). */
 .mm-field--set {
   position: relative;
-  width: 200px;
-  flex: 0 0 200px;
-  min-width: 0;
+  flex: 0 1 200px;
+  min-width: 140px;
 }
 .mm-field--set .mm-selector-button.mm-set-button {
   height: 48px;
@@ -136,22 +136,26 @@
 
 /* ─────────── NARROW SCREENS ─────────── */
 
-/* With the Set picker the row no longer fits a phone: the card and the
-   set each take a full line, then the price and the button share one. */
-@media (max-width: 760px) {
-  .mm-form-panel {
-    padding: 20px;
-  }
+/* With the Set picker the one-line row needs about 960 px of viewport to
+   keep the card field at 240 px or more (review UI-2), so below that the
+   row wraps: the card and the set each take a full line, then the price
+   and the button share one. */
+@media (max-width: 960px) {
   .mm-form-row {
     flex-wrap: wrap;
   }
   .mm-field--grow,
   .mm-field--set {
     flex: 1 1 100%;
-    width: auto;
   }
   .mm-field--price {
     flex: 1 1 auto;
     width: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .mm-form-panel {
+    padding: 20px;
   }
 }
