@@ -12,11 +12,15 @@
 // with the landing input's look and its list opening upward, since the
 // panel clips anything below the form; and the optional Set picker sits
 // beside it. A chosen set adds its printing to the href; changing the card
-// text resets it to "Any set".
+// text resets it to "Any set". The form is a Headless UI Field and the card
+// error its Description, so the combobox names the error in its
+// aria-describedby, which Headless UI sets itself (review UI-5).
 import { CardCombobox } from "@/components/card-combobox";
 import { useResultNavigation } from "@/components/result-navigation";
 import {
+  ANY_SET,
   chosenPrinting,
+  setChoiceFor,
   SetSelect,
   useCardPrintings,
   type SetChoice,
@@ -30,6 +34,7 @@ import {
   markSubmit,
 } from "@/lib/entry-submit";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
+import { Description, Field } from "@headlessui/react";
 import { useId, useRef, useState, type FormEvent } from "react";
 
 export function LandingForm() {
@@ -39,14 +44,10 @@ export function LandingForm() {
   const [cardError, setCardError] = useState(false);
   const [priceError, setPriceError] = useState(false);
   const printings = useCardPrintings();
-  const [setChoice, setSetChoice] = useState<SetChoice>({
-    card: "",
-    printing: "",
-  });
+  const [setChoice, setSetChoice] = useState<SetChoice>(ANY_SET);
   const lastHref = useRef<string | null>(null);
   const id = useId();
   const cardId = `${id}-card`;
-  const setId = `${id}-set`;
   const helperId = `${id}-helper`;
   const cardErrorId = `${id}-card-error`;
   const priceErrorId = `${id}-price-error`;
@@ -81,7 +82,7 @@ export function LandingForm() {
   };
 
   return (
-    <form className="landing-form" onSubmit={submit} noValidate>
+    <Field as="form" className="landing-form" onSubmit={submit} noValidate>
       <div className="landing-form-card">
         <CardCombobox
           id={cardId}
@@ -96,17 +97,17 @@ export function LandingForm() {
           onChange={(next) => {
             setCard(next);
             setCardError(false);
-            setSetChoice({ card: "", printing: "" });
+            if (next.trim() !== card.trim()) setSetChoice(ANY_SET);
           }}
           onCommit={printings.request}
         />
       </div>
       <SetSelect
-        id={setId}
         card={card}
         lookup={printings.lookup}
         value={printing}
-        onChange={(next) => setSetChoice({ card, printing: next })}
+        onChange={(next) => setSetChoice(setChoiceFor(card, next))}
+        onRequest={() => printings.request(card)}
         className="landing-form-set"
         labelClassName="landing-form-set-label"
         optionsClassName="mm-selector-options mm-set-options mm-set-options--above"
@@ -138,9 +139,14 @@ export function LandingForm() {
       </button>
       <div className="landing-form-messages">
         {cardError && (
-          <p className="landing-form-error" id={cardErrorId} role="alert">
+          <Description
+            as="p"
+            className="landing-form-error"
+            id={cardErrorId}
+            role="alert"
+          >
             {UI_COPY.cardNotFound}
-          </p>
+          </Description>
         )}
         {priceError && (
           <p className="landing-form-error" id={priceErrorId} role="alert">
@@ -153,6 +159,6 @@ export function LandingForm() {
           </p>
         )}
       </div>
-    </form>
+    </Field>
   );
 }

@@ -285,9 +285,9 @@ describe("the optional Set picker (UI patch 2026-10-30)", () => {
     collectorNumber: "12",
     label: "Modern Horizons 2 (MH2) · #12",
   };
-  // While the card's list is open Headless UI hides the rest of the form.
-  const setButton = () =>
-    screen.getByRole("button", { name: /^Set/, hidden: true });
+  const setButton = () => screen.getByRole("button", { name: /^Set/ });
+  const enabled = () =>
+    vi.waitFor(() => expect(setButton()).not.toHaveAttribute("aria-disabled"));
   /**
    * The printings route lists MH2; the autocomplete route suggests nothing,
    * so no open list hides the rest of the form.
@@ -298,8 +298,12 @@ describe("the optional Set picker (UI patch 2026-10-30)", () => {
         ? Response.json({ data: [MH2] })
         : Response.json({ data: [] }),
     );
+  const printingsCalls = () =>
+    fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.startsWith("/api/cards/printings"));
   const chooseMh2 = async () => {
-    await vi.waitFor(() => expect(setButton()).toBeEnabled());
+    await enabled();
     setButton().focus();
     await act(async () => {
       fireEvent.keyDown(setButton(), { key: "ArrowDown" });
@@ -309,14 +313,74 @@ describe("the optional Set picker (UI patch 2026-10-30)", () => {
     });
   };
 
-  test("defaults to Any set, disabled, with nothing fetched; a submit adds no printing", () => {
-    render(<EntryForm initialCard="Esper Sentinel" initialPrice="74.99" />);
+  test("with no card: Any set, aria-disabled but focusable, nothing fetched", async () => {
+    render(<EntryForm />);
     expect(setButton()).toHaveTextContent("Any set");
-    expect(setButton()).toBeDisabled();
+    expect(setButton()).toHaveAttribute("aria-disabled", "true");
+    expect(setButton()).not.toBeDisabled();
+    await new Promise((resolve) => setTimeout(resolve, 200));
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("the prefilled card's sets are looked up once on mount (UI-3); a submit with Any set adds no printing", async () => {
+    routes();
+    render(<EntryForm initialCard="Esper Sentinel" initialPrice="74.99" />);
+    await enabled();
+    expect(printingsCalls()).toEqual([
+      "/api/cards/printings?name=Esper%20Sentinel",
+    ]);
+    expect(setButton()).toHaveTextContent("Any set");
     send();
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       "/Esper%20Sentinel?price=74.99",
+    );
+  });
+
+  test.each(["Esper\uD800", "..", "   "])(
+    "a prefilled card the guard rejects (%j) is never looked up",
+    async (initialCard) => {
+      routes();
+      render(<EntryForm initialCard={initialCard} initialPrice="1" />);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(printingsCalls()).toEqual([]);
+    },
+  );
+
+  test("the URL's printing seeds the set (UI-4): it shows once the sets load, and a price-only resubmit keeps it", async () => {
+    routes();
+    render(
+      <EntryForm
+        initialCard="Esper Sentinel"
+        initialPrice="74.99"
+        initialPrinting={MH2.id}
+      />,
+    );
+    await enabled();
+    expect(setButton()).toHaveTextContent(MH2.label);
+    fireEvent.change(priceInput(), { target: { value: "70" } });
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      `/Esper%20Sentinel?price=70&printing=${MH2.id}`,
+    );
+  });
+
+  test("a navigation that lands takes the new URL printing into an unedited set (UI-4)", async () => {
+    routes();
+    const { rerender } = render(
+      <EntryForm initialCard="Esper Sentinel" initialPrice="74.99" />,
+    );
+    rerender(
+      <EntryForm
+        initialCard="Esper Sentinel"
+        initialPrice="74.99"
+        initialPrinting={MH2.id}
+      />,
+    );
+    await enabled();
+    expect(setButton()).toHaveTextContent(MH2.label);
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      `/Esper%20Sentinel?price=74.99&printing=${MH2.id}`,
     );
   });
 
@@ -327,13 +391,25 @@ describe("the optional Set picker (UI patch 2026-10-30)", () => {
     fireEvent.blur(cardInput());
     await chooseMh2();
     expect(setButton()).toHaveTextContent(MH2.label);
-    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+    expect(printingsCalls()).toEqual([
       "/api/cards/printings?name=Esper%20Sentinel",
-    );
+    ]);
     send();
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       `/Esper%20Sentinel?price=74.99&printing=${MH2.id}`,
     );
+  });
+
+  test("Tab from the card field reaches the set picker while it loads (UI-3)", async () => {
+    routes();
+    render(<EntryForm />);
+    fill("Esper Sentinel", "74.99");
+    // Focus moves on; the picker is focusable before its sets arrive.
+    fireEvent.blur(cardInput());
+    setButton().focus();
+    expect(setButton()).toHaveFocus();
+    expect(setButton()).toHaveTextContent("Loading sets");
+    await enabled();
   });
 
   test("changing the card text resets the set to Any set", async () => {
@@ -347,6 +423,35 @@ describe("the optional Set picker (UI patch 2026-10-30)", () => {
     send();
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       "/Esper%20Charm?price=74.99",
+    );
+  });
+
+  test("a set chosen, the card changed and changed back: the submit has no printing (T4)", async () => {
+    routes();
+    render(<EntryForm />);
+    fill("Esper Sentinel", "74.99");
+    fireEvent.blur(cardInput());
+    await chooseMh2();
+    fireEvent.change(cardInput(), { target: { value: "Esper Charm" } });
+    fireEvent.change(cardInput(), { target: { value: "Esper Sentinel" } });
+    expect(setButton()).toHaveTextContent("Any set");
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/Esper%20Sentinel?price=74.99",
+    );
+  });
+
+  test("a trailing space typed after choosing keeps the set (UI-8)", async () => {
+    routes();
+    render(<EntryForm />);
+    fill("Esper Sentinel", "74.99");
+    fireEvent.blur(cardInput());
+    await chooseMh2();
+    fireEvent.change(cardInput(), { target: { value: "Esper Sentinel " } });
+    expect(setButton()).toHaveTextContent(MH2.label);
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      `/Esper%20Sentinel?price=74.99&printing=${MH2.id}`,
     );
   });
 });

@@ -111,15 +111,21 @@ function Page({
   controls,
   error = false,
   panel = error ? "error" : "controls",
+  initialPrinting,
 }: {
   paramsKey: string;
   controls: SelectionControlsProps;
   error?: boolean;
   panel?: "controls" | "error" | "none";
+  initialPrinting?: string;
 }) {
   return (
     <ResultNavigationProvider>
-      <EntryForm initialCard="Esper Sentinel" initialPrice="74.99" />
+      <EntryForm
+        initialCard="Esper Sentinel"
+        initialPrice="74.99"
+        initialPrinting={initialPrinting}
+      />
       <ResultSlot>
         <Suspense key={paramsKey} fallback={<PanelSkeleton />}>
           {panel === "error" ? (
@@ -461,5 +467,59 @@ describe("unsubmitted form edits on a switch (ADV-6, S2.3d13)", () => {
     rerender(<Page paramsKey="b" controls={shown(MH2_12_ID, "foil")} />);
     await nav.settle();
     expect(priceField()).toHaveValue("80");
+  });
+});
+
+describe("the form's Set picker follows the URL's printing (UI patch review UI-4)", () => {
+  const priceField = () => screen.getByRole("textbox", { name: "Your price" });
+  const setButton = () => screen.getByRole("button", { name: /^Set/ });
+  const send = () => fireEvent.submit(priceField().closest("form")!);
+
+  beforeEach(() => {
+    // The Set picker's mount lookup: the route answers no printings here.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ data: [] })),
+    );
+    return () => vi.unstubAllGlobals();
+  });
+
+  test("a printing switch moves the set to the new URL printing, never to Any set, so a price-only resubmit keeps the shown printing", async () => {
+    const nav = pendingNavigation();
+    router.push.mockImplementation(() => nav.promise);
+    const { rerender } = render(
+      <Page
+        paramsKey="a"
+        controls={shown(MH2_12_ID, "normal")}
+        initialPrinting={MH2_12_ID}
+      />,
+    );
+    await choose(printingButton(), "Modern Horizons 2 (MH2) · #328");
+    url.search = `price=74.99&finish=normal&printing=${MH2_328_ID}`;
+    rerender(
+      <Page
+        paramsKey="b"
+        controls={shown(MH2_328_ID, "normal")}
+        initialPrinting={MH2_328_ID}
+      />,
+    );
+    await nav.settle();
+    router.push.mockReset();
+    fireEvent.change(priceField(), { target: { value: "70" } });
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      `/Esper%20Sentinel?price=70&printing=${MH2_328_ID}`,
+    );
+    expect(setButton()).toBeInTheDocument();
+  });
+
+  test("with no printing in the URL the set reads Any set and a resubmit adds none", async () => {
+    render(<Page paramsKey="a" controls={shown(MH2_12_ID, "normal")} />);
+    await vi.waitFor(() => expect(setButton()).toHaveTextContent("Any set"));
+    fireEvent.change(priceField(), { target: { value: "70" } });
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/Esper%20Sentinel?price=70",
+    );
   });
 });

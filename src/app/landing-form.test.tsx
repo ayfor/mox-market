@@ -273,8 +273,7 @@ describe("rejected input (T5, AC-2)", () => {
     const error = screen.getByText(UI_COPY.cardNotFound);
     expect(error).toHaveAttribute("role", "alert");
     expect(cardInput()).toHaveAttribute("aria-invalid", "true");
-    // The combobox names its error the entry form's way (UI patch).
-    expect(cardInput()).toHaveAttribute("aria-errormessage", error.id);
+    expect(cardInput()).toHaveAccessibleDescription(UI_COPY.cardNotFound);
     expect(router.push).not.toHaveBeenCalled();
     expect(events).toEqual([]);
   });
@@ -343,10 +342,11 @@ describe("autocomplete and the optional Set picker (UI patch 2026-10-30)", () =>
     expect(cardInput()).toHaveClass("landing-form-input");
   });
 
-  test("the Set picker starts disabled at Any set with a visible label", () => {
+  test("the Set picker starts aria-disabled (still focusable) at Any set with a visible label", () => {
     render(<LandingForm />);
     expect(screen.getByText("Set")).toBeVisible();
-    expect(setButton()).toBeDisabled();
+    expect(setButton()).toHaveAttribute("aria-disabled", "true");
+    expect(setButton()).not.toBeDisabled();
     expect(setButton()).toHaveTextContent("Any set");
   });
 
@@ -362,7 +362,9 @@ describe("autocomplete and the optional Set picker (UI patch 2026-10-30)", () =>
       fireEvent.click(suggestion);
     });
     expect(cardInput()).toHaveValue("Esper Sentinel");
-    await vi.waitFor(() => expect(setButton()).toBeEnabled());
+    await vi.waitFor(() =>
+      expect(setButton()).not.toHaveAttribute("aria-disabled"),
+    );
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
       "/api/cards/printings?name=Esper%20Sentinel",
     );
@@ -392,7 +394,9 @@ describe("autocomplete and the optional Set picker (UI patch 2026-10-30)", () =>
     render(<LandingForm />);
     fill("Esper Sentinel", "74.99");
     fireEvent.blur(cardInput());
-    await vi.waitFor(() => expect(setButton()).toBeEnabled());
+    await vi.waitFor(() =>
+      expect(setButton()).not.toHaveAttribute("aria-disabled"),
+    );
     setButton().focus();
     await act(async () => {
       fireEvent.keyDown(setButton(), { key: "ArrowDown" });
@@ -402,10 +406,52 @@ describe("autocomplete and the optional Set picker (UI patch 2026-10-30)", () =>
     });
     fireEvent.change(cardInput(), { target: { value: "Esper Charm" } });
     expect(setButton()).toHaveTextContent("Any set");
-    expect(setButton()).toBeDisabled();
+    expect(setButton()).toHaveAttribute("aria-disabled", "true");
     send();
     expect(router.push).toHaveBeenCalledExactlyOnceWith(
       "/Esper%20Charm?price=74.99",
     );
+  });
+
+  test("a set chosen, the card changed and changed back: the submit has no printing (T4)", async () => {
+    fetchMock.mockImplementation(async (url) =>
+      String(url).startsWith("/api/cards/printings")
+        ? Response.json({ data: [MH2] })
+        : Response.json({ data: [] }),
+    );
+    render(<LandingForm />);
+    fill("Esper Sentinel", "74.99");
+    fireEvent.blur(cardInput());
+    await vi.waitFor(() =>
+      expect(setButton()).not.toHaveAttribute("aria-disabled"),
+    );
+    setButton().focus();
+    await act(async () => {
+      fireEvent.keyDown(setButton(), { key: "ArrowDown" });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: MH2.label }));
+    });
+    expect(setButton()).toHaveTextContent(MH2.label);
+    fireEvent.change(cardInput(), { target: { value: "Esper Charm" } });
+    fireEvent.change(cardInput(), { target: { value: "Esper Sentinel" } });
+    expect(setButton()).toHaveTextContent("Any set");
+    send();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith(
+      "/Esper%20Sentinel?price=74.99",
+    );
+  });
+
+  test("the form is the field and the card error its description (UI-5)", () => {
+    render(<LandingForm />);
+    fill("..", "5");
+    send();
+    const error = screen.getByText(UI_COPY.cardNotFound);
+    expect(cardInput().getAttribute("aria-describedby")?.split(" ")).toContain(
+      error.id,
+    );
+    expect(cardInput()).toHaveAccessibleDescription(UI_COPY.cardNotFound);
+    fireEvent.change(cardInput(), { target: { value: "Esper" } });
+    expect(cardInput()).not.toHaveAttribute("aria-describedby");
   });
 });

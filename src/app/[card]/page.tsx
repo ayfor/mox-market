@@ -61,6 +61,9 @@ export default async function ResultPage({
               initialCard={parsed.card}
               initialPrice={shownPrice(parsed)}
               initialError={parsed.kind === "form" && parsed.error}
+              initialPrinting={
+                parsed.kind === "ok" ? (parsed.printing ?? "") : ""
+              }
             />
             {parsed.kind === "ok" && (
               <ResultSlot>
