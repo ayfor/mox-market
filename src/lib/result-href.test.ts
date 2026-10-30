@@ -58,6 +58,44 @@ describe("resultHref (T1, AC-1)", () => {
     },
   );
 
+  test("an optional printing adds &printing= after the price; empty or absent adds nothing (UI patch)", () => {
+    const id = "f3537373-ef54-4578-9d05-6216420ee349";
+    expect(resultHref("Esper Sentinel", "$74.99", id)).toBe(
+      `/Esper%20Sentinel?price=74.99&printing=${id}`,
+    );
+    expect(resultHref("Esper Sentinel", "74.99", "")).toBe(
+      "/Esper%20Sentinel?price=74.99",
+    );
+    expect(resultHref("Esper Sentinel", "74.99", undefined)).toBe(
+      "/Esper%20Sentinel?price=74.99",
+    );
+    // Encoded as one query value, so it never adds a parameter of its own.
+    const url = new URL(
+      resultHref("Fire // Ice", "1", "a&b=c"),
+      "https://x.test",
+    );
+    expect([...url.searchParams.keys()]).toEqual(["price", "printing"]);
+    expect(url.searchParams.get("printing")).toBe("a&b=c");
+  });
+
+  test("a printing href round-trips through parseResultParams to that printing", () => {
+    const id = "f3537373-ef54-4578-9d05-6216420ee349";
+    const url = new URL(
+      resultHref("Esper Sentinel", "74.99", id),
+      "https://x.test",
+    );
+    const parsed = parseResultParams(url.pathname.slice(1), {
+      price: url.searchParams.get("price") ?? undefined,
+      printing: url.searchParams.get("printing") ?? undefined,
+    });
+    expect(parsed).toMatchObject({
+      kind: "ok",
+      card: "Esper Sentinel",
+      askingPriceCents: 7499,
+      printing: id,
+    });
+  });
+
   test('DEMO_RESULT_HREF equals resultHref("Esper Sentinel", "74.99") (AC-11)', () => {
     expect(DEMO_RESULT_HREF).toBe("/Esper%20Sentinel?price=74.99");
     expect(DEMO_RESULT_HREF).toBe(resultHref("Esper Sentinel", "74.99"));

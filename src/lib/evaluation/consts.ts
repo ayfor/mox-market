@@ -23,6 +23,15 @@ export const AUTOCOMPLETE_DEBOUNCE_MS = 150;
 /** The autocomplete route's CDN cache lifetime, one day (C1.30). */
 export const AUTOCOMPLETE_CACHE_SECONDS = 86_400;
 
+/**
+ * The printings route's CDN cache lifetime, one hour: shorter than
+ * autocomplete's, since a new set adds printings on its release day.
+ */
+export const PRINTINGS_CACHE_SECONDS = 3_600;
+
+/** The Set picker waits this long after a pick or blur before it fetches. */
+export const PRINTINGS_LOOKUP_DEBOUNCE_MS = 150;
+
 /** Each Scryfall request aborts after this long, queue wait included (S2.1d21, ADV-1). */
 export const SCRYFALL_TIMEOUT_MS = 8_000;
 

@@ -7,6 +7,7 @@ import {
   parsePriceCents,
 } from "@/lib/evaluation/result-params";
 import { resultHref } from "./result-href";
+import { isScryfallId } from "./scryfall-id";
 
 /** What a submit with these field values does. */
 export type EntryCheck =
@@ -50,16 +51,23 @@ export function isEntryEmpty(card: string, price: string): boolean {
  * The outcome of submitting `card` and `price`, checked in the order the
  * forms show it: empty, then the card guard, then the price. Never throws:
  * the card guard rejects a lone surrogate before resultHref encodes it
- * (S2.4 ADV-2).
+ * (S2.4 ADV-2). An optional `printing` from the Set picker joins the href
+ * only when it is one Scryfall id; anything else is dropped, so the result
+ * page picks its default printing.
  */
-export function checkEntry(card: string, price: string): EntryCheck {
+export function checkEntry(
+  card: string,
+  price: string,
+  printing?: string,
+): EntryCheck {
   if (isEntryEmpty(card, price)) return { status: "empty" };
   const parsed = parseCardParam(card);
   if (parsed === null || RESERVED_TOP_LEVEL_SEGMENTS.includes(parsed)) {
     return { status: "bad_card" };
   }
   if (parsePriceCents(price) === null) return { status: "bad_price" };
-  return { status: "ok", href: resultHref(card, price) };
+  const set = isScryfallId(printing) ? printing : undefined;
+  return { status: "ok", href: resultHref(card, price, set) };
 }
 
 /** The sessionStorage key prefix of the submit marker (C2-B.10). */
