@@ -15,7 +15,8 @@ export const CATEGORY_CHIPS = Object.freeze({
   }),
   recent: Object.freeze({
     label: "Recent print (<6mo)",
-    tooltip: "This printing was released in the last 183 days",
+    tooltip:
+      "This printing was released in the last 183 days or is not yet released",
   }),
   modernEra: Object.freeze({
     label: "Modern-era print",

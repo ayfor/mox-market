@@ -1,9 +1,12 @@
 /* F4's chip row near the card identity (S4.1d11): informational chips in the
    confidence chip's neutral treatment (tokens only, no literal colour). The
    tooltip is the title attribute plus this bubble on hover and keyboard
-   focus, so no client JavaScript is added (S3.2d9's pattern). */
+   focus, so no client JavaScript is added (S3.2d9's pattern).
+   The row stacks above .mm-selector-row (z-index 2 in result.css), so the
+   bubble paints over the PRINTING and FINISH controls below it (ADV UB-1). */
 .mm-category-chips {
   position: relative;
+  z-index: 3;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

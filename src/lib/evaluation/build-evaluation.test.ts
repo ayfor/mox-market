@@ -1412,17 +1412,55 @@ describe("production safety: missing fields render cleanly (S4.1 T6; S4.1d4)", (
     expect(log).not.toHaveBeenCalled();
   });
 
+  // ADV TC-1: each row pins the field it attacks at its default, the whole
+  // category against classify on the printing as fetched (so a coercion in
+  // buildEvaluation before classify fails), and which printing was priced.
   test.each([
-    ["legalities null", { legalities: null }],
-    ["legalities an array", { legalities: [] }],
-    ["legalities a string", { legalities: "legal" }],
-    ["reserved a string", { reserved: "true" }],
-    ["digital a number on the named fallback", { digital: 1 }],
-    ["edhrec_rank a string", { edhrec_rank: "12" }],
-    ["released_at not a date", { released_at: "2026-02-30" }],
-  ])(
-    "hostile %s on every card: ok, never the error panel",
-    async (_label, fields) => {
+    [
+      "legalities null",
+      { legalities: null },
+      { formatProfile: "casual" },
+      "default",
+    ],
+    [
+      "legalities an array",
+      { legalities: [] },
+      { formatProfile: "casual" },
+      "default",
+    ],
+    [
+      "legalities a string",
+      { legalities: "legal" },
+      { formatProfile: "casual" },
+      "default",
+    ],
+    [
+      "reserved a string",
+      { reserved: "true" },
+      { reservedList: false },
+      "default",
+    ],
+    [
+      "digital a number on the named fallback",
+      { digital: 1 },
+      { digital: false },
+      NAMED.id,
+    ],
+    [
+      "edhrec_rank a string",
+      { edhrec_rank: "12" },
+      { popularity: "unranked" },
+      "default",
+    ],
+    [
+      "released_at not a date",
+      { released_at: "2026-02-30" },
+      { age: "unknown" },
+      "default",
+    ],
+  ] as const)(
+    "hostile %s on every card: ok, never the error panel, and the field at its default",
+    async (_label, fields, atDefault, pricedId) => {
       const hostile = (card: ScryfallCard) =>
         ({ ...card, ...fields }) as unknown as ScryfallCard;
       const { deps, log } = depsWith({
@@ -1430,7 +1468,20 @@ describe("production safety: missing fields render cleanly (S4.1 T6; S4.1d4)", (
         getAllPrintings: async () => ESPER_SENTINEL_PRINTS.map(hostile),
       });
       const result = ok(await buildEvaluation(query(7499), deps));
-      expect(result.recommendation.signals.category).not.toBeNull();
+      const clean = ok(await buildEvaluation(query(7499), depsWith({}).deps));
+      expect(clean.printing.id).not.toBe(NAMED.id);
+      expect(result.printing.id).toBe(
+        pricedId === "default" ? clean.printing.id : pricedId,
+      );
+      const category = result.recommendation.signals.category;
+      expect(category).toMatchObject(atDefault);
+      for (const [field, value] of Object.entries(atDefault)) {
+        expect(value).toBe(
+          DEFAULT_CARD_CATEGORY[field as keyof typeof DEFAULT_CARD_CATEGORY],
+        );
+      }
+      expect(category).toStrictEqual(classify(result.printing, AS_OF));
+      expect(result.tiers.tier1.signals.category).toBe(category);
       expect(log).not.toHaveBeenCalled();
     },
   );

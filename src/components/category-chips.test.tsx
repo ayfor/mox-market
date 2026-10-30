@@ -192,6 +192,19 @@ const SOURCE = readFileSync(
   path.join(ROOT, "src/components/category-chips.tsx"),
   "utf8",
 );
+// Read only: result.css is the parallel lane's file (S4.1d15); these tests
+// tie the chips to its confidence chip and selector row without editing it.
+const RESULT_CSS = readFileSync(
+  path.join(ROOT, "src/app/[card]/result.css"),
+  "utf8",
+);
+/** One top-level rule's declarations, by exact selector. */
+const topLevel = (css: string, selector: string) =>
+  extractRules(css).find(
+    (r) => r.atRules.length === 0 && r.selector === selector,
+  )?.declarations ?? [];
+const declared = (css: string, selector: string, property: string) =>
+  topLevel(css, selector).find((d) => d.property === property)?.value;
 const LITERAL_COLOUR =
   /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(|\b(?:white|black|red|green|blue|gray|grey|transparent|currentcolor)\b/i;
 
@@ -228,19 +241,67 @@ describe("category-chips.css (T13; F4 UI)", () => {
     }
   });
 
-  test("chips reuse the confidence chip's neutral treatment", () => {
-    const chip = extractRules(CSS).find(
-      (r) => r.atRules.length === 0 && r.selector === ".mm-category-chip",
+  test("chips reuse the confidence chip's neutral treatment, read from result.css (ADV TC-2)", () => {
+    // Every shared property equals .mm-rec-chip's value, so the two cannot
+    // drift. text-transform is left out on purpose (Deviation 5): labels read
+    // as F4 words them, not upper-cased.
+    const SHARED = [
+      "display",
+      "align-items",
+      "height",
+      "padding",
+      "border-radius",
+      "border",
+      "font",
+      "letter-spacing",
+      "color",
+    ];
+    for (const property of SHARED) {
+      const confidence = declared(RESULT_CSS, ".mm-rec-chip", property);
+      expect(confidence, `.mm-rec-chip { ${property} }`).toBeDefined();
+      expect(
+        declared(CSS, ".mm-category-chip", property),
+        `.mm-category-chip { ${property} }`,
+      ).toBe(confidence);
+    }
+    expect(declared(RESULT_CSS, ".mm-rec-chip", "text-transform")).toBe(
+      "uppercase",
     );
-    expect(chip?.declarations).toEqual(
-      expect.arrayContaining([
-        { property: "height", value: "28px" },
-        { property: "border-radius", value: "999px" },
-        { property: "border", value: "1px solid var(--glass-stroke-strong)" },
-        { property: "font", value: "var(--ts-label)" },
-        { property: "color", value: "var(--fg-secondary)" },
-      ]),
+    expect(
+      declared(CSS, ".mm-category-chip", "text-transform"),
+    ).toBeUndefined();
+  });
+
+  test("the chip row, and so its bubble, paints above the selector row (ADV UB-1)", () => {
+    // The bubble opens 8 px below a chip, over the PRINTING and FINISH
+    // controls that follow the heading. .mm-selector-row is positioned with a
+    // z-index, and .mm-card-heading makes no stacking context, so the row must
+    // be positioned with a higher z-index or the controls paint over the
+    // bubble. Above the row also means above an open option list, which
+    // stacks inside .mm-selector-row's context.
+    const selectorZ = Number(
+      declared(RESULT_CSS, ".mm-selector-row", "z-index"),
     );
+    expect(Number.isInteger(selectorZ)).toBe(true);
+    expect(declared(CSS, ".mm-category-chips", "position")).toBe("relative");
+    const rowZ = Number(declared(CSS, ".mm-category-chips", "z-index"));
+    expect(Number.isInteger(rowZ)).toBe(true);
+    expect(rowZ).toBeGreaterThan(selectorZ);
+    for (const property of [
+      "position",
+      "z-index",
+      "transform",
+      "opacity",
+      "filter",
+      "isolation",
+      "backdrop-filter",
+      "contain",
+    ]) {
+      expect(
+        declared(RESULT_CSS, ".mm-card-heading", property),
+        `.mm-card-heading { ${property} } would trap the row's z-index`,
+      ).toBeUndefined();
+    }
   });
 
   test("the bubble shows on hover and on keyboard focus", () => {

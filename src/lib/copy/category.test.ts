@@ -4,6 +4,8 @@
 // RECOMMENDATION_PARAMS field: a param change fails until the copy is
 // re-ruled (as S3.2 tied "last 7 days" to shockWindowDays). copy-lock and the
 // forbidden-phrase lint cover this module through their src/lib/copy globs.
+import { classify } from "@/lib/recommendation/classify";
+import { classifyFixtureNamed } from "@/lib/recommendation/fixtures";
 import { RECOMMENDATION_PARAMS } from "@/lib/recommendation/params";
 import { describe, expect, test } from "vitest";
 import { CATEGORY_CHIPS } from "./category";
@@ -17,7 +19,8 @@ describe("CATEGORY_CHIPS (T10)", () => {
       },
       recent: {
         label: "Recent print (<6mo)",
-        tooltip: "This printing was released in the last 183 days",
+        tooltip:
+          "This printing was released in the last 183 days or is not yet released",
       },
       modernEra: {
         label: "Modern-era print",
@@ -127,5 +130,20 @@ describe("the numbers in the copy follow the params (T10; S4.1d10)", () => {
       `above ${edhrecTop2Rank}`,
     );
     expect(CATEGORY_CHIPS.longtail.label).toContain(`${edhrecTop2Rank}`);
+  });
+});
+
+describe("the recent tooltip is true for every printing the classifier calls recent (ADV UB-2, SPEC-1)", () => {
+  test("F4 sends a future-dated (preview) printing to recent, so the tooltip covers one not yet released", () => {
+    // F4 Functionality: "A future-dated released_at (preview) → recent, with
+    // age clamped at 0". CL-PREVIEW is released 35 days after asOf.
+    const asOf = "2026-10-10";
+    const preview = classifyFixtureNamed("CL-PREVIEW").card;
+    expect(String(preview.released_at) > asOf).toBe(true);
+    expect(classify(preview, asOf).age).toBe("recent");
+    expect(CATEGORY_CHIPS.recent.tooltip).toContain("not yet released");
+    expect(CATEGORY_CHIPS.recent.tooltip).toContain(
+      `the last ${RECOMMENDATION_PARAMS.recentPrintingDays} days`,
+    );
   });
 });

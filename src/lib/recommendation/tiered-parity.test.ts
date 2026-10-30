@@ -25,6 +25,7 @@
 // classification fixture.
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { describe, expect, test } from "vitest";
 import { withCategory } from "./classify";
 import {
@@ -43,11 +44,12 @@ import {
   TIER2_FIXTURES,
 } from "./fixtures";
 import { RECOMMENDATION_PARAMS } from "./params";
-import type {
-  MarketSnapshot,
-  Recommendation,
-  RecommendationInput,
-  TieredRecommendation,
+import {
+  DEFAULT_CARD_CATEGORY,
+  type MarketSnapshot,
+  type Recommendation,
+  type RecommendationInput,
+  type TieredRecommendation,
 } from "./types";
 
 const RECORDING = "./__snapshots__/tiered-parity.s1.2.json";
@@ -374,7 +376,19 @@ describe("classification changes nothing else (S4.1 T7; S4.1d6, S4.1d7)", () => 
   );
 
   test("the classify fixtures hold nine non-default categories and the default", () => {
+    // ADV TC-3: the claim itself, so the withCategory loop below runs over
+    // ten distinct categories, exactly one of them the default.
     expect(CLASSIFY_FIXTURES).toHaveLength(10);
+    const isDefault = CLASSIFY_FIXTURES.map(({ expected }) =>
+      isDeepStrictEqual(expected, DEFAULT_CARD_CATEGORY),
+    );
+    expect(isDefault.filter(Boolean)).toHaveLength(1);
+    const distinct = new Set(
+      CLASSIFY_FIXTURES.map(({ expected }) =>
+        JSON.stringify(expected, Object.keys(DEFAULT_CARD_CATEGORY)),
+      ),
+    );
+    expect(distinct.size).toBe(10);
   });
 
   test.each(FULL_MATRIX.map((c) => [c.name, c] as const))(
