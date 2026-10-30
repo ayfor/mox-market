@@ -126,6 +126,11 @@ describe("featureOf", () => {
     ],
     ["src/lib/evaluation/shock-tooltip.test.ts", "F2 · Live Evaluation"],
     ["src/lib/classification/rules.test.ts", "F4 · Card Classification"],
+    // S4.1 T14: this story's new test files map to F4 by the existing rules.
+    ["src/lib/recommendation/classify.test.ts", "F4 · Card Classification"],
+    ["src/components/category-chips.test.tsx", "F4 · Card Classification"],
+    ["src/lib/copy/category.test.ts", "F4 · Card Classification"],
+    ["src/lib/evaluation/classify-input.test-d.ts", "F4 · Card Classification"],
     ["src/lib/Category.test.ts", "F4 · Card Classification"],
     ["src/lib/recommendation-log/write.test.ts", "F5 · Recommendation Log"],
     ["src/lib/ops/digest.test.ts", "F5 · Recommendation Log"],

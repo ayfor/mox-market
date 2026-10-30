@@ -1,7 +1,9 @@
 // T19 (AC-1, AC-6; S1.2d2): computeRecommendation's signature. S3.1 T15
 // (F3 Engine API): computeTieredRecommendation, servedRecommendation and the
 // flag's type. S3.2 T15: the shock annotation and the five F3 params.
+// S4.1 T11: classify, withCategory and F4's four params.
 import { describe, expectTypeOf, test } from "vitest";
+import { classify, withCategory } from "./classify";
 import {
   computeRecommendation,
   computeTieredRecommendation,
@@ -9,6 +11,8 @@ import {
 } from "./engine";
 import type { RecommendationParams } from "./params";
 import type {
+  CardCategory,
+  ClassifiableCard,
   MarketSnapshot,
   Recommendation,
   RecommendationInput,
@@ -116,5 +120,45 @@ describe("S3.2's types (T15)", () => {
     expectTypeOf<
       RecommendationParams["shockMagnitudePct"]
     >().toEqualTypeOf<number>();
+  });
+});
+
+describe("S4.1's types (T11)", () => {
+  test("classify takes a card (or nothing), the caller's asOf and optional params; returns a CardCategory", () => {
+    expectTypeOf<Parameters<typeof classify>>().toEqualTypeOf<
+      [ClassifiableCard | null | undefined, string, RecommendationParams?]
+    >();
+    expectTypeOf<ReturnType<typeof classify>>().toEqualTypeOf<CardCategory>();
+  });
+
+  test("classify without asOf does not compile (the engine never reads the clock)", () => {
+    expectTypeOf(() => {
+      // @ts-expect-error asOf is required: the caller passes the request date
+      classify({ reserved: true });
+    }).toBeFunction();
+  });
+
+  test("withCategory takes the tiers and a category; returns the tiers", () => {
+    expectTypeOf<Parameters<typeof withCategory>>().toEqualTypeOf<
+      [TieredRecommendation, CardCategory]
+    >();
+    expectTypeOf<
+      ReturnType<typeof withCategory>
+    >().toEqualTypeOf<TieredRecommendation>();
+  });
+
+  test("F4's four params: three numbers and a date string", () => {
+    expectTypeOf<
+      RecommendationParams["recentPrintingDays"]
+    >().toEqualTypeOf<number>();
+    expectTypeOf<
+      RecommendationParams["edhrecTop1Rank"]
+    >().toEqualTypeOf<number>();
+    expectTypeOf<
+      RecommendationParams["edhrecTop2Rank"]
+    >().toEqualTypeOf<number>();
+    expectTypeOf<
+      RecommendationParams["modernEraStart"]
+    >().toEqualTypeOf<string>();
   });
 });

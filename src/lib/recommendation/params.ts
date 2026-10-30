@@ -1,14 +1,16 @@
 // F1 tunables (S1.1, AC-2). Every tunable lives here; tuning never needs a
 // logic change. Changing a value needs a plan-doc deviation and Josh's ruling.
 // TIER2_ENABLED and the two F3 params S3.1 reads joined at S3.1; S3.2 added
-// the five it reads (S1.1d8, C3.7 = B; S3.1d4, S3.2d2).
+// the five it reads (S1.1d8, C3.7 = B; S3.1d4, S3.2d2). S4.1 added F4's
+// four classification thresholds (S4.1d2).
 // Server-side only (node:crypto); client-safe limits live in ./limits.
 import { createHash } from "node:crypto";
 
 /**
  * F1's eleven tunables, then F3's (S3.1: TIER2_ENABLED, trendShiftFactor,
  * lowConfidenceWidening; S3.2: staleDays, volatileCV, volatilityWideningCap,
- * shockWindowDays, shockMagnitudePct). Each field's JSDoc gives its meaning, unit and
+ * shockWindowDays, shockMagnitudePct), then F4's (S4.1: recentPrintingDays,
+ * edhrecTop1Rank, edhrecTop2Rank, modernEraStart). Each field's JSDoc gives its meaning, unit and
  * rationale (S1.3d9); params.test.ts checks every field has "Unit:" and
  * "Why:". Comments never change PARAMS_VERSION.
  */
@@ -127,6 +129,30 @@ export interface RecommendationParams {
    * Why: F3, a move that large is worth flagging beside the badge (C1.47 = A).
    */
   readonly shockMagnitudePct: number;
+  /**
+   * F4's age: a printing is recent when max(0, its age in UTC days at asOf) is less than this.
+   * Unit: UTC days (183 → a printing released 182 days before asOf is recent, 183 days is not).
+   * Why: F4, a printing under about six months old is recent; display only (S4.1d2).
+   */
+  readonly recentPrintingDays: number;
+  /**
+   * F4's popularity: an EDHREC rank from 1 to this is top1000.
+   * Unit: EDHREC rank, inclusive upper bound.
+   * Why: F4's popularity buckets; display only (S4.1d2).
+   */
+  readonly edhrecTop1Rank: number;
+  /**
+   * F4's popularity: an EDHREC rank above edhrecTop1Rank and up to this is top5000; above it, longtail.
+   * Unit: EDHREC rank, inclusive upper bound.
+   * Why: F4's popularity buckets; display only (S4.1d2).
+   */
+  readonly edhrecTop2Rank: number;
+  /**
+   * F4's age: a printing that is not recent is modern-era when released on or after this date, else vintage-era.
+   * Unit: UTC calendar date 'YYYY-MM-DD', inclusive.
+   * Why: F4, the 8th Edition release date and the modern card frame; display only (S4.1d2).
+   */
+  readonly modernEraStart: string;
 }
 
 export const RECOMMENDATION_PARAMS: RecommendationParams = Object.freeze({
@@ -149,6 +175,10 @@ export const RECOMMENDATION_PARAMS: RecommendationParams = Object.freeze({
   volatilityWideningCap: 2,
   shockWindowDays: 7,
   shockMagnitudePct: 35,
+  recentPrintingDays: 183,
+  edhrecTop1Rank: 1000,
+  edhrecTop2Rank: 5000,
+  modernEraStart: "2003-07-28",
 });
 
 /** JSON with object keys sorted at every level, so key order never matters. */

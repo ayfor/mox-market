@@ -4,6 +4,9 @@
 // unavailable note and the banner, never the error panel. S2.4 adds T13's
 // panel half (AC-8: every lookup failure resolves to the error panel) and
 // T18 (AC-13: the demo link renders a panel whatever kind the market gives).
+// S4.1 T4 (AC-4, display half) and T6's render half: through buildEvaluation,
+// F4's chips for the evaluated printing, and no chip row and no error panel
+// when the card objects lack the classified fields.
 import {
   ESPER_SENTINEL_PRINTS,
   MH2_12_ID,
@@ -15,10 +18,14 @@ import {
   type PriceHistoryReader,
 } from "@/lib/evaluation/history-reader";
 import { parseResultParams } from "@/lib/evaluation/result-params";
-import { dailyHistory } from "@/lib/recommendation/fixtures";
+import {
+  classifyFixtureNamed,
+  dailyHistory,
+} from "@/lib/recommendation/fixtures";
 import { UI_COPY } from "@/lib/recommendation/ui-copy";
 import { DEMO_RESULT_HREF } from "@/lib/result-href";
 import { getAllPrintings, getCardByName } from "@/lib/scryfall";
+import type { ScryfallCard } from "@/types/scryfall";
 import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ResultPanel } from "./result-panel";
@@ -321,5 +328,77 @@ describe("the demo link serves a panel, whatever the market says (T18, AC-13; C1
       "insufficient_data",
       "wait",
     ]);
+  });
+});
+
+describe("F4's chip row through buildEvaluation (S4.1 T4, T6)", () => {
+  const reader: PriceHistoryReader = {
+    getPriceHistory: async () => ({ history: ROWS, latestSnapshotAt: NOW }),
+    getHistoryFreshness: async () => ({
+      lastSuccessAt: NOW,
+      sourceDate: "2026-10-09",
+    }),
+  };
+  const query = {
+    card: "Esper Sentinel",
+    askingPriceCents: 7499,
+    finish: "normal" as const,
+  };
+  const chipsIn = (container: HTMLElement) =>
+    [...container.querySelectorAll(".mm-category-chip")].map(
+      (c) => c.textContent,
+    );
+
+  test("the evaluated printing is CL-RESERVED's card: the four chips render in the card heading", async () => {
+    const fields = classifyFixtureNamed("CL-RESERVED")
+      .card as Partial<ScryfallCard>;
+    const { deps } = depsWith(reader);
+    const withReserved: EvaluationDeps = {
+      ...deps,
+      scryfall: {
+        ...deps.scryfall,
+        getAllPrintings: async () =>
+          ESPER_SENTINEL_PRINTS.map((p) =>
+            p.id === MH2_12_ID ? { ...p, ...fields } : p,
+          ),
+      },
+    };
+    const { container } = render(
+      await ResultPanel({ query, deps: withReserved }),
+    );
+    expect(
+      container.querySelector(".mm-card-heading .mm-category-chips"),
+    ).not.toBeNull();
+    expect(chipsIn(container)).toEqual([
+      "Reserved List",
+      "Vintage-era print",
+      "EDH top-5000",
+      "Commander-legal",
+    ]);
+  });
+
+  test("card objects without the five fields: an ok panel, no chip row, no error panel, nothing logged", async () => {
+    const strip = (card: ScryfallCard): ScryfallCard => {
+      const copy: Partial<ScryfallCard> = { ...card };
+      delete copy.reserved;
+      delete copy.released_at;
+      delete copy.edhrec_rank;
+      delete copy.legalities;
+      return copy as ScryfallCard;
+    };
+    const { deps, log } = depsWith(reader);
+    const stripped: EvaluationDeps = {
+      ...deps,
+      scryfall: {
+        getCardByName: async () => strip(scryfallCard()),
+        getAllPrintings: async () => ESPER_SENTINEL_PRINTS.map(strip),
+      },
+    };
+    const { container } = render(await ResultPanel({ query, deps: stripped }));
+    expect(container.querySelector('[data-status="ok"]')).not.toBeNull();
+    expect(container.querySelector('[data-status="error"]')).toBeNull();
+    expect(container.querySelector(".mm-category-chips")).toBeNull();
+    expect(container.querySelector(".mm-rec-badge")).not.toBeNull();
+    expect(log).not.toHaveBeenCalled();
   });
 });

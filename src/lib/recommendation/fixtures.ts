@@ -4,6 +4,8 @@
 // fixture updates its expected values here, in the same PR (F1 W2).
 // Test support only: imports types only, and no app code imports it.
 import type {
+  CardCategory,
+  ClassifiableCard,
   Confidence,
   Finish,
   MarketSnapshot,
@@ -1153,4 +1155,231 @@ export function s32FixtureNamed(name: string): S3_2Fixture {
   const found = S3_2_FIXTURES.find((f) => f.name === name);
   if (!found) throw new Error(`no S3.2 fixture named ${name}`);
   return found;
+}
+
+// --- S4.1: F4's classification fixtures (asOf 2026-10-10) -----------------
+
+/** The 22 formats of Scryfall's legalities record (ScryfallLegalities). */
+export const SCRYFALL_FORMATS = [
+  "standard",
+  "future",
+  "historic",
+  "timeless",
+  "gladiator",
+  "pioneer",
+  "explorer",
+  "modern",
+  "legacy",
+  "pauper",
+  "vintage",
+  "penny",
+  "commander",
+  "oathbreaker",
+  "standardbrawl",
+  "brawl",
+  "alchemy",
+  "paupercommander",
+  "duel",
+  "oldschool",
+  "premodern",
+  "predh",
+] as const;
+
+/**
+ * A full Scryfall legalities record: the listed formats "legal", every
+ * other format "not_legal".
+ */
+export function legalIn(
+  ...formats: readonly (typeof SCRYFALL_FORMATS)[number][]
+): Record<(typeof SCRYFALL_FORMATS)[number], "legal" | "not_legal"> {
+  return Object.fromEntries(
+    SCRYFALL_FORMATS.map((format) => [
+      format,
+      formats.includes(format) ? "legal" : "not_legal",
+    ]),
+  ) as Record<(typeof SCRYFALL_FORMATS)[number], "legal" | "not_legal">;
+}
+
+/** One AC-1 fixture: the five fields classify reads and the expected category. */
+export interface ClassifyFixture {
+  readonly name: string;
+  readonly card: ClassifiableCard;
+  readonly expected: CardCategory;
+}
+
+/**
+ * The S4.1 plan's fixtures (Fixture data), each expected value worked out
+ * from F4's rules alone before the build. Days are UTC days to 2026-10-10.
+ */
+export const CLASSIFY_FIXTURES: readonly ClassifyFixture[] = [
+  {
+    name: "CL-RESERVED",
+    card: {
+      reserved: true,
+      released_at: "1994-04-01",
+      edhrec_rank: 3120,
+      legalities: legalIn("commander", "legacy", "vintage"),
+      digital: false,
+    },
+    expected: {
+      reservedList: true,
+      age: "vintage-era",
+      popularity: "top5000",
+      formatProfile: "edh",
+      digital: false,
+    },
+  },
+  {
+    name: "CL-RECENT",
+    card: {
+      reserved: false,
+      // 70 days before asOf.
+      released_at: "2026-08-01",
+      edhrec_rank: 12000,
+      legalities: legalIn("standard", "pioneer", "modern", "commander"),
+      digital: false,
+    },
+    expected: {
+      reservedList: false,
+      age: "recent",
+      popularity: "longtail",
+      formatProfile: "competitive",
+      digital: false,
+    },
+  },
+  {
+    name: "CL-TOP1000",
+    card: {
+      reserved: false,
+      released_at: "2021-06-18",
+      edhrec_rank: 1000,
+      legalities: legalIn("modern", "legacy", "vintage", "commander"),
+      digital: false,
+    },
+    expected: {
+      reservedList: false,
+      age: "modern-era",
+      popularity: "top1000",
+      formatProfile: "competitive",
+      digital: false,
+    },
+  },
+  {
+    name: "CL-STANDARD",
+    card: {
+      reserved: false,
+      // 330 days before asOf.
+      released_at: "2025-11-14",
+      legalities: legalIn("standard"),
+      digital: false,
+    },
+    expected: {
+      reservedList: false,
+      age: "modern-era",
+      popularity: "unranked",
+      formatProfile: "competitive",
+      digital: false,
+    },
+  },
+  {
+    name: "CL-COMMANDER",
+    card: {
+      reserved: false,
+      released_at: "2019-08-23",
+      edhrec_rank: 4800,
+      legalities: legalIn("commander", "legacy", "vintage"),
+      digital: false,
+    },
+    expected: {
+      reservedList: false,
+      age: "modern-era",
+      popularity: "top5000",
+      formatProfile: "edh",
+      digital: false,
+    },
+  },
+  {
+    name: "CL-PRE8ED",
+    card: {
+      reserved: false,
+      released_at: "2003-07-27",
+      edhrec_rank: 6500,
+      legalities: legalIn("commander", "legacy", "vintage"),
+      digital: false,
+    },
+    expected: {
+      reservedList: false,
+      age: "vintage-era",
+      popularity: "longtail",
+      formatProfile: "edh",
+      digital: false,
+    },
+  },
+  {
+    name: "CL-8ED",
+    card: {
+      reserved: false,
+      released_at: "2003-07-28",
+      edhrec_rank: 6500,
+      legalities: legalIn("commander", "legacy", "vintage"),
+      digital: false,
+    },
+    expected: {
+      reservedList: false,
+      age: "modern-era",
+      popularity: "longtail",
+      formatProfile: "edh",
+      digital: false,
+    },
+  },
+  {
+    name: "CL-DIGITAL",
+    card: {
+      reserved: false,
+      released_at: "2021-12-09",
+      legalities: legalIn("alchemy", "historic"),
+      digital: true,
+    },
+    expected: {
+      reservedList: false,
+      age: "modern-era",
+      popularity: "unranked",
+      formatProfile: "casual",
+      digital: true,
+    },
+  },
+  {
+    name: "CL-PREVIEW",
+    card: {
+      reserved: false,
+      // 35 days after asOf: age clamped to 0.
+      released_at: "2026-11-14",
+      legalities: legalIn(),
+      digital: false,
+    },
+    expected: {
+      reservedList: false,
+      age: "recent",
+      popularity: "unranked",
+      formatProfile: "casual",
+      digital: false,
+    },
+  },
+  {
+    name: "CL-DEFAULT",
+    card: { released_at: "not a date", legalities: legalIn() },
+    expected: {
+      reservedList: false,
+      age: "unknown",
+      popularity: "unranked",
+      formatProfile: "casual",
+      digital: false,
+    },
+  },
+];
+
+export function classifyFixtureNamed(name: string): ClassifyFixture {
+  const fixture = CLASSIFY_FIXTURES.find((f) => f.name === name);
+  if (!fixture) throw new Error(`unknown classify fixture ${name}`);
+  return fixture;
 }

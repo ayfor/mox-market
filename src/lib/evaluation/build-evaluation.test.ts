@@ -7,7 +7,10 @@
 // adversarial review adds the finishes-list fallback (ADV-3) and the option
 // round trip (ADV-5). S3.1 T16 (pivot; F3 Engine API): the spy moves to
 // computeTieredRecommendation, the served result is unchanged, the ok
-// Evaluation carries both tiers, and a success logs nothing.
+// Evaluation carries both tiers, and a success logs nothing. S4.1 T5 (AC-6),
+// T6 (production safety) and T8 (AC-1, the printing being priced): F4's
+// classification of the evaluated printing, on both tiers and the served
+// result, with no extra fetch; the engine's tiers otherwise unchanged.
 import {
   ESPER_PRINTS_PAGE_1,
   ESPER_PRINTS_PAGE_2,
@@ -30,10 +33,18 @@ import {
   keyedHistoryReader,
 } from "@/lib/__fixtures__/keyed-history";
 import { offeredFinishes, selectablePrintings } from "@/lib/printings";
+import { classify, withCategory } from "@/lib/recommendation/classify";
 import * as engine from "@/lib/recommendation/engine";
 import { InvalidRecommendationInputError } from "@/lib/recommendation/errors";
-import { dailyHistory, ramp } from "@/lib/recommendation/fixtures";
-import type { RecommendationInput } from "@/lib/recommendation/types";
+import {
+  classifyFixtureNamed,
+  dailyHistory,
+  ramp,
+} from "@/lib/recommendation/fixtures";
+import {
+  DEFAULT_CARD_CATEGORY,
+  type RecommendationInput,
+} from "@/lib/recommendation/types";
 import {
   getAllPrintings,
   getCardByName,
@@ -1252,7 +1263,12 @@ describe("the tiered server path (S3.1 T16; pivot S3.1d2, S3.1d9)", () => {
       expect(result.recommendation.kind).toBe(kind);
       expect(result.recommendation.reason).toBe(reason);
       expect(result.tiers.tier1).toStrictEqual(result.recommendation);
-      expect(result.tiers).toStrictEqual(computeSpy.mock.results[0].value);
+      // S4.1 T7: the engine's tiers with only F4's category set (S4.1d6).
+      const engineTiers = computeSpy.mock.results[0].value;
+      expect(engineTiers.tier1.signals.category).toBeNull();
+      expect(result.tiers).toStrictEqual(
+        withCategory(engineTiers, result.recommendation.signals.category!),
+      );
       expect(result.tiers.tier2).not.toBeNull();
       // No log write and no console fallback on a successful evaluation.
       expect(log).not.toHaveBeenCalled();
@@ -1312,4 +1328,277 @@ describe("the tiered server path (S3.1 T16; pivot S3.1d2, S3.1d9)", () => {
     });
     expect(log).not.toHaveBeenCalled();
   });
+});
+
+// --- S4.1: F4's classification on the server path ---------------------------
+/** CL-RESERVED's five fields, as Scryfall card fields. */
+const RESERVED_FIELDS = classifyFixtureNamed("CL-RESERVED")
+  .card as Partial<ScryfallCard>;
+const RESERVED_CATEGORY = classifyFixtureNamed("CL-RESERVED").expected;
+
+/** The Esper prints with mh2 #12 (the default) given `fields`. */
+const printsWithDefault = (fields: Partial<ScryfallCard>): ScryfallCard[] =>
+  ESPER_SENTINEL_PRINTS.map((p) =>
+    p.id === MH2_12_ID ? { ...p, ...fields } : p,
+  );
+
+/** A card object without the five fields classify reads. */
+function withoutClassifiedFields(card: ScryfallCard): ScryfallCard {
+  const copy: Partial<ScryfallCard> = { ...card };
+  delete copy.reserved;
+  delete copy.released_at;
+  delete copy.edhrec_rank;
+  delete copy.legalities;
+  delete copy.digital;
+  return copy as ScryfallCard;
+}
+
+describe("no extra fetch for classification (S4.1 T5, AC-6; S4.1d13)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("through the real client, a default printing with CL-RESERVED's fields: fetch is called exactly twice (named, then prints) and the category is CL-RESERVED's", async () => {
+    const prints = printsWithDefault(RESERVED_FIELDS);
+    const named = { ...scryfallCard({ id: MH2_12_ID }), ...RESERVED_FIELDS };
+    const fetchMock = scryfallFetch({
+      [NAMED_URL("Esper Sentinel")]: () => Response.json(named),
+      [ESPER_PRINTS_URI]: onePage(prints),
+    });
+    const { deps } = depsWith({ getCardByName, getAllPrintings });
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.printing.id).toBe(MH2_12_ID);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchedUrls(fetchMock)).toEqual([
+      NAMED_URL("Esper Sentinel"),
+      ESPER_PRINTS_URI,
+    ]);
+    expect(result.recommendation.signals.category).toStrictEqual(
+      RESERVED_CATEGORY,
+    );
+  });
+});
+
+describe("production safety: missing fields render cleanly (S4.1 T6; S4.1d4)", () => {
+  test("printings without the five fields (digital kept so mh2 #12 stays the default): ok, DEFAULT_CARD_CATEGORY, nothing logged", async () => {
+    const prints = ESPER_SENTINEL_PRINTS.map((p) => ({
+      ...withoutClassifiedFields(p),
+      digital: p.digital,
+    }));
+    const { deps, log } = depsWith({ getAllPrintings: async () => prints });
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.printing.id).toBe(MH2_12_ID);
+    expect(result.recommendation.signals.category).toStrictEqual(
+      DEFAULT_CARD_CATEGORY,
+    );
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  test("printings and the named card all without the five fields: the named-card fallback is ok with DEFAULT_CARD_CATEGORY", async () => {
+    const named = withoutClassifiedFields(NAMED);
+    const prints = ESPER_SENTINEL_PRINTS.map(withoutClassifiedFields);
+    const { deps, log } = depsWith({
+      getCardByName: async () => named,
+      getAllPrintings: async () => prints,
+    });
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.printing.id).toBe(NAMED.id);
+    expect(result.tiers.tier1.signals.category).toStrictEqual(
+      DEFAULT_CARD_CATEGORY,
+    );
+    expect(result.recommendation.signals.category).toStrictEqual(
+      DEFAULT_CARD_CATEGORY,
+    );
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  // ADV TC-1: each row pins the field it attacks at its default, the whole
+  // category against classify on the printing as fetched (so a coercion in
+  // buildEvaluation before classify fails), and which printing was priced.
+  test.each([
+    [
+      "legalities null",
+      { legalities: null },
+      { formatProfile: "casual" },
+      "default",
+    ],
+    [
+      "legalities an array",
+      { legalities: [] },
+      { formatProfile: "casual" },
+      "default",
+    ],
+    [
+      "legalities a string",
+      { legalities: "legal" },
+      { formatProfile: "casual" },
+      "default",
+    ],
+    [
+      "reserved a string",
+      { reserved: "true" },
+      { reservedList: false },
+      "default",
+    ],
+    [
+      "digital a number on the named fallback",
+      { digital: 1 },
+      { digital: false },
+      NAMED.id,
+    ],
+    [
+      "edhrec_rank a string",
+      { edhrec_rank: "12" },
+      { popularity: "unranked" },
+      "default",
+    ],
+    [
+      "released_at not a date",
+      { released_at: "2026-02-30" },
+      { age: "unknown" },
+      "default",
+    ],
+  ] as const)(
+    "hostile %s on every card: ok, never the error panel, and the field at its default",
+    async (_label, fields, atDefault, pricedId) => {
+      const hostile = (card: ScryfallCard) =>
+        ({ ...card, ...fields }) as unknown as ScryfallCard;
+      const { deps, log } = depsWith({
+        getCardByName: async () => hostile(NAMED),
+        getAllPrintings: async () => ESPER_SENTINEL_PRINTS.map(hostile),
+      });
+      const result = ok(await buildEvaluation(query(7499), deps));
+      const clean = ok(await buildEvaluation(query(7499), depsWith({}).deps));
+      expect(clean.printing.id).not.toBe(NAMED.id);
+      expect(result.printing.id).toBe(
+        pricedId === "default" ? clean.printing.id : pricedId,
+      );
+      const category = result.recommendation.signals.category;
+      expect(category).toMatchObject(atDefault);
+      for (const [field, value] of Object.entries(atDefault)) {
+        expect(value).toBe(
+          DEFAULT_CARD_CATEGORY[field as keyof typeof DEFAULT_CARD_CATEGORY],
+        );
+      }
+      expect(category).toStrictEqual(classify(result.printing, AS_OF));
+      expect(result.tiers.tier1.signals.category).toBe(category);
+      expect(log).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("the printing being priced is classified (S4.1 T8, AC-1; F4 Functionality)", () => {
+  test("a recent named reprint whose default printing is from 1994: the default printing's category (vintage-era)", async () => {
+    const named = { ...NAMED, released_at: "2026-08-01" };
+    const { deps } = depsWith({
+      getCardByName: async () => named,
+      getAllPrintings: async () =>
+        printsWithDefault({ released_at: "1994-04-01" }),
+    });
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.printing.id).toBe(MH2_12_ID);
+    expect(result.recommendation.signals.category?.age).toBe("vintage-era");
+  });
+
+  test("a URL printing PrintingSelect offers: that printing's category", async () => {
+    const prints = ESPER_SENTINEL_PRINTS.map((p) =>
+      p.id === MH2_328_ID ? { ...p, released_at: "2026-08-01" } : p,
+    );
+    const { deps } = depsWith({ getAllPrintings: async () => prints });
+    const result = ok(
+      await buildEvaluation({ ...query(7499), printing: MH2_328_ID }, deps),
+    );
+    expect(result.printing.id).toBe(MH2_328_ID);
+    expect(result.recommendation.signals.category?.age).toBe("recent");
+    expect(result.recommendation.signals.category).toStrictEqual(
+      classify(prints.find((p) => p.id === MH2_328_ID)!, AS_OF),
+    );
+  });
+
+  test("the named-card fallback (no candidate for either finish): the named card's category", async () => {
+    const named = { ...NAMED, ...RESERVED_FIELDS };
+    const { deps } = depsWith({
+      getCardByName: async () => named,
+      getAllPrintings: async () => [],
+    });
+    const result = ok(await buildEvaluation(query(7499, "foil"), deps));
+    expect(result.printing.id).toBe(NAMED.id);
+    expect(result.recommendation.signals.category).toStrictEqual(
+      RESERVED_CATEGORY,
+    );
+  });
+
+  test("a digital-only named card reaches the fallback, so the Digital chip is reachable (S4.1d14)", async () => {
+    const digitalNamed = scryfallCard({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      digital: true,
+      finishes: ["nonfoil"],
+    });
+    const { deps } = depsWith({
+      getCardByName: async () => digitalNamed,
+      getAllPrintings: async () => [digitalNamed],
+    });
+    const result = ok(await buildEvaluation(query(7499), deps));
+    expect(result.printing.id).toBe(digitalNamed.id);
+    expect(result.recommendation.signals.category?.digital).toBe(true);
+  });
+
+  test.each([
+    ["verdict", FLAT_30, false],
+    ["insufficient_data", [], true],
+  ] as const)(
+    "%s: tier1, tier2 and the served recommendation carry the same category object",
+    async (_label, history, insufficient) => {
+      const { deps } = depsWith({
+        getAllPrintings: async () => printsWithDefault(RESERVED_FIELDS),
+        reader: fixtureReader([...history]),
+      });
+      const result = ok(await buildEvaluation(query(7499), deps));
+      const category = result.recommendation.signals.category;
+      expect(category).toStrictEqual(RESERVED_CATEGORY);
+      expect(result.tiers.tier1.signals.category).toBe(category);
+      if (insufficient) {
+        expect(result.recommendation.kind).toBe("insufficient_data");
+        expect(result.tiers.tier2).toBeNull();
+      } else {
+        expect(result.tiers.tier2?.signals.category).toBe(category);
+      }
+      expect(result.recommendation).toBe(result.tiers.tier1);
+    },
+  );
+
+  test("classification changes nothing else: the served result equals the engine's with only the category set", async () => {
+    const { deps } = depsWith({
+      getAllPrintings: async () => printsWithDefault(RESERVED_FIELDS),
+    });
+    const result = ok(await buildEvaluation(query(5400), deps));
+    const engineTiers = computeSpy.mock.results[0].value;
+    expect(result.recommendation.kind).toBe(engineTiers.tier1.kind);
+    expect(result.recommendation.confidence).toBe(engineTiers.tier1.confidence);
+    expect(result.recommendation.reason).toBe(engineTiers.tier1.reason);
+    expect(result.tiers).toStrictEqual(
+      withCategory(engineTiers, RESERVED_CATEGORY),
+    );
+  });
+
+  test.each([
+    ["2026-10-10T23:59:59.000Z", "recent"],
+    ["2026-10-11T00:00:00.000Z", "modern-era"],
+  ])(
+    "asOf is market.asOf, the injected now's UTC date: now %s classifies a 2026-04-11 printing as %s",
+    async (iso, age) => {
+      const { deps } = depsWith({
+        getAllPrintings: async () =>
+          printsWithDefault({ released_at: "2026-04-11" }),
+      });
+      const result = ok(
+        await buildEvaluation(query(7499), {
+          ...deps,
+          now: () => new Date(iso),
+        }),
+      );
+      expect(result.printing.id).toBe(MH2_12_ID);
+      expect(result.recommendation.signals.category?.age).toBe(age);
+    },
+  );
 });

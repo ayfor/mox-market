@@ -1,6 +1,10 @@
 // T1 (AC-1): the contract matches F1's literal shapes exactly (S1.1d7).
+// S4.1 T11 (F4 Fields; S4.1d3): CardCategory, ClassifiableCard and
+// signals.category.
 import { describe, expectTypeOf, test } from "vitest";
 import type {
+  CardCategory,
+  ClassifiableCard,
   Confidence,
   Finish,
   MarketSnapshot,
@@ -88,6 +92,13 @@ describe("F1 contract types", () => {
         readonly magnitude: number;
         readonly window: number;
       } | null;
+      category: {
+        readonly reservedList: boolean;
+        readonly age: "recent" | "modern-era" | "vintage-era" | "unknown";
+        readonly popularity: "top1000" | "top5000" | "longtail" | "unranked";
+        readonly formatProfile: "competitive" | "edh" | "casual";
+        readonly digital: boolean;
+      } | null;
     }>();
     // S3.2 T15: F3's shock annotation, null meaning no annotation.
     expectTypeOf<
@@ -104,6 +115,26 @@ describe("F1 contract types", () => {
     expectTypeOf<
       RecommendationSignals["waitThresholdPct"]
     >().toEqualTypeOf<number>();
+  });
+
+  test("CardCategory and signals.category (S4.1 T11)", () => {
+    expectTypeOf<CardCategory>().toEqualTypeOf<{
+      readonly reservedList: boolean;
+      readonly age: "recent" | "modern-era" | "vintage-era" | "unknown";
+      readonly popularity: "top1000" | "top5000" | "longtail" | "unranked";
+      readonly formatProfile: "competitive" | "edh" | "casual";
+      readonly digital: boolean;
+    }>();
+    expectTypeOf<
+      RecommendationSignals["category"]
+    >().toEqualTypeOf<CardCategory | null>();
+    expectTypeOf<ClassifiableCard>().toEqualTypeOf<{
+      readonly reserved?: unknown;
+      readonly released_at?: unknown;
+      readonly edhrec_rank?: unknown;
+      readonly legalities?: unknown;
+      readonly digital?: unknown;
+    }>();
   });
 
   test("Recommendation", () => {
